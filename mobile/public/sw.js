@@ -1,5 +1,5 @@
 /* eslint-disable no-restricted-globals */
-const CACHE_NAME = "spesasmart-v2";
+const CACHE_NAME = "spesasmart-v3";
 const PRECACHE_URLS = ["/", "/manifest.json"];
 
 // ── Install: precache shell ──────────────────────────────────────────────────
@@ -38,6 +38,9 @@ self.addEventListener("fetch", (event) => {
 
   // Skip non-GET requests
   if (request.method !== "GET") return;
+
+  // Only handle http/https requests (skip chrome-extension://, etc.)
+  if (!url.protocol.startsWith("http")) return;
 
   // API calls: network only (don't cache dynamic data)
   if (url.pathname.startsWith("/api/")) return;
