@@ -13,6 +13,7 @@ venv/
 # Environment
 .env
 *.env.local
+.env.production
 
 # IDE
 .vscode/
@@ -41,6 +42,9 @@ mobile/dist/
 *.key
 *.mobileprovision
 *.orig.*
+
+# Lighthouse reports
+lighthouse-*.report.*
 
 # OS
 .DS_Store
