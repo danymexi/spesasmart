@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { Card, Chip, Text, useTheme } from "react-native-paper";
+import { Chip, Text, useTheme } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { getActiveOffers, getBestOffers } from "../../services/api";
 import OfferCard from "../../components/OfferCard";
+import { glassColors, glassChip, glassPanel } from "../../styles/glassStyles";
 
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
 
@@ -59,7 +60,7 @@ export default function HomeScreen() {
       refreshControl={<RefreshControl refreshing={isLoading} onRefresh={onRefresh} />}
     >
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: theme.colors.primary }]}>
+      <View style={styles.header}>
         <Text variant="headlineMedium" style={styles.headerTitle}>
           SpesaSmart
         </Text>
@@ -73,7 +74,7 @@ export default function HomeScreen() {
         {CHAINS.map((chain) => (
           <Chip
             key={chain}
-            style={styles.chip}
+            style={[styles.chip, selectedChain === chain && styles.chipSelected]}
             selected={selectedChain === chain}
             onPress={() =>
               setSelectedChain(selectedChain === chain ? null : chain)
@@ -122,15 +123,28 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f5f5f5" },
-  header: { padding: 20, paddingTop: 12, paddingBottom: 16 },
-  headerTitle: { color: "#fff", fontWeight: "bold" },
-  headerSubtitle: { color: "rgba(255,255,255,0.8)", marginTop: 2 },
+  container: { flex: 1, backgroundColor: "transparent" },
+  header: {
+    marginHorizontal: 12,
+    marginTop: 12,
+    padding: 20,
+    paddingBottom: 16,
+    ...glassPanel,
+    backgroundColor: "rgba(46,125,50,0.12)",
+  } as any,
+  headerTitle: { color: glassColors.greenDark, fontWeight: "bold" },
+  headerSubtitle: { color: glassColors.greenSubtle, marginTop: 2 },
   chips: { paddingHorizontal: 12, paddingVertical: 12, flexGrow: 0 },
-  chip: { marginRight: 8 },
+  chip: {
+    marginRight: 8,
+    ...glassChip,
+  } as any,
+  chipSelected: {
+    backgroundColor: glassColors.greenAccent,
+  },
   sectionTitle: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, fontWeight: "600" },
   horizontalList: { paddingHorizontal: 12 },
   horizontalCard: { width: 260, marginRight: 12 },
   emptyText: { paddingHorizontal: 16, color: "#888" },
-  bottomPadding: { height: 24 },
+  bottomPadding: { height: 96 },
 });

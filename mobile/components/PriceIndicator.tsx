@@ -20,10 +20,10 @@ function computeIndicator(currentPrice: number, history: { price: number | strin
   return "medio";
 }
 
-const INDICATOR_CONFIG: Record<Indicator, { color: string; bg: string; label: string }> = {
-  ottimo: { color: "#2E7D32", bg: "#E8F5E9", label: "Ottimo prezzo" },
-  medio: { color: "#F57F17", bg: "#FFFDE7", label: "Nella media" },
-  alto: { color: "#C62828", bg: "#FFEBEE", label: "Prezzo alto" },
+const INDICATOR_CONFIG: Record<Indicator, { color: string; bg: string; border: string; label: string }> = {
+  ottimo: { color: "#2E7D32", bg: "rgba(46,125,50,0.12)", border: "rgba(46,125,50,0.25)", label: "Ottimo prezzo" },
+  medio: { color: "#F57F17", bg: "rgba(245,127,23,0.12)", border: "rgba(245,127,23,0.25)", label: "Nella media" },
+  alto: { color: "#C62828", bg: "rgba(198,40,40,0.12)", border: "rgba(198,40,40,0.25)", label: "Prezzo alto" },
 };
 
 export default function PriceIndicator({ productId }: Props) {
@@ -46,7 +46,7 @@ export default function PriceIndicator({ productId }: Props) {
   const config = INDICATOR_CONFIG[indicator];
 
   return (
-    <View style={[styles.container, { backgroundColor: config.bg }]}>
+    <View style={[styles.container, { backgroundColor: config.bg, borderColor: config.border }]}>
       <View style={[styles.dot, { backgroundColor: config.color }]} />
       <Text variant="labelMedium" style={{ color: config.color, fontWeight: "bold" }}>
         {config.label}
@@ -61,7 +61,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: 14,
+    borderWidth: 1,
     gap: 6,
   },
   dot: { width: 10, height: 10, borderRadius: 5 },

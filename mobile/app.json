@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1B5E20"
+      "backgroundColor": "#E8F5E9"
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
@@ -21,7 +21,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1B5E20"
+        "backgroundColor": "#E8F5E9"
       },
       "package": "com.spesasmart.app"
     },
@@ -31,8 +31,8 @@
       "name": "SpesaSmart",
       "shortName": "SpesaSmart",
       "description": "Confronto prezzi supermercati - Monza e Brianza",
-      "themeColor": "#1B5E20",
-      "backgroundColor": "#FFFFFF",
+      "themeColor": "#E8F5E9",
+      "backgroundColor": "#E8F5E9",
       "display": "standalone",
       "orientation": "portrait",
       "scope": "/",

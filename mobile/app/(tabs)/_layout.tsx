@@ -1,6 +1,7 @@
 import { Tabs } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTheme } from "react-native-paper";
+import { glassColors, glassHeader, glassTabBar, gradientBackground } from "../../styles/glassStyles";
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -14,18 +15,22 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: theme.colors.primary,
+        tabBarActiveTintColor: glassColors.greenDark,
         tabBarInactiveTintColor: "#999",
-        headerStyle: { backgroundColor: theme.colors.primary },
-        headerTintColor: "#fff",
-        headerTitleStyle: { fontWeight: "bold" },
-        tabBarStyle: { paddingBottom: 4, height: 56 },
+        headerStyle: glassHeader as any,
+        headerTintColor: glassColors.greenDark,
+        headerTitleStyle: { fontWeight: "bold", color: glassColors.greenDark },
+        headerShadowVisible: false,
+        tabBarStyle: glassTabBar as any,
+        tabBarItemStyle: { paddingVertical: 4 },
+        sceneStyle: { backgroundColor: "transparent" },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "Home",
+          headerShown: false,
           tabBarIcon: ({ color, size }) => <TabIcon name="home" color={color} size={size} />,
         }}
       />

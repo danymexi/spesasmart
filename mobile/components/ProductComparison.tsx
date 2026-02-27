@@ -2,6 +2,7 @@ import { StyleSheet, View } from "react-native";
 import { Text, useTheme, ActivityIndicator } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { getActiveOffers } from "../services/api";
+import { glassPanel, glassColors } from "../styles/glassStyles";
 
 interface Props {
   productId: string;
@@ -96,14 +97,25 @@ export default function ProductComparison({ productId }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 16, paddingBottom: 8 },
+  container: {
+    marginHorizontal: 12,
+    padding: 12,
+    marginBottom: 8,
+    ...glassPanel,
+  } as any,
   loader: { marginVertical: 20 },
   emptyText: { color: "#888" },
   row: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
   chainLabel: { width: 90 },
   chainName: { fontSize: 13 },
-  barContainer: { flex: 1, height: 24, backgroundColor: "#f0f0f0", borderRadius: 4, overflow: "hidden" },
-  bar: { height: "100%", borderRadius: 4 },
+  barContainer: {
+    flex: 1,
+    height: 24,
+    backgroundColor: glassColors.subtleBg,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  bar: { height: "100%", borderRadius: 14 },
   priceLabel: { width: 80, alignItems: "flex-end", paddingLeft: 8 },
   price: { fontSize: 14 },
   bestLabel: { color: "#2E7D32", fontSize: 9, fontWeight: "bold" },

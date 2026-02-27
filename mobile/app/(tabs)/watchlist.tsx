@@ -1,10 +1,11 @@
 import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
-import { Button, Card, IconButton, Text, useTheme } from "react-native-paper";
+import { Button, IconButton, Text, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { getWatchlist, removeFromWatchlist } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import PriceIndicator from "../../components/PriceIndicator";
+import { glassCard, glassColors, alertBadgeGlass } from "../../styles/glassStyles";
 
 export default function WatchlistScreen() {
   const theme = useTheme();
@@ -53,13 +54,16 @@ export default function WatchlistScreen() {
           const hasOffer = item.best_current_price != null;
 
           return (
-            <Card
+            <View
               style={styles.card}
-              onPress={() => router.push(`/product/${item.product_id}`)}
             >
-              <Card.Content style={styles.cardContent}>
+              <View style={styles.cardContent}>
                 <View style={styles.infoSection}>
-                  <Text variant="titleMedium" numberOfLines={2}>
+                  <Text
+                    variant="titleMedium"
+                    numberOfLines={2}
+                    onPress={() => router.push(`/product/${item.product_id}`)}
+                  >
                     {item.product_name}
                   </Text>
                   {item.brand && (
@@ -103,8 +107,8 @@ export default function WatchlistScreen() {
                   size={20}
                   onPress={() => removeMutation.mutate({ productId: item.product_id })}
                 />
-              </Card.Content>
-            </Card>
+              </View>
+            </View>
           );
         }}
         ListEmptyComponent={
@@ -127,10 +131,15 @@ export default function WatchlistScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f5f5f5" },
+  container: { flex: 1, backgroundColor: "transparent" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", padding: 20 },
   emptyContainer: { flexGrow: 1 },
-  card: { marginHorizontal: 12, marginBottom: 8 },
+  card: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    padding: 12,
+    ...glassCard,
+  } as any,
   cardContent: { flexDirection: "row", alignItems: "center" },
   infoSection: { flex: 1 },
   brand: { color: "#666", marginTop: 2 },
@@ -138,14 +147,11 @@ const styles = StyleSheet.create({
   priceSection: { alignItems: "flex-end", marginRight: 4 },
   chainText: { color: "#666", marginTop: 2 },
   alertBadge: {
-    backgroundColor: "#E8F5E9",
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
     marginTop: 4,
+    ...alertBadgeGlass,
   },
-  alertText: { color: "#2E7D32", fontSize: 10, fontWeight: "bold" },
+  alertText: { color: glassColors.greenMedium, fontSize: 10, fontWeight: "bold" },
   emptyTitle: { marginBottom: 8 },
   emptyText: { color: "#888", textAlign: "center", marginBottom: 16 },
-  listContent: { paddingTop: 12, paddingBottom: 20 },
+  listContent: { paddingTop: 12, paddingBottom: 96 },
 });

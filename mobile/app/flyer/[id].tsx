@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { FlatList, Image, StyleSheet, View, useWindowDimensions } from "react-native";
-import { Card, Text, useTheme, ActivityIndicator, SegmentedButtons } from "react-native-paper";
+import { Text, useTheme, ActivityIndicator, SegmentedButtons } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, router } from "expo-router";
 import { getFlyer, getFlyerPages, getFlyerProducts } from "../../services/api";
+import { glassCard, glassColors, glassPanel } from "../../styles/glassStyles";
 
 export default function FlyerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -75,11 +76,11 @@ export default function FlyerDetailScreen() {
               {item.image_url ? (
                 <Image
                   source={{ uri: item.image_url }}
-                  style={{ width: pageWidth - 32, height: (pageWidth - 32) * 1.3, borderRadius: 8 }}
+                  style={{ width: pageWidth - 32, height: (pageWidth - 32) * 1.3, borderRadius: 16 }}
                   resizeMode="contain"
                 />
               ) : (
-                <View style={{ width: pageWidth - 32, height: (pageWidth - 32) * 1.3, backgroundColor: "#e0e0e0", borderRadius: 8, justifyContent: "center", alignItems: "center" }}>
+                <View style={[styles.pagePlaceholder, { width: pageWidth - 32, height: (pageWidth - 32) * 1.3 }]}>
                   <Text variant="bodyMedium" style={styles.placeholderText}>
                     Pagina {item.page_number}
                   </Text>
@@ -104,13 +105,16 @@ export default function FlyerDetailScreen() {
           data={products}
           keyExtractor={(item, idx) => `${item.product_id}-${idx}`}
           renderItem={({ item }) => (
-            <Card
+            <View
               style={styles.productCard}
-              onPress={() => router.push(`/product/${item.product_id}`)}
             >
-              <Card.Content style={styles.productContent}>
+              <View style={styles.productContent}>
                 <View style={styles.productInfo}>
-                  <Text variant="titleSmall" numberOfLines={2}>
+                  <Text
+                    variant="titleSmall"
+                    numberOfLines={2}
+                    onPress={() => router.push(`/product/${item.product_id}`)}
+                  >
                     {item.product_name}
                   </Text>
                   {item.brand && (
@@ -147,8 +151,8 @@ export default function FlyerDetailScreen() {
                     </Text>
                   )}
                 </View>
-              </Card.Content>
-            </Card>
+              </View>
+            </View>
           )}
           ListEmptyComponent={
             <Text style={styles.emptyText}>Nessun prodotto estratto</Text>
@@ -161,18 +165,33 @@ export default function FlyerDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f5f5f5" },
+  container: { flex: 1, backgroundColor: "transparent" },
   loader: { marginTop: 60 },
-  header: { padding: 16, backgroundColor: "#fff" },
+  header: {
+    margin: 12,
+    padding: 16,
+    ...glassPanel,
+  } as any,
   title: { fontWeight: "bold" },
   dates: { color: "#666", marginTop: 4 },
   segmented: { marginHorizontal: 12, marginVertical: 8 },
   pageContainer: { alignItems: "center", padding: 8 },
+  pagePlaceholder: {
+    backgroundColor: glassColors.subtleBorder,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   placeholderText: { color: "#999" },
   pageNumber: { marginTop: 8, color: "#888" },
   emptyContainer: { alignItems: "center", paddingTop: 40 },
   emptyText: { textAlign: "center", color: "#888", padding: 20 },
-  productCard: { marginHorizontal: 12, marginBottom: 8 },
+  productCard: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    padding: 12,
+    ...glassCard,
+  } as any,
   productContent: { flexDirection: "row", justifyContent: "space-between" },
   productInfo: { flex: 1, marginRight: 12 },
   brand: { color: "#666", marginTop: 2 },

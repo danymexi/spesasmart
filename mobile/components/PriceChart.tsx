@@ -1,6 +1,7 @@
 import { Dimensions, StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { LineChart } from "react-native-chart-kit";
+import { glassPanel } from "../styles/glassStyles";
 
 interface PricePoint {
   date: string;
@@ -58,19 +59,22 @@ export default function PriceChart({ data }: Props) {
           labels,
           datasets: [{ data: prices, strokeWidth: 2 }],
         }}
-        width={SCREEN_WIDTH - 32}
+        width={SCREEN_WIDTH - 64}
         height={200}
         yAxisLabel={"\u20AC"}
         yAxisSuffix=""
         chartConfig={{
-          backgroundColor: "#ffffff",
-          backgroundGradientFrom: "#ffffff",
-          backgroundGradientTo: "#f5f5f5",
+          backgroundColor: "transparent",
+          backgroundGradientFrom: "rgba(255,255,255,0.01)",
+          backgroundGradientTo: "rgba(255,255,255,0.01)",
           decimalPlaces: 2,
           color: (opacity = 1) => `rgba(27, 94, 32, ${opacity})`,
-          labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+          labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity * 0.6})`,
           propsForDots: { r: "4", strokeWidth: "2", stroke: "#1B5E20" },
-          propsForBackgroundLines: { strokeDasharray: "" },
+          propsForBackgroundLines: {
+            strokeDasharray: "",
+            stroke: "rgba(0,0,0,0.06)",
+          },
         }}
         bezier
         style={styles.chart}
@@ -95,8 +99,13 @@ export default function PriceChart({ data }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 16, paddingBottom: 8 },
-  chart: { borderRadius: 8 },
+  container: {
+    marginHorizontal: 12,
+    padding: 12,
+    marginBottom: 8,
+    ...glassPanel,
+  } as any,
+  chart: { borderRadius: 12 },
   empty: { padding: 20, alignItems: "center" },
   emptyText: { color: "#888" },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 8, paddingLeft: 4 },

@@ -5,6 +5,7 @@ import { PaperProvider, MD3DarkTheme, MD3LightTheme } from "react-native-paper";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useColorScheme } from "react-native";
 import { registerServiceWorker } from "../services/registerSW";
+import { glassColors, glassHeader, gradientBackground } from "../styles/glassStyles";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,11 +15,13 @@ const queryClient = new QueryClient({
 
 const lightTheme = {
   ...MD3LightTheme,
+  roundness: 20,
   colors: {
     ...MD3LightTheme.colors,
-    primary: "#1B5E20",
+    primary: "#2E7D32",
     secondary: "#FF6F00",
-    surface: "#FFFFFF",
+    surface: "rgba(255,255,255,0.72)",
+    background: "transparent",
   },
 };
 
@@ -45,9 +48,11 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <Stack
             screenOptions={{
-              headerStyle: { backgroundColor: theme.colors.primary },
-              headerTintColor: "#fff",
-              headerTitleStyle: { fontWeight: "bold" },
+              headerStyle: glassHeader as any,
+              headerTintColor: glassColors.greenDark,
+              headerTitleStyle: { fontWeight: "bold", color: glassColors.greenDark },
+              headerShadowVisible: false,
+              contentStyle: gradientBackground,
             }}
           >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
