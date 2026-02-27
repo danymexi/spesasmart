@@ -1,16 +1,17 @@
 import { useState } from "react";
-import { Dimensions, FlatList, Image, StyleSheet, View } from "react-native";
+import { FlatList, Image, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Card, Text, useTheme, ActivityIndicator, SegmentedButtons } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, router } from "expo-router";
 import { getFlyer, getFlyerPages, getFlyerProducts } from "../../services/api";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
-
 export default function FlyerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
+  const { width: screenWidth } = useWindowDimensions();
   const [viewMode, setViewMode] = useState("pages");
+  // Cap page width for large screens (desktop web)
+  const pageWidth = Math.min(screenWidth, 600);
 
   const { data: flyer, isLoading: loadingFlyer } = useQuery({
     queryKey: ["flyer", id],
@@ -70,15 +71,15 @@ export default function FlyerDetailScreen() {
           data={pages}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <View style={styles.pageContainer}>
+            <View style={[styles.pageContainer, { width: pageWidth }]}>
               {item.image_url ? (
                 <Image
                   source={{ uri: item.image_url }}
-                  style={styles.pageImage}
+                  style={{ width: pageWidth - 32, height: (pageWidth - 32) * 1.3, borderRadius: 8 }}
                   resizeMode="contain"
                 />
               ) : (
-                <View style={styles.placeholderPage}>
+                <View style={{ width: pageWidth - 32, height: (pageWidth - 32) * 1.3, backgroundColor: "#e0e0e0", borderRadius: 8, justifyContent: "center", alignItems: "center" }}>
                   <Text variant="bodyMedium" style={styles.placeholderText}>
                     Pagina {item.page_number}
                   </Text>
@@ -90,7 +91,7 @@ export default function FlyerDetailScreen() {
             </View>
           )}
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
+            <View style={[styles.emptyContainer, { width: pageWidth }]}>
               <Text style={styles.emptyText}>Nessuna pagina disponibile</Text>
             </View>
           }
@@ -166,19 +167,10 @@ const styles = StyleSheet.create({
   title: { fontWeight: "bold" },
   dates: { color: "#666", marginTop: 4 },
   segmented: { marginHorizontal: 12, marginVertical: 8 },
-  pageContainer: { width: SCREEN_WIDTH, alignItems: "center", padding: 8 },
-  pageImage: { width: SCREEN_WIDTH - 32, height: SCREEN_WIDTH * 1.3, borderRadius: 8 },
-  placeholderPage: {
-    width: SCREEN_WIDTH - 32,
-    height: SCREEN_WIDTH * 1.3,
-    backgroundColor: "#e0e0e0",
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  pageContainer: { alignItems: "center", padding: 8 },
   placeholderText: { color: "#999" },
   pageNumber: { marginTop: 8, color: "#888" },
-  emptyContainer: { width: SCREEN_WIDTH, alignItems: "center", paddingTop: 40 },
+  emptyContainer: { alignItems: "center", paddingTop: 40 },
   emptyText: { textAlign: "center", color: "#888", padding: 20 },
   productCard: { marginHorizontal: 12, marginBottom: 8 },
   productContent: { flexDirection: "row", justifyContent: "space-between" },

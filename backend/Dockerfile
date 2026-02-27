@@ -1,3 +1,22 @@
+# ── Stage 1: Build Expo web app ───────────────────────────────────────────────
+FROM node:20-slim AS web-builder
+
+WORKDIR /web
+
+# Install dependencies first (cache-friendly)
+COPY mobile/package.json mobile/package-lock.json* ./
+RUN npm ci
+
+# Copy the rest of mobile source
+COPY mobile/ ./
+
+# Build Expo for web (output to /web/dist)
+RUN npx expo export --platform web
+
+# Inject PWA tags into generated index.html (Expo doesn't include manifest link)
+RUN sed -i 's|</head>|<link rel="manifest" href="/manifest.json" />\n<link rel="apple-touch-icon" sizes="192x192" href="/pwa-icons/icon-192.png" />\n<meta name="apple-mobile-web-app-capable" content="yes" />\n<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />\n<meta name="apple-mobile-web-app-title" content="SpesaSmart" />\n</head>|' /web/dist/index.html
+
+# ── Stage 2: Python backend + static dist ─────────────────────────────────────
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -7,11 +26,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright browser and its dependencies
-# Install deps separately to handle font package name changes in Debian Trixie
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-unifont \
     fonts-dejavu-core \
@@ -21,7 +39,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && playwright install chromium
 
-COPY . .
+# Copy backend source
+COPY backend/ .
+
+# Copy Expo web build from stage 1
+COPY --from=web-builder /web/dist /app/dist
 
 EXPOSE 8000
 

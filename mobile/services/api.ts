@@ -1,15 +1,26 @@
 import axios from "axios";
 import { Platform } from "react-native";
 
-// On web/simulator, localhost works. On a physical device, use the LAN IP.
-const API_HOST = Platform.select({
-  web: "localhost",
-  ios: "192.168.178.40",
-  android: "192.168.178.40",
-  default: "localhost",
-});
+// On web production (served by backend), use relative URL.
+// On web dev or native, use explicit host.
+function getBaseUrl(): string {
+  if (Platform.OS === "web") {
+    // In production the SPA is served by the backend at the same origin
+    if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+      return "/api/v1";
+    }
+    return "http://localhost:8000/api/v1";
+  }
+  // Physical devices need the LAN IP
+  const API_HOST = Platform.select({
+    ios: "192.168.178.40",
+    android: "192.168.178.40",
+    default: "localhost",
+  });
+  return `http://${API_HOST}:8000/api/v1`;
+}
 
-const BASE_URL = `http://${API_HOST}:8000/api/v1`;
+const BASE_URL = getBaseUrl();
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

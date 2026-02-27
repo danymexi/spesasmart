@@ -1,6 +1,14 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, View, Alert } from "react-native";
+import { ScrollView, StyleSheet, View, Alert, Platform } from "react-native";
 import { Button, Divider, List, Switch, Text, TextInput, useTheme } from "react-native-paper";
+
+function showAlert(title: string, message: string) {
+  if (Platform.OS === "web") {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
 import { useAppStore } from "../../stores/useAppStore";
 import { createUser } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
@@ -19,9 +27,9 @@ export default function SettingsScreen() {
         telegram_chat_id: telegramId ? parseInt(telegramId, 10) : undefined,
       });
       setUserId(user.id);
-      Alert.alert("Profilo creato", "Il tuo profilo è stato creato con successo.");
+      showAlert("Profilo creato", "Il tuo profilo è stato creato con successo.");
     } catch {
-      Alert.alert("Errore", "Impossibile creare il profilo. Riprova.");
+      showAlert("Errore", "Impossibile creare il profilo. Riprova.");
     }
     setCreating(false);
   };
@@ -31,9 +39,9 @@ export default function SettingsScreen() {
     const token = await registerForPushNotifications(userId);
     if (token) {
       setPushEnabled(true);
-      Alert.alert("Notifiche attivate", "Riceverai notifiche per le offerte.");
+      showAlert("Notifiche attivate", "Riceverai notifiche per le offerte.");
     } else {
-      Alert.alert("Errore", "Impossibile attivare le notifiche push.");
+      showAlert("Errore", "Impossibile attivare le notifiche push.");
     }
   };
 

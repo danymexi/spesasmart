@@ -31,6 +31,10 @@ apscheduler==3.11.0
 # Telegram
 python-telegram-bot==21.9
 
+# Web Push
+pywebpush==2.0.1
+py-vapid==1.9.2
+
 # Utilities
 python-dotenv==1.0.1
 

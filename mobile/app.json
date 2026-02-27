@@ -27,7 +27,16 @@
     },
     "web": {
       "favicon": "./assets/favicon.png",
-      "bundler": "metro"
+      "bundler": "metro",
+      "name": "SpesaSmart",
+      "shortName": "SpesaSmart",
+      "description": "Confronto prezzi supermercati - Monza e Brianza",
+      "themeColor": "#1B5E20",
+      "backgroundColor": "#FFFFFF",
+      "display": "standalone",
+      "orientation": "portrait",
+      "scope": "/",
+      "startUrl": "/"
     },
     "plugins": [
       "expo-router"

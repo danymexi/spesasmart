@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Node
+mobile/node_modules
+mobile/.expo
+mobile/dist
+
+# Python
+backend/__pycache__
+backend/**/__pycache__
+backend/.pytest_cache
+backend/*.pyc
+
+# Env files (injected at runtime)
+.env
+.env.*
+!.env.example
+
+# Docker
+docker-compose.yml
+docker-compose.*.yml
+
+# Docs
+*.md
+LICENSE
+
+# Telegram bot (separate service)
+telegram-bot/

@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     scraping_headless: bool = True
     scraping_timeout: int = 30000  # ms
 
+    # Web Push (VAPID)
+    vapid_private_key: str = ""
+    vapid_public_key: str = ""
+    vapid_claims_email: str = "mailto:info@spesasmart.it"
+
     # Scheduler
     scheduler_enabled: bool = True
 

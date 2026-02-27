@@ -1,8 +1,10 @@
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { PaperProvider, MD3DarkTheme, MD3LightTheme } from "react-native-paper";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useColorScheme } from "react-native";
+import { registerServiceWorker } from "../services/registerSW";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,6 +34,10 @@ const darkTheme = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const theme = colorScheme === "dark" ? darkTheme : lightTheme;
+
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
 
   return (
     <SafeAreaProvider>
