@@ -20,13 +20,11 @@ from pathlib import Path
 from typing import Any
 
 import google.generativeai as genai
-from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import async_session
 from app.models.flyer import Flyer, FlyerPage
 from app.models.offer import Offer
-from app.models.product import Product
 
 logger = logging.getLogger(__name__)
 
@@ -402,23 +400,20 @@ class ScrapingPipeline:
             logger.debug("Skipping product without parseable offer_price: %s", name)
             return 0
 
-        # Try to find an existing product with the same name + brand.
+        # Find or create product (fuzzy dedup via ProductMatcher)
         brand = (prod_data.get("brand") or "").strip() or None
-        stmt = select(Product).where(Product.name == name)
-        if brand:
-            stmt = stmt.where(Product.brand == brand)
-        result = await session.execute(stmt.limit(1))
-        product = result.scalar_one_or_none()
+        from app.services.product_matcher import ProductMatcher
 
-        if product is None:
-            product = Product(
-                name=name,
-                brand=brand,
-                category=(prod_data.get("category") or "").strip() or None,
-                unit=prod_data.get("quantity"),
-            )
-            session.add(product)
-            await session.flush()  # populate product.id
+        matcher = ProductMatcher()
+        product = await matcher.create_or_match_product(
+            {
+                "name": name,
+                "brand": brand,
+                "category": (prod_data.get("category") or "").strip() or None,
+                "unit": prod_data.get("quantity"),
+            },
+            session=session,
+        )
 
         # Build the Offer row.
         original_price = self._parse_italian_price(prod_data.get("original_price"))

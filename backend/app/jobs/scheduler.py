@@ -2,48 +2,123 @@
 
 import asyncio
 import logging
+import uuid
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
+# Target store names by chain slug.
+# These are the specific stores the user wants to track.
+TARGET_STORES: dict[str, str] = {
+    "esselunga": "Esselunga Macherio",
+    "iperal": "Iperal Lesmo",
+    "lidl": "Lidl Biassono",
+    "coop": "Coop Monza",
+}
+
+
+async def _resolve_store_id(chain_slug: str) -> uuid.UUID | None:
+    """Look up the target store for a chain and return its id."""
+    store_name = TARGET_STORES.get(chain_slug)
+    if not store_name:
+        return None
+
+    from sqlalchemy import select
+    from app.database import async_session
+    from app.models.store import Store
+
+    async with async_session() as session:
+        stmt = select(Store).where(Store.name == store_name)
+        result = await session.execute(stmt)
+        store = result.scalar_one_or_none()
+        if store:
+            logger.info("Resolved target store: %s -> %s", chain_slug, store.id)
+            return store.id
+        else:
+            logger.warning(
+                "Target store '%s' not found in DB for chain '%s'.",
+                store_name,
+                chain_slug,
+            )
+            return None
+
 
 async def scrape_chain(chain_slug: str):
-    """Run scraper for a specific chain."""
-    logger.info("Starting scrape job for chain: %s", chain_slug)
-    try:
-        if chain_slug == "esselunga":
-            from app.scrapers.esselunga import EsselungaScraper
+    """Run scraper for a specific chain using multi-source strategy.
 
-            scraper = EsselungaScraper()
-        elif chain_slug == "lidl":
+    Strategy (Tiendeo-first):
+        1. Tiendeo (primary) — structured data, HTTP-only, all 4 chains.
+        2. Direct scraper (supplementary) — chain-specific, for extra products.
+        3. PromoQui (fallback) — only if Tiendeo returned 0 products.
+    """
+    logger.info("Starting scrape job for chain: %s", chain_slug)
+
+    store_id = await _resolve_store_id(chain_slug)
+    total_products = 0
+
+    # --- 1. Tiendeo (primary) ---
+    try:
+        from app.scrapers.tiendeo import TiendeoScraper
+
+        tiendeo = TiendeoScraper(chain_slug, store_id=store_id)
+        tiendeo_results = await tiendeo.scrape()
+        tiendeo_count = sum(len(f.get("products", [])) for f in tiendeo_results)
+        total_products += tiendeo_count
+        logger.info(
+            "Tiendeo returned %d products for '%s'.", tiendeo_count, chain_slug
+        )
+    except Exception:
+        logger.exception("Tiendeo scraping failed for '%s'.", chain_slug)
+        tiendeo_count = 0
+
+    # --- 2. Direct scraper (supplementary for Lidl) ---
+    try:
+        if chain_slug == "lidl":
             from app.scrapers.lidl import LidlScraper
 
-            scraper = LidlScraper()
-        elif chain_slug == "coop":
-            from app.scrapers.coop import CoopScraper
+            scraper = LidlScraper(store_id=store_id)
+            direct_results = await scraper.scrape()
+            direct_count = sum(len(f.get("products", [])) for f in direct_results)
+            total_products += direct_count
+            logger.info(
+                "Direct scraper returned %d products for '%s'.",
+                direct_count,
+                chain_slug,
+            )
+    except Exception:
+        logger.exception("Direct scraper failed for '%s'.", chain_slug)
 
-            scraper = CoopScraper()
-        elif chain_slug == "iperal":
-            from app.scrapers.iperal import IperalScraper
+    # --- 3. PromoQui (fallback if Tiendeo returned nothing) ---
+    if tiendeo_count == 0:
+        try:
+            from app.scrapers.promoqui import PromoQuiScraper
 
-            scraper = IperalScraper()
-        else:
-            logger.error("Unknown chain: %s", chain_slug)
-            return
+            pq = PromoQuiScraper(chain_slug, store_id=store_id)
+            pq_results = await pq.scrape()
+            pq_count = sum(len(f.get("products", [])) for f in pq_results)
+            total_products += pq_count
+            logger.info(
+                "PromoQui fallback returned %d products for '%s'.",
+                pq_count,
+                chain_slug,
+            )
+        except Exception:
+            logger.exception("PromoQui fallback failed for '%s'.", chain_slug)
 
-        await scraper.scrape()
-        logger.info("Scrape completed for chain: %s", chain_slug)
+    logger.info(
+        "Scrape completed for '%s': %d total products.", chain_slug, total_products
+    )
 
-        # Trigger notifications after scraping
+    # Trigger notifications after scraping
+    try:
         from app.services.notification import NotificationService
 
         notifier = NotificationService()
         await notifier.notify_new_offers_for_chain(chain_slug)
-
     except Exception:
-        logger.exception("Error scraping chain %s", chain_slug)
+        logger.exception("Notification dispatch failed for '%s'.", chain_slug)
 
 
 async def scrape_all_chains():

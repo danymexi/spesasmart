@@ -68,6 +68,8 @@ class BaseScraper(ABC):
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
+            geolocation={"latitude": 45.5845, "longitude": 9.2744},
+            permissions=["geolocation"],
         )
         self._context.set_default_timeout(self.settings.scraping_timeout)
         return self._context
@@ -261,6 +263,26 @@ class BaseScraper(ABC):
             return Decimal(value)
         except (InvalidOperation, ValueError):
             return None
+
+    # ------------------------------------------------------------------
+    # Product dedup via ProductMatcher
+    # ------------------------------------------------------------------
+
+    async def _find_or_create_product(
+        self,
+        prod_data: dict,
+        *,
+        session=None,
+    ):
+        """Find an existing product by fuzzy match or create a new one.
+
+        Delegates to :class:`~app.services.product_matcher.ProductMatcher`.
+        ``prod_data`` must contain at least a ``name`` key.
+        """
+        from app.services.product_matcher import ProductMatcher
+
+        matcher = ProductMatcher()
+        return await matcher.create_or_match_product(prod_data, session=session)
 
     # ------------------------------------------------------------------
     # Teardown

@@ -10,7 +10,7 @@ import uuid
 from typing import Optional
 
 from rapidfuzz import fuzz
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
@@ -134,6 +134,27 @@ class ProductMatcher:
         return " ".join(tokens)
 
     @staticmethod
+    def extract_brand_from_name(raw_name: str) -> tuple[str | None, str]:
+        """Split ``"Brand - Product Name"`` into (brand, product_name).
+
+        Tiendeo and other sources format names as ``"Barilla - Penne Rigate 500g"``.
+        Returns ``(None, raw_name)`` when no separator is found.
+        """
+        if not raw_name:
+            return None, raw_name
+
+        # Pattern: "Brand - Product" (with surrounding spaces around the dash)
+        if " - " in raw_name:
+            parts = raw_name.split(" - ", 1)
+            brand_candidate = parts[0].strip()
+            product_name = parts[1].strip()
+            # Only treat as brand if the left part is short-ish (≤ 4 words)
+            if brand_candidate and len(brand_candidate.split()) <= 4 and product_name:
+                return brand_candidate, product_name
+
+        return None, raw_name.strip()
+
+    @staticmethod
     def normalize_brand(brand: str | None) -> str | None:
         """Return canonical brand name or the original (title-cased)."""
         if not brand:
@@ -185,19 +206,35 @@ class ProductMatcher:
         try:
             canonical_brand = self.normalize_brand(brand)
 
+            # Pre-filter: use significant tokens from the name to narrow
+            # candidates via SQL ILIKE instead of loading every product.
+            tokens = self.normalize_text(name).split()
+            significant = [t for t in tokens if len(t) > 3][:3]
+
             # Fetch candidates – restrict to same brand when available
             if canonical_brand:
                 stmt = select(Product).where(Product.brand == canonical_brand)
+                if significant:
+                    stmt = stmt.where(
+                        or_(*[Product.name.ilike(f"%{tok}%") for tok in significant])
+                    )
                 result = await session.execute(stmt)
                 candidates: list[Product] = list(result.scalars().all())
 
-                # If no candidates with that brand, widen the search
-                if not candidates:
-                    stmt = select(Product)
+                # If no candidates with that brand, widen to token-only search
+                if not candidates and significant:
+                    stmt = select(Product).where(
+                        or_(*[Product.name.ilike(f"%{tok}%") for tok in significant])
+                    )
                     result = await session.execute(stmt)
                     candidates = list(result.scalars().all())
             else:
-                stmt = select(Product)
+                if significant:
+                    stmt = select(Product).where(
+                        or_(*[Product.name.ilike(f"%{tok}%") for tok in significant])
+                    )
+                else:
+                    stmt = select(Product)
                 result = await session.execute(stmt)
                 candidates = list(result.scalars().all())
 

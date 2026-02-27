@@ -26,6 +26,12 @@ class ScrapeResult(BaseModel):
     message: str
 
 
+async def _resolve_store_id(chain_slug: str):
+    """Resolve the target store id for a chain."""
+    from app.jobs.scheduler import _resolve_store_id as resolve
+    return await resolve(chain_slug)
+
+
 async def _run_scraper(chain_slug: str, source: str = "auto") -> dict:
     """Run the scraper for a specific chain and return results.
 
@@ -35,11 +41,15 @@ async def _run_scraper(chain_slug: str, source: str = "auto") -> dict:
                 "promoqui" uses only the PromoQui aggregator.
     """
     scraper = None
+    store_id = await _resolve_store_id(chain_slug)
 
-    if source in ("auto", "direct"):
+    if source == "tiendeo":
+        from app.scrapers.tiendeo import TiendeoScraper
+        scraper = TiendeoScraper(chain_slug, store_id=store_id)
+    elif source in ("auto", "direct"):
         if chain_slug == "lidl":
             from app.scrapers.lidl import LidlScraper
-            scraper = LidlScraper()
+            scraper = LidlScraper(store_id=store_id)
         elif chain_slug == "esselunga":
             from app.scrapers.esselunga import EsselungaScraper
             scraper = EsselungaScraper()
@@ -48,13 +58,13 @@ async def _run_scraper(chain_slug: str, source: str = "auto") -> dict:
             scraper = CoopScraper()
         elif chain_slug == "iperal":
             from app.scrapers.iperal import IperalScraper
-            scraper = IperalScraper()
+            scraper = IperalScraper(store_id=store_id)
         elif source == "direct":
             raise ValueError(f"Unknown chain: {chain_slug}")
 
     if source == "promoqui" or scraper is None:
         from app.scrapers.promoqui import PromoQuiScraper
-        scraper = PromoQuiScraper(chain_slug)
+        scraper = PromoQuiScraper(chain_slug, store_id=store_id)
 
     flyers_data = await scraper.scrape()
 
@@ -122,8 +132,8 @@ async def trigger_scraping_sync(chain_slug: str, source: str = "auto"):
             detail=f"Invalid chain '{chain_slug}'. Valid chains: {', '.join(sorted(VALID_CHAINS))}",
         )
 
-    if source not in ("auto", "direct", "promoqui"):
-        raise HTTPException(status_code=400, detail="source must be 'auto', 'direct', or 'promoqui'")
+    if source not in ("auto", "direct", "promoqui", "tiendeo"):
+        raise HTTPException(status_code=400, detail="source must be 'auto', 'direct', 'promoqui', or 'tiendeo'")
 
     try:
         result = await _run_scraper(chain_slug, source=source)

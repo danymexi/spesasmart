@@ -1,12 +1,15 @@
-"""Lidl scraper -- extracts weekly offers from HTML pages.
+"""Lidl scraper -- extracts weekly offers from all sections.
 
 Strategy:
     1. Navigate to https://www.lidl.it homepage.
-    2. Discover offer page links matching /c/super-offerte-*/a*.
-    3. Navigate to each offer page.
-    4. Extract product data from .odsc-tile cards using innerText parsing.
-    5. Parse prices with regex (offer price = starred price, original = first €).
-    6. Persist products and offers to the database.
+    2. Discover ALL offer page links: weekly offers, thematic, "da lunedi",
+       "da giovedi", and any other promotional sections.
+    3. Also navigate directly to known offer URL patterns.
+    4. Navigate to each offer page.
+    5. Scroll fully to load all lazy content.
+    6. Extract product data from .odsc-tile cards using innerText parsing.
+    7. Parse prices with regex (offer price = starred price, original = first €).
+    8. Persist products and offers to the database.
 """
 
 from __future__ import annotations
@@ -28,32 +31,56 @@ from app.scrapers.base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
+# Known Lidl offer section URLs to try directly.
+# These are stable category pages that contain .odsc-tile product cards.
+# The /c/super-offerte-kw-XX-YY/... URLs rotate weekly and are discovered
+# from the homepage via _discover_offer_urls.
+KNOWN_OFFER_PATHS = [
+    "/c/cibo-e-bevande/s10068374",          # Food & drinks category (always available)
+    "/c/cucina-e-casalinghi/s10068166",      # Kitchen & homeware
+    "/c/casa-e-arredo/s10068371",            # Home & decor
+]
+
 
 class LidlScraper(BaseScraper):
-    """Scraper for Lidl Italia weekly offers."""
+    """Scraper for Lidl Italia weekly offers -- all sections."""
 
     name = "Lidl"
     slug = "lidl"
     base_url = "https://www.lidl.it"
+
+    def __init__(self, *, store_id: uuid.UUID | None = None) -> None:
+        self.store_id = store_id
+        super().__init__()
 
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
 
     async def scrape(self) -> list[dict[str, Any]]:
-        """Run the full Lidl scraping workflow."""
+        """Run the full Lidl scraping workflow across all sections."""
         flyers_data: list[dict[str, Any]] = []
 
         try:
             page = await self._new_page()
             logger.info("Navigating to Lidl homepage: %s", self.base_url)
-            await page.goto(self.base_url, wait_until="domcontentloaded")
+            await page.goto(self.base_url, wait_until="domcontentloaded", timeout=30000)
             await self._accept_cookies(page)
             await page.wait_for_timeout(2000)
 
-            # Discover offer page URLs from the homepage.
+            # Discover offer page URLs from the homepage
             offer_urls = await self._discover_offer_urls(page)
-            logger.info("Discovered %d offer URLs from homepage.", len(offer_urls))
+
+            # Also add known offer paths that might not be linked from homepage
+            for path in KNOWN_OFFER_PATHS:
+                full_url = f"{self.base_url}{path}"
+                if full_url not in offer_urls:
+                    offer_urls.append(full_url)
+
+            logger.info(
+                "Total offer URLs to process: %d (discovered + known)",
+                len(offer_urls),
+            )
             await page.close()
 
             for url in offer_urls:
@@ -69,6 +96,12 @@ class LidlScraper(BaseScraper):
         finally:
             await self.close()
 
+        total_products = sum(len(f.get("products", [])) for f in flyers_data)
+        logger.info(
+            "Lidl scraping complete: %d sections, %d total products.",
+            len(flyers_data),
+            total_products,
+        )
         return flyers_data
 
     # ------------------------------------------------------------------
@@ -98,20 +131,24 @@ class LidlScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     async def _discover_offer_urls(self, page: Page) -> list[str]:
-        """Find offer page links on the Lidl homepage.
+        """Find ALL offer page links on the Lidl homepage.
 
         Looks for links matching patterns like:
             /c/super-offerte-kw-08-26/a10088983
             /c/offerte-della-settimana/...
+            /c/da-lunedi/...
+            /c/da-giovedi/...
         """
         urls: list[str] = []
         seen: set[str] = set()
 
-        # Patterns that match Lidl offer page URLs
+        # Patterns that match Lidl offer page URLs (current site structure)
         link_patterns = [
             "a[href*='/c/super-offerte']",
-            "a[href*='/c/offerte-della-settimana']",
             "a[href*='/c/offerte']",
+            "a[href*='/c/da-lunedi']",
+            "a[href*='/c/da-giovedi']",
+            "a[href*='/c/cibo-e-bevande']",
         ]
 
         for selector in link_patterns:
@@ -130,15 +167,15 @@ class LidlScraper(BaseScraper):
                 except Exception:
                     continue
 
-        # If no offer URLs found, try a broader search
-        if not urls:
-            logger.warning("No offer URLs found with specific selectors, trying broader search.")
+        # Broader search for any offer-related links we might have missed
+        if len(urls) < 3:
+            logger.info("Few offer URLs found, trying broader search.")
             all_links = page.locator("a[href*='/c/']")
             count = await all_links.count()
             for i in range(count):
                 try:
                     href = await all_links.nth(i).get_attribute("href") or ""
-                    if re.search(r"/c/.*offert", href, re.IGNORECASE):
+                    if re.search(r"/c/.*(?:offert|lunedi|giovedi|super|promo)", href, re.IGNORECASE):
                         full_url = href if href.startswith("http") else f"https://www.lidl.it{href}"
                         if full_url not in seen:
                             seen.add(full_url)
@@ -146,6 +183,7 @@ class LidlScraper(BaseScraper):
                 except Exception:
                     continue
 
+        logger.info("Discovered %d offer URLs from homepage.", len(urls))
         return urls
 
     # ------------------------------------------------------------------
@@ -158,11 +196,17 @@ class LidlScraper(BaseScraper):
 
         page = await self._new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded")
+            resp = await page.goto(url, wait_until="networkidle", timeout=30000)
+
+            # Skip 404 or error pages
+            if resp and resp.status >= 400:
+                logger.info("Lidl page returned %d, skipping: %s", resp.status, url)
+                return None
+
             await self._accept_cookies(page)
             await page.wait_for_timeout(2000)
 
-            # Scroll to load lazy content.
+            # Scroll to load ALL lazy content (increased depth)
             await self._scroll_to_bottom(page)
 
             # Extract products from .odsc-tile cards (proven working selector)
@@ -178,7 +222,6 @@ class LidlScraper(BaseScraper):
 
             # Determine validity dates (Lidl flyers are typically Mon-Sun)
             today = date.today()
-            # Find the most recent Monday
             days_since_monday = today.weekday()
             valid_from = today - timedelta(days=days_since_monday)
             valid_to = valid_from + timedelta(days=6)
@@ -195,11 +238,15 @@ class LidlScraper(BaseScraper):
                 "valid_to": valid_to,
                 "products": products,
                 "image_paths": [],
+                "store_id": self.store_id,
             }
 
             await self._persist_offers(flyer_data)
             return flyer_data
 
+        except PlaywrightTimeout:
+            logger.warning("Timeout loading Lidl page: %s", url)
+            return None
         finally:
             await page.close()
 
@@ -490,28 +537,45 @@ class LidlScraper(BaseScraper):
         return None
 
     # ------------------------------------------------------------------
-    # Scroll helper
+    # Scroll helper -- increased depth for full content loading
     # ------------------------------------------------------------------
 
-    async def _scroll_to_bottom(self, page: Page, max_scrolls: int = 15) -> None:
-        """Gradually scroll down to trigger lazy loading of product cards."""
+    async def _scroll_to_bottom(self, page: Page, max_scrolls: int = 30) -> None:
+        """Gradually scroll down to trigger lazy loading of ALL product cards.
+
+        Increased from 15 to 30 scrolls and added a stall counter so we
+        don't stop too early on pages with many lazy-loaded tiles.
+        """
+        stall_count = 0
         for _ in range(max_scrolls):
             prev_height = await page.evaluate("document.body.scrollHeight")
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(1500)
             new_height = await page.evaluate("document.body.scrollHeight")
             if new_height == prev_height:
-                break
+                stall_count += 1
+                if stall_count >= 3:
+                    break
+            else:
+                stall_count = 0
 
     # ------------------------------------------------------------------
     # Database persistence
     # ------------------------------------------------------------------
 
     async def _persist_offers(self, flyer_data: dict[str, Any]) -> None:
-        """Create a Flyer row and persist extracted product offers."""
-        async with async_session() as session:
-            from sqlalchemy import select
+        """Create a Flyer row and persist extracted product offers.
 
+        Uses date-based dedup so re-scraping the same section in a new
+        week creates new offer rows, building price history.
+        """
+        from sqlalchemy import select, and_
+
+        store_id = flyer_data.get("store_id") or self.store_id
+        valid_from = flyer_data.get("valid_from") or date.today()
+        valid_to = flyer_data.get("valid_to") or date.today()
+
+        async with async_session() as session:
             stmt = select(Chain).where(Chain.slug == self.slug)
             result = await session.execute(stmt)
             chain = result.scalar_one_or_none()
@@ -520,25 +584,32 @@ class LidlScraper(BaseScraper):
                 logger.error("Chain '%s' not found in DB.", self.slug)
                 return
 
-            # Check if a flyer with same source_url already exists
+            # Date-based dedup: same source + same date range = skip
             stmt_existing = select(Flyer).where(
-                Flyer.source_url == flyer_data["source_url"],
-                Flyer.chain_id == chain.id,
+                and_(
+                    Flyer.source_url == flyer_data["source_url"],
+                    Flyer.chain_id == chain.id,
+                    Flyer.valid_from == valid_from,
+                    Flyer.valid_to == valid_to,
+                )
             )
             existing = (await session.execute(stmt_existing)).scalar_one_or_none()
             if existing:
                 logger.info(
-                    "Flyer already exists for URL %s (id=%s), skipping.",
+                    "Flyer already exists for URL %s (%s to %s, id=%s), skipping.",
                     flyer_data["source_url"],
+                    valid_from,
+                    valid_to,
                     existing.id,
                 )
                 return
 
             flyer = Flyer(
                 chain_id=chain.id,
+                store_id=store_id,
                 title=flyer_data["title"],
-                valid_from=flyer_data.get("valid_from") or date.today(),
-                valid_to=flyer_data.get("valid_to") or date.today(),
+                valid_from=valid_from,
+                valid_to=valid_to,
                 source_url=flyer_data["source_url"],
                 pages_count=1,
                 status="processing",
@@ -556,8 +627,9 @@ class LidlScraper(BaseScraper):
                 products=products,
                 flyer_id=flyer_id,
                 chain_id=chain_id,
-                valid_from=flyer_data.get("valid_from"),
-                valid_to=flyer_data.get("valid_to"),
+                store_id=store_id,
+                valid_from=valid_from,
+                valid_to=valid_to,
             )
 
     async def _save_html_products(
@@ -565,13 +637,12 @@ class LidlScraper(BaseScraper):
         products: list[dict[str, Any]],
         flyer_id: uuid.UUID,
         chain_id: uuid.UUID,
+        store_id: uuid.UUID | None = None,
         valid_from=None,
         valid_to=None,
     ) -> None:
         """Save extracted products to the database."""
         from app.models.offer import Offer
-        from app.models.product import Product
-        from sqlalchemy import select
 
         saved_count = 0
         async with async_session() as session:
@@ -588,23 +659,17 @@ class LidlScraper(BaseScraper):
 
                     brand = (prod_data.get("brand") or "").strip() or None
 
-                    # Find or create product.
-                    stmt = select(Product).where(Product.name == name)
-                    if brand:
-                        stmt = stmt.where(Product.brand == brand)
-                    result = await session.execute(stmt.limit(1))
-                    product = result.scalar_one_or_none()
-
-                    if product is None:
-                        product = Product(
-                            name=name,
-                            brand=brand,
-                            category=prod_data.get("category"),
-                            unit=prod_data.get("quantity"),
-                            image_url=prod_data.get("image_url"),
-                        )
-                        session.add(product)
-                        await session.flush()
+                    # Find or create product (fuzzy dedup via ProductMatcher)
+                    product = await self._find_or_create_product(
+                        {
+                            "name": name,
+                            "brand": brand,
+                            "category": prod_data.get("category"),
+                            "unit": prod_data.get("quantity"),
+                            "image_url": prod_data.get("image_url"),
+                        },
+                        session=session,
+                    )
 
                     original_price = self.normalize_price(prod_data.get("original_price"))
                     discount_pct = self.normalize_discount_pct(prod_data.get("discount_pct"))
@@ -614,6 +679,7 @@ class LidlScraper(BaseScraper):
                         product_id=product.id,
                         flyer_id=flyer_id,
                         chain_id=chain_id,
+                        store_id=store_id,
                         original_price=original_price,
                         offer_price=offer_price,
                         discount_pct=discount_pct,

@@ -41,13 +41,34 @@ class PromoQuiScraper(BaseScraper):
     slug = "promoqui"
     base_url = "https://www.promoqui.it"
 
-    def __init__(self, chain_slug: str) -> None:
+    def __init__(self, chain_slug: str, *, store_id: uuid.UUID | None = None) -> None:
         self.chain_slug = chain_slug
         self.chain_name = chain_slug.title()
+        self.store_id = store_id
         # Override name/slug to match the actual chain
         self.name = self.chain_name
         self.slug = chain_slug
         super().__init__()
+
+    async def _new_page_plain(self) -> Page:
+        """Create a plain browser page without locale/UA that triggers geo-lock.
+
+        PromoQui geo-localizes based on locale/UA headers and shows only
+        local offers (e.g. 4 items in Milan).  A clean context without
+        these headers shows the full national catalog (e.g. 282 items).
+        """
+        from playwright.async_api import async_playwright as ap
+
+        if self._context is None:
+            self._playwright = await ap().start()
+            self._browser = await self._playwright.chromium.launch(
+                headless=self.settings.scraping_headless
+            )
+            self._context = await self._browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+            )
+            self._context.set_default_timeout(self.settings.scraping_timeout)
+        return await self._context.new_page()
 
     async def scrape(self) -> list[dict[str, Any]]:
         """Scrape offers for the configured chain from PromoQui."""
@@ -60,13 +81,13 @@ class PromoQuiScraper(BaseScraper):
         flyers_data: list[dict[str, Any]] = []
 
         try:
-            page = await self._new_page()
+            page = await self._new_page_plain()
             logger.info("Navigating to PromoQui: %s", url)
-            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await self._accept_cookies(page)
             await page.wait_for_timeout(2000)
 
-            # Load more offers by scrolling and clicking "load more"
+            # Load ALL offers by clicking "CARICA ALTRE OFFERTE" up to 50 times
             await self._load_all_offers(page)
 
             # Extract products
@@ -76,17 +97,12 @@ class PromoQuiScraper(BaseScraper):
                 logger.info("No offers found for '%s' on PromoQui.", self.chain_slug)
                 return []
 
-            # Filter out non-food items (Salomon collection, etc.)
-            food_products = [p for p in products if self._is_food_product(p)]
+            # NO food filter -- load EVERYTHING into the catalog
             logger.info(
-                "Extracted %d total offers, %d food products for '%s'.",
+                "Extracted %d total products for '%s' from PromoQui.",
                 len(products),
-                len(food_products),
                 self.chain_slug,
             )
-
-            # Use food products if we have enough, otherwise fall back to all
-            final_products = food_products if len(food_products) >= 5 else products
 
             today = date.today()
             days_since_monday = today.weekday()
@@ -100,8 +116,9 @@ class PromoQuiScraper(BaseScraper):
                 "source_url": url,
                 "valid_from": valid_from,
                 "valid_to": valid_to,
-                "products": final_products,
+                "products": products,
                 "image_paths": [],
+                "store_id": self.store_id,
             }
 
             await self._persist_offers(flyer_data)
@@ -119,15 +136,40 @@ class PromoQuiScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     async def _accept_cookies(self, page: Page) -> None:
+        """Dismiss cookie consent dialogs (multiple possible providers)."""
+        # Try clicking via JS to handle overlays that block Playwright clicks
+        dismissed = await page.evaluate("""() => {
+            // Common consent button texts
+            const texts = ['ACCETTO', 'Accetta', 'Accetta tutti', 'Accept', 'Accept All'];
+            const btns = document.querySelectorAll('button, a[role="button"], [class*="consent"] button');
+            for (const b of btns) {
+                const t = b.innerText.trim();
+                for (const target of texts) {
+                    if (t === target || t.toUpperCase() === target.toUpperCase()) {
+                        b.click();
+                        return true;
+                    }
+                }
+            }
+            // Also check for iframes (e.g. Didomi, OneTrust)
+            return false;
+        }""")
+        if dismissed:
+            await page.wait_for_timeout(1000)
+            return
+
+        # Fallback: Playwright selectors
         selectors = [
             "button:has-text('ACCETTO')",
             "button:has-text('Accetta')",
             "button#onetrust-accept-btn-handler",
+            "button:has-text('Accetta tutti')",
+            "button:has-text('Accept')",
         ]
         for sel in selectors:
             try:
                 btn = page.locator(sel).first
-                if await btn.is_visible(timeout=3000):
+                if await btn.is_visible(timeout=2000):
                     await btn.click()
                     await page.wait_for_timeout(500)
                     return
@@ -135,77 +177,233 @@ class PromoQuiScraper(BaseScraper):
                 continue
 
     # ------------------------------------------------------------------
-    # Load all offers (scroll + "load more" button)
+    # Set location to Monza area
     # ------------------------------------------------------------------
 
-    async def _load_all_offers(self, page: Page, max_loads: int = 10) -> None:
-        """Scroll and click 'load more' to get more offers."""
+    async def _set_location(self, page: Page) -> None:
+        """Set PromoQui location to Monza e Brianza for local offers."""
+        # PromoQui has a location search input. We type "Monza" and select.
+        try:
+            # Look for the location/city input field
+            set_ok = await page.evaluate("""() => {
+                // Find the search/location input by placeholder or nearby text
+                const inputs = document.querySelectorAll('input');
+                for (const inp of inputs) {
+                    const ph = (inp.placeholder || '').toLowerCase();
+                    if (ph.includes('cerca') || ph.includes('città') || ph.includes('dove') || ph.includes('localit')) {
+                        inp.value = '';
+                        inp.focus();
+                        return 'found_input';
+                    }
+                }
+                // Check for a "TROVAMI" or location button
+                const btns = document.querySelectorAll('button, a');
+                for (const b of btns) {
+                    const text = b.innerText.trim().toUpperCase();
+                    if (text.includes('MONZA') || text.includes('TROVAMI')) {
+                        return 'found_btn:' + b.innerText.trim();
+                    }
+                }
+                return 'not_found';
+            }""")
+            logger.info("Location search result: %s", set_ok)
+
+            if set_ok == "found_input":
+                # Type Monza in the input
+                inputs = page.locator("input")
+                for i in range(await inputs.count()):
+                    inp = inputs.nth(i)
+                    ph = await inp.get_attribute("placeholder") or ""
+                    if any(k in ph.lower() for k in ("cerca", "città", "dove", "localit")):
+                        await inp.fill("Monza")
+                        await page.wait_for_timeout(1500)
+                        # Click the first suggestion
+                        await page.evaluate("""() => {
+                            const items = document.querySelectorAll('[class*="suggestion"], [class*="autocomplete"] li, [class*="result"] a');
+                            for (const item of items) {
+                                if (item.innerText.toLowerCase().includes('monza')) {
+                                    item.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }""")
+                        await page.wait_for_timeout(2000)
+                        break
+
+        except Exception:
+            logger.warning("Could not set PromoQui location to Monza.")
+
+    # ------------------------------------------------------------------
+    # Load all offers (scroll + "load more" button) -- up to 50 rounds
+    # ------------------------------------------------------------------
+
+    async def _load_all_offers(self, page: Page, max_loads: int = 50) -> None:
+        """Scroll and click 'load more' repeatedly to get ALL offers.
+
+        PromoQui loads ~50 offer cards per batch.  We count only direct offer
+        cards (``OffersList_offer__`` that are NOT sub-elements like image/info).
+        """
+        # Count only direct offer card divs, excluding sub-elements.
+        CARD_COUNTER_JS = """(() => {
+            const all = document.querySelectorAll('[class*="OffersList_offer__"]');
+            return [...all].filter(el => {
+                const cls = el.className;
+                return !cls.includes('image') && !cls.includes('information') &&
+                       !cls.includes('description') && !cls.includes('title') &&
+                       !cls.includes('offerItem') && !cls.includes('mobilePrice') &&
+                       !cls.includes('infosRetailer') && !cls.includes('buttonIcon');
+            }).length;
+        })()"""
+        consecutive_no_new = 0
+        prev_count = await page.evaluate(CARD_COUNTER_JS)
+        logger.info("Initial offer cards visible: %d", prev_count)
+
         for i in range(max_loads):
+            # Scroll to bottom to trigger lazy loading
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await page.wait_for_timeout(1000)
 
-            # Try clicking "CARICA ALTRE OFFERTE"
-            try:
-                load_more = page.locator(
-                    "button:has-text('CARICA ALTRE'), "
-                    "a:has-text('CARICA ALTRE'), "
-                    "button:has-text('Carica altre')"
-                ).first
-                if await load_more.is_visible(timeout=2000):
-                    await load_more.click()
-                    await page.wait_for_timeout(2000)
-                    logger.debug("Loaded more offers (round %d).", i + 1)
-                else:
-                    break
-            except (PlaywrightTimeout, Exception):
+            # Click "CARICA ALTRE OFFERTE" via JavaScript.
+            # PromoQui uses React; Playwright's click() doesn't always trigger
+            # the React event handler, but native JS .click() does.
+            # Match exactly "CARICA ALTRE OFFERTE" to avoid clicking unrelated buttons.
+            clicked = await page.evaluate("""() => {
+                const btns = document.querySelectorAll('button');
+                for (const b of btns) {
+                    const text = b.innerText.trim().toUpperCase();
+                    if (text === 'CARICA ALTRE OFFERTE' && b.offsetParent !== null && b.offsetHeight > 0) {
+                        b.scrollIntoView({behavior: 'instant', block: 'center'});
+                        b.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""")
+            if clicked:
+                await page.wait_for_timeout(3000)
+
+            # Count offer cards now
+            current_count = await page.evaluate(CARD_COUNTER_JS)
+
+            if current_count > prev_count:
+                consecutive_no_new = 0
+                logger.info(
+                    "Load round %d: %d -> %d offer cards.", i + 1, prev_count, current_count
+                )
+            else:
+                consecutive_no_new += 1
+
+            prev_count = current_count
+
+            # Stop if no new content for 3 consecutive rounds
+            if not clicked and consecutive_no_new >= 3:
+                logger.info(
+                    "No more offers to load after %d rounds (%d cards).",
+                    i + 1,
+                    current_count,
+                )
                 break
+
+        logger.info(
+            "Finished loading: %d rounds, %d offer cards.",
+            min(i + 1, max_loads),
+            prev_count,
+        )
 
     # ------------------------------------------------------------------
     # Extract offers from HTML
     # ------------------------------------------------------------------
 
     async def _extract_offers(self, page: Page) -> list[dict[str, Any]]:
-        """Extract structured offer data from PromoQui offer cards."""
+        """Extract structured offer data from PromoQui offer cards.
+
+        PromoQui DOM structure (as of Feb 2026):
+            div.OffersList_offer__vyBiG          <- individual offer card
+              div.OffersList_offer__image__*      <- image wrapper
+                a[href="/volantino/..."]          <- link to flyer page
+                  img[src, alt, title]            <- product image + name
+              div.OffersList_offer__information__* <- info wrapper
+                div.*description*                 <- product name
+                div (hidden-sm)                   <- "VOLANTINO XX.XX€ Chain"
+                div (hidden-md-up)                <- "Chain XX.XX€"
+        """
         products: list[dict[str, Any]] = []
 
         offers_data = await page.evaluate("""() => {
-            const offerEls = document.querySelectorAll('[class*="offer__vyBiG"], [class*="OffersList_offer_"]');
+            // Select individual offer cards (filter out sub-elements).
+            // PromoQui renders each card twice (mobile + desktop).
+            // We deduplicate by name+price inside the JS to avoid doubles.
+            const allOfferEls = document.querySelectorAll('[class*="OffersList_offer__"]');
+            const offerCards = [...allOfferEls].filter(el => {
+                const cls = el.className;
+                return cls.includes('OffersList_offer__') &&
+                       !cls.includes('image') &&
+                       !cls.includes('information') &&
+                       !cls.includes('description') &&
+                       !cls.includes('title') &&
+                       !cls.includes('offerItem') &&
+                       !cls.includes('mobilePrice') &&
+                       !cls.includes('infosRetailer') &&
+                       !cls.includes('buttonIcon');
+            });
+
             const results = [];
+            const seen = new Set();
 
-            for (const el of offerEls) {
-                const titleEl = el.querySelector('[class*="title"]');
-                const priceLabels = el.querySelectorAll('[class*="price-label"]');
+            for (const el of offerCards) {
                 const imgEl = el.querySelector('img');
+                const descEl = el.querySelector('[class*="description"]');
+                const titleEl = el.querySelector('[class*="title"]');
 
-                const title = titleEl ? titleEl.innerText.trim() : '';
-                if (!title) continue;
+                let name = '';
+                if (descEl) name = descEl.innerText.trim();
+                if (!name && titleEl) name = titleEl.innerText.trim();
+                if (!name && imgEl) name = (imgEl.alt || imgEl.title || '').trim();
+                if (!name || name.length < 2) continue;
 
-                // Get the first price (offer price)
+                const text = el.innerText || '';
+
+                // Price: XX.XX€ or XX,XX€ (€ may be on next line)
                 let offerPrice = null;
                 let originalPrice = null;
-
-                // Parse price from the text - look for the pattern X.XX€
-                const text = el.innerText;
                 const priceMatches = text.match(/(\\d+[,.]\\d{2})\\s*€/g);
                 if (priceMatches && priceMatches.length > 0) {
                     offerPrice = priceMatches[0].replace('€', '').trim();
+                    if (priceMatches.length > 1) {
+                        originalPrice = priceMatches[1].replace('€', '').trim();
+                    }
                 }
 
-                // Look for discount percentage
+                // JS-level dedup: same name+price = same product (mobile/desktop)
+                const dedupKey = name.toLowerCase().substring(0, 60) + '|' + (offerPrice || '');
+                if (seen.has(dedupKey)) continue;
+                seen.add(dedupKey);
+
                 let discount = null;
                 const discountMatch = text.match(/-\\s*(\\d+)\\s*%/);
-                if (discountMatch) {
-                    discount = discountMatch[1];
-                }
+                if (discountMatch) discount = discountMatch[1];
 
                 const imgSrc = imgEl ? (imgEl.src || imgEl.getAttribute('data-src')) : null;
 
+                let quantity = null;
+                const qtyMatch = text.match(/(\\d+(?:[,.]\\d+)?\\s*(?:g|kg|ml|l|cl|pz|pezzi|conf)\\b)/i);
+                if (qtyMatch) quantity = qtyMatch[1];
+
+                const linkEl = el.querySelector('a[href*="/volantino/"]');
+                const href = linkEl ? linkEl.href : null;
+
                 results.push({
-                    name: title,
+                    name: name,
+                    brand: null,
+                    category: null,
                     offer_price: offerPrice,
+                    original_price: originalPrice,
                     discount_pct: discount,
+                    quantity: quantity,
                     image_url: imgSrc,
-                    raw_text: text.substring(0, 400)
+                    raw_text: text.substring(0, 500),
+                    source_link: href,
                 });
             }
             return results;
@@ -236,15 +434,20 @@ class PromoQuiScraper(BaseScraper):
                 except Exception:
                     pass
 
+            original_price = self.normalize_price(item.get("original_price"))
+            # If original < offer, swap (parsing artifact)
+            if original_price is not None and original_price < offer_price:
+                original_price, offer_price = offer_price, original_price
+
             products.append({
                 "name": name,
-                "brand": None,
-                "category": None,
-                "original_price": None,
+                "brand": (item.get("brand") or "").strip() or None,
+                "category": (item.get("category") or "").strip() or None,
+                "original_price": str(original_price) if original_price else None,
                 "offer_price": str(offer_price),
                 "discount_pct": str(discount_pct) if discount_pct else None,
                 "discount_type": "percentage" if discount_pct else None,
-                "quantity": None,
+                "quantity": item.get("quantity"),
                 "price_per_unit": None,
                 "raw_text": item.get("raw_text", ""),
                 "confidence": 0.80,
@@ -254,63 +457,22 @@ class PromoQuiScraper(BaseScraper):
         return products
 
     # ------------------------------------------------------------------
-    # Food product filter
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _is_food_product(product: dict[str, Any]) -> bool:
-        """Heuristic to filter out non-food items (clothing, collectibles, etc.)."""
-        name = (product.get("name") or "").lower()
-
-        # Non-food keywords
-        non_food = [
-            "bollini", "salomon", "marsupio", "zaino", "borsa", "berretto",
-            "cappellino", "scaldacollo", "cuffie", "smart tv", "tv ",
-            "smartphone", "tablet", "scarpe", "abbigliamento", "maglietta",
-            "pantalone", "giacca", "felpa", "set utensili",
-        ]
-        if any(kw in name for kw in non_food):
-            return False
-
-        # Food-positive keywords
-        food_kw = [
-            "latte", "pane", "pasta", "riso", "olio", "aceto", "sale",
-            "zucchero", "farina", "uova", "burro", "formaggio", "yogurt",
-            "carne", "pollo", "maiale", "manzo", "pesce", "salmone", "tonno",
-            "frutta", "verdura", "insalata", "pomodor", "patate", "cipoll",
-            "mela", "banana", "arancia", "limone",
-            "biscott", "crackers", "cereali", "fette", "muffin",
-            "prosciutto", "salame", "mortadella", "bresaola", "speck",
-            "mozzarella", "parmigiano", "grana", "pecorino", "ricotta",
-            "acqua", "birra", "vino", "succo", "caffè", "tè",
-            "detersivo", "sapone", "shampoo", "dentifricio",
-            "surgelat", "gelato", "pizza", "ravioli", "gnocchi",
-            "nutella", "cioccolat", "caramell",
-            "ketchup", "maionese", "senape",
-            "conserv", "pelat", "passata", "sugo",
-        ]
-        if any(kw in name for kw in food_kw):
-            return True
-
-        # If price is < 20€, likely food/grocery
-        try:
-            price = float(product.get("offer_price", "999"))
-            if price < 20:
-                return True
-        except (ValueError, TypeError):
-            pass
-
-        return False
-
-    # ------------------------------------------------------------------
     # Database persistence
     # ------------------------------------------------------------------
 
     async def _persist_offers(self, flyer_data: dict[str, Any]) -> None:
-        """Create Flyer and save products to DB."""
+        """Create Flyer and save products to DB.
+
+        Uses date-based deduplication: same source_url + overlapping date
+        range won't create a duplicate flyer. But a new week's scraping
+        creates a new flyer with new offers, building price history.
+        """
         from app.models.offer import Offer
-        from app.models.product import Product
-        from sqlalchemy import select
+        from sqlalchemy import select, and_
+
+        store_id = flyer_data.get("store_id")
+        valid_from = flyer_data.get("valid_from") or date.today()
+        valid_to = flyer_data.get("valid_to") or date.today()
 
         async with async_session() as session:
             # Find the chain
@@ -322,27 +484,34 @@ class PromoQuiScraper(BaseScraper):
                 logger.error("Chain '%s' not found in DB.", self.chain_slug)
                 return
 
-            # Check for existing flyer from PromoQui
-            source_url = flyer_data["source_url"]
+            # Date-based dedup: check for existing flyer with same source and
+            # overlapping validity dates
             stmt_existing = select(Flyer).where(
-                Flyer.source_url == source_url,
-                Flyer.chain_id == chain.id,
+                and_(
+                    Flyer.source_url == flyer_data["source_url"],
+                    Flyer.chain_id == chain.id,
+                    Flyer.valid_from == valid_from,
+                    Flyer.valid_to == valid_to,
+                )
             )
             existing = (await session.execute(stmt_existing)).scalar_one_or_none()
             if existing:
                 logger.info(
-                    "PromoQui flyer already exists for '%s' (id=%s), skipping.",
+                    "PromoQui flyer already exists for '%s' (%s to %s, id=%s), skipping.",
                     self.chain_slug,
+                    valid_from,
+                    valid_to,
                     existing.id,
                 )
                 return
 
             flyer = Flyer(
                 chain_id=chain.id,
+                store_id=store_id,
                 title=flyer_data["title"],
-                valid_from=flyer_data.get("valid_from") or date.today(),
-                valid_to=flyer_data.get("valid_to") or date.today(),
-                source_url=source_url,
+                valid_from=valid_from,
+                valid_to=valid_to,
+                source_url=flyer_data["source_url"],
                 pages_count=1,
                 status="processing",
             )
@@ -368,23 +537,17 @@ class PromoQuiScraper(BaseScraper):
 
                     brand = (prod_data.get("brand") or "").strip() or None
 
-                    # Find or create product
-                    stmt = select(Product).where(Product.name == name)
-                    if brand:
-                        stmt = stmt.where(Product.brand == brand)
-                    result = await session.execute(stmt.limit(1))
-                    product = result.scalar_one_or_none()
-
-                    if product is None:
-                        product = Product(
-                            name=name,
-                            brand=brand,
-                            category=prod_data.get("category"),
-                            unit=prod_data.get("quantity"),
-                            image_url=prod_data.get("image_url"),
-                        )
-                        session.add(product)
-                        await session.flush()
+                    # Find or create product (fuzzy dedup via ProductMatcher)
+                    product = await self._find_or_create_product(
+                        {
+                            "name": name,
+                            "brand": brand,
+                            "category": prod_data.get("category"),
+                            "unit": prod_data.get("quantity"),
+                            "image_url": prod_data.get("image_url"),
+                        },
+                        session=session,
+                    )
 
                     discount_pct = self.normalize_discount_pct(prod_data.get("discount_pct"))
                     original_price = self.normalize_price(prod_data.get("original_price"))
@@ -393,6 +556,7 @@ class PromoQuiScraper(BaseScraper):
                         product_id=product.id,
                         flyer_id=flyer_id,
                         chain_id=chain_id,
+                        store_id=store_id,
                         original_price=original_price,
                         offer_price=offer_price,
                         discount_pct=discount_pct,
