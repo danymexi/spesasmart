@@ -1,16 +1,17 @@
 """Tiendeo.it aggregator scraper -- HTTP-only, no Playwright needed.
 
-Tiendeo is an international flyer aggregator that serves structured data via
-Next.js SSR.  Product information is embedded in ``<script type="application/ld+json">``
-tags using schema.org ``Product`` + ``Offer`` markup.
+Tiendeo is an international flyer aggregator built on Next.js SSR.
+Product data is embedded in the ``__NEXT_DATA__`` JSON blob:
+
+- Landing page (``/Volantini/{chain}``):
+    ``apiResources.flyersByRetailer`` — list of active catalog objects.
+- Catalog page (``/Cataloghi/{id}``):
+    ``apiResources.flyerGibsData.flyerGibs`` — all products with price,
+    brand, image, and category ID.
+
+No Playwright needed — plain httpx + BeautifulSoup.
 
 Supported chains: esselunga, lidl, coop, iperal.
-
-Workflow per chain:
-    1. GET ``/Volantini/{chain}`` to discover active catalog IDs.
-    2. For each catalog, GET ``/Cataloghi/{id}`` and parse ``ld+json`` Product tags.
-    3. Split brand from product name (``"Brand - Product"`` pattern).
-    4. Persist via ``ProductMatcher`` for fuzzy dedup.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ TIENDEO_CHAINS: dict[str, str] = {
     "iperal": "iperal",
 }
 
-# Headers that mimic an Italian browser + Monza geolocation cookie
+# Headers that mimic an Italian browser
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -141,7 +142,11 @@ class TiendeoScraper(BaseScraper):
     async def _discover_catalogs(
         self, client, tiendeo_slug: str
     ) -> list[dict[str, Any]]:
-        """Fetch the chain's landing page and extract catalog IDs + metadata."""
+        """Fetch the chain's landing page and extract catalog IDs + metadata.
+
+        Primary source: ``apiResources.flyersByRetailer`` in ``__NEXT_DATA__``.
+        Fallback: ``apiResources.mainFlyer``.
+        """
         url = f"{self.base_url}/Volantini/{tiendeo_slug}"
         logger.info("Fetching Tiendeo landing page: %s", url)
 
@@ -152,57 +157,43 @@ class TiendeoScraper(BaseScraper):
         catalogs: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
 
-        # Source 1: __NEXT_DATA__ → retailerHeroFlyer
         next_data = self._parse_next_data(soup)
-        if next_data:
-            page_props = next_data.get("props", {}).get("pageProps", {})
-            hero = page_props.get("retailerHeroFlyer")
-            if hero and hero.get("id"):
-                cat = self._catalog_from_hero(hero)
+        if not next_data:
+            logger.warning("No __NEXT_DATA__ found on Tiendeo landing page.")
+            return []
+
+        api_res = (
+            next_data.get("props", {})
+            .get("pageProps", {})
+            .get("apiResources", {})
+        )
+
+        # Primary: flyersByRetailer — list of all active catalogs for this chain
+        for flyer_obj in api_res.get("flyersByRetailer", []):
+            cat = self._catalog_from_flyer_obj(flyer_obj)
+            if cat and cat["id"] not in seen_ids:
+                seen_ids.add(cat["id"])
+                catalogs.append(cat)
+
+        # Fallback: mainFlyer (single highlighted catalog)
+        if not catalogs:
+            main = api_res.get("mainFlyer")
+            if main:
+                cat = self._catalog_from_flyer_obj(main)
                 if cat and cat["id"] not in seen_ids:
                     seen_ids.add(cat["id"])
                     catalogs.append(cat)
 
-        # Source 2: ld+json SaleEvent entries (list all catalogs)
-        for script_tag in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json.loads(script_tag.string or "")
-            except (json.JSONDecodeError, TypeError):
-                continue
-
-            if isinstance(data, dict) and data.get("@type") == "OfferCatalog":
-                for item in data.get("itemListElement", []):
-                    cat = self._catalog_from_sale_event(item)
-                    if cat and cat["id"] not in seen_ids:
-                        seen_ids.add(cat["id"])
-                        catalogs.append(cat)
-
-        # Source 3: scan all href="/Cataloghi/{id}" links as fallback
-        if not catalogs:
-            for a_tag in soup.find_all("a", href=re.compile(r"/Cataloghi/\d+")):
-                href = a_tag.get("href", "")
-                match = re.search(r"/Cataloghi/(\d+)", href)
-                if match:
-                    cat_id = match.group(1)
-                    if cat_id not in seen_ids:
-                        seen_ids.add(cat_id)
-                        catalogs.append({
-                            "id": cat_id,
-                            "title": (a_tag.get_text(strip=True) or f"Catalogo {cat_id}")[:200],
-                            "valid_from": None,
-                            "valid_to": None,
-                        })
-
         return catalogs
 
     # ------------------------------------------------------------------
-    # Catalog processing: fetch page and extract products
+    # Catalog processing: fetch page and extract products from flyerGibs
     # ------------------------------------------------------------------
 
     async def _process_catalog(
         self, client, catalog: dict[str, Any]
     ) -> dict[str, Any] | None:
-        """Fetch a single catalog page and extract all products from ld+json."""
+        """Fetch a catalog page and extract products from flyerGibsData."""
         cat_id = catalog["id"]
         url = f"{self.base_url}/Cataloghi/{cat_id}"
         logger.info("Fetching Tiendeo catalog %s: %s", cat_id, url)
@@ -212,8 +203,8 @@ class TiendeoScraper(BaseScraper):
 
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Extract products from ld+json Product schema tags
-        products = self._extract_products_from_ldjson(soup)
+        # Extract products from __NEXT_DATA__ → apiResources.flyerGibsData
+        products = self._extract_products_from_gibs(soup)
 
         if not products:
             logger.info("No products found in catalog %s.", cat_id)
@@ -245,43 +236,66 @@ class TiendeoScraper(BaseScraper):
         return flyer_data
 
     # ------------------------------------------------------------------
-    # Product extraction from ld+json
+    # Product extraction from __NEXT_DATA__ flyerGibs
     # ------------------------------------------------------------------
 
-    def _extract_products_from_ldjson(
+    def _extract_products_from_gibs(
         self, soup: BeautifulSoup
     ) -> list[dict[str, Any]]:
-        """Parse all ``<script type="application/ld+json">`` Product entries."""
+        """Parse products from ``apiResources.flyerGibsData.flyerGibs``."""
+        next_data = self._parse_next_data(soup)
+        if not next_data:
+            return []
+
+        api_res = (
+            next_data.get("props", {})
+            .get("pageProps", {})
+            .get("apiResources", {})
+        )
+        gibs_data = api_res.get("flyerGibsData", {})
+        gibs = gibs_data.get("flyerGibs", [])
+
+        if not gibs:
+            return []
+
         products: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        for script_tag in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json.loads(script_tag.string or "")
-            except (json.JSONDecodeError, TypeError):
-                continue
-
-            if not isinstance(data, dict):
-                continue
-            if data.get("@type") != "Product":
-                continue
-
-            raw_name = (data.get("name") or "").strip()
+        for gib in gibs:
+            raw_name = (gib.get("title") or "").strip()
             if not raw_name or len(raw_name) < 2:
                 continue
 
-            # Extract price from offers
-            offers = data.get("offers", {})
-            raw_price = offers.get("price")
-            if raw_price is None:
-                continue
+            settings = gib.get("settings") or {}
 
-            price = self.normalize_price(str(raw_price))
+            # Extract price
+            price_ext = settings.get("price_extended") or {}
+            raw_price = price_ext.get("digits") or ""
+            if not raw_price:
+                # Fallback: parse from settings.price ("€ 1.47")
+                raw_price = (settings.get("price") or "").strip()
+
+            price = self.normalize_price(raw_price)
             if price is None:
                 continue
 
-            # Split brand from name: "Barilla - Penne Rigate 500g"
-            brand, product_name = self._matcher.extract_brand_from_name(raw_name)
+            # Extract original price (before discount)
+            original_price = None
+            starting = settings.get("starting_price") or {}
+            starting_digits = (starting.get("digits") or "").strip()
+            if starting_digits:
+                original_price = self.normalize_price(starting_digits)
+
+            # Extract discount percentage from sale field ("−30%", etc.)
+            discount_pct_str = (settings.get("sale") or "").strip() or None
+
+            # Brand — either from settings.brand or split from name
+            brand_from_settings = (settings.get("brand") or "").strip() or None
+            brand_from_name, product_name = self._matcher.extract_brand_from_name(raw_name)
+            brand = brand_from_settings or brand_from_name
+
+            # Image URL
+            image_url = (settings.get("image_url") or "").strip() or None
 
             # Dedup within this catalog
             dedup_key = f"{product_name.lower()}|{price}"
@@ -289,17 +303,14 @@ class TiendeoScraper(BaseScraper):
                 continue
             seen.add(dedup_key)
 
-            image_url = data.get("image")
-            valid_to_str = offers.get("priceValidUntil")
-
             products.append({
                 "name": product_name,
                 "brand": brand,
                 "category": None,
-                "original_price": None,
+                "original_price": str(original_price) if original_price else None,
                 "offer_price": str(price),
-                "discount_pct": None,
-                "discount_type": None,
+                "discount_pct": discount_pct_str,
+                "discount_type": "percentage" if discount_pct_str else None,
                 "quantity": None,
                 "price_per_unit": None,
                 "raw_text": raw_name,
@@ -449,37 +460,21 @@ class TiendeoScraper(BaseScraper):
             return None
 
     @staticmethod
-    def _catalog_from_hero(hero: dict) -> dict[str, Any] | None:
-        """Build a catalog dict from a ``retailerHeroFlyer`` object."""
-        cat_id = str(hero.get("id", ""))
+    def _catalog_from_flyer_obj(flyer_obj: dict) -> dict[str, Any] | None:
+        """Build a catalog dict from a Tiendeo flyer object.
+
+        Works for both ``flyersByRetailer`` entries and ``mainFlyer``.
+        """
+        cat_id = str(flyer_obj.get("id", ""))
         if not cat_id:
             return None
 
-        valid_from = _parse_iso_date(hero.get("start_date"))
-        valid_to = _parse_iso_date(hero.get("end_date"))
+        valid_from = _parse_iso_date(flyer_obj.get("start_date"))
+        valid_to = _parse_iso_date(flyer_obj.get("end_date"))
 
         return {
             "id": cat_id,
-            "title": hero.get("title", f"Catalogo {cat_id}"),
-            "valid_from": valid_from,
-            "valid_to": valid_to,
-        }
-
-    @staticmethod
-    def _catalog_from_sale_event(item: dict) -> dict[str, Any] | None:
-        """Build a catalog dict from a schema.org SaleEvent entry."""
-        url = item.get("url", "")
-        match = re.search(r"/Cataloghi/(\d+)", url)
-        if not match:
-            return None
-
-        cat_id = match.group(1)
-        valid_from = _parse_iso_date(item.get("startDate"))
-        valid_to = _parse_iso_date(item.get("endDate"))
-
-        return {
-            "id": cat_id,
-            "title": (item.get("name") or f"Catalogo {cat_id}")[:200],
+            "title": (flyer_obj.get("title") or f"Catalogo {cat_id}")[:200],
             "valid_from": valid_from,
             "valid_to": valid_to,
         }
