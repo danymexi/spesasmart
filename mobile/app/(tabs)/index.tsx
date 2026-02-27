@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Card, Chip, Text, useTheme } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
@@ -6,8 +6,11 @@ import { router } from "expo-router";
 import { getActiveOffers, getBestOffers } from "../../services/api";
 import OfferCard from "../../components/OfferCard";
 
+const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
+
 export default function HomeScreen() {
   const theme = useTheme();
+  const [selectedChain, setSelectedChain] = useState<string | null>(null);
 
   const {
     data: bestOffers,
@@ -34,6 +37,22 @@ export default function HomeScreen() {
 
   const isLoading = loadingBest || loadingActive;
 
+  const filteredBest = useMemo(() => {
+    if (!bestOffers) return [];
+    if (!selectedChain) return bestOffers;
+    return bestOffers.filter(
+      (o) => o.chain_name?.toLowerCase() === selectedChain.toLowerCase()
+    );
+  }, [bestOffers, selectedChain]);
+
+  const filteredActive = useMemo(() => {
+    if (!activeOffers) return [];
+    if (!selectedChain) return activeOffers;
+    return activeOffers.filter(
+      (o) => o.chain_name?.toLowerCase() === selectedChain.toLowerCase()
+    );
+  }, [activeOffers, selectedChain]);
+
   return (
     <ScrollView
       style={styles.container}
@@ -51,11 +70,14 @@ export default function HomeScreen() {
 
       {/* Chain filters */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-        {["Esselunga", "Lidl", "Coop", "Iperal"].map((chain) => (
+        {CHAINS.map((chain) => (
           <Chip
             key={chain}
             style={styles.chip}
-            onPress={() => router.push({ pathname: "/search", params: { chain: chain.toLowerCase() } })}
+            selected={selectedChain === chain}
+            onPress={() =>
+              setSelectedChain(selectedChain === chain ? null : chain)
+            }
           >
             {chain}
           </Chip>
@@ -66,11 +88,11 @@ export default function HomeScreen() {
       <Text variant="titleLarge" style={styles.sectionTitle}>
         Migliori Offerte
       </Text>
-      {bestOffers && bestOffers.length > 0 ? (
+      {filteredBest.length > 0 ? (
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={bestOffers}
+          data={filteredBest}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <View style={styles.horizontalCard}>
@@ -90,7 +112,7 @@ export default function HomeScreen() {
       <Text variant="titleLarge" style={styles.sectionTitle}>
         Offerte Attive
       </Text>
-      {activeOffers?.map((offer) => (
+      {filteredActive.map((offer) => (
         <OfferCard key={offer.id} offer={offer} />
       ))}
 
