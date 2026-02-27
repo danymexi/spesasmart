@@ -123,13 +123,22 @@ INSERT INTO chains (name, slug, website_url) VALUES
 ON CONFLICT (slug) DO NOTHING;
 
 -- Dati iniziali: Negozi Monza e Brianza
+-- I primi 4 sono i negozi TARGET principali per lo scraping
 INSERT INTO stores (chain_id, name, address, city, province, zip_code) VALUES
+    -- TARGET: Esselunga Macherio
+    ((SELECT id FROM chains WHERE slug = 'esselunga'), 'Esselunga Macherio', 'Via Milano 15', 'Macherio', 'MB', '20846'),
+    -- TARGET: Iperal Lesmo
+    ((SELECT id FROM chains WHERE slug = 'iperal'), 'Iperal Lesmo', 'Via Nazionale dei Giovi', 'Lesmo', 'MB', '20855'),
+    -- TARGET: Lidl Biassono
+    ((SELECT id FROM chains WHERE slug = 'lidl'), 'Lidl Biassono', 'Via Milano 40', 'Biassono', 'MB', '20853'),
+    -- TARGET: Coop Monza
+    ((SELECT id FROM chains WHERE slug = 'coop'), 'Coop Monza', 'Via Italia 30', 'Monza', 'MB', '20900'),
+    -- Altri negozi zona
     ((SELECT id FROM chains WHERE slug = 'esselunga'), 'Esselunga Monza', 'Viale Elvezia 4', 'Monza', 'MB', '20900'),
     ((SELECT id FROM chains WHERE slug = 'esselunga'), 'Esselunga Lissone', 'Via Matteotti 11', 'Lissone', 'MB', '20851'),
     ((SELECT id FROM chains WHERE slug = 'esselunga'), 'Esselunga Desio', 'Via Milano 166', 'Desio', 'MB', '20832'),
     ((SELECT id FROM chains WHERE slug = 'lidl'), 'Lidl Monza', 'Via Borgazzi 45', 'Monza', 'MB', '20900'),
     ((SELECT id FROM chains WHERE slug = 'lidl'), 'Lidl Lissone', 'Via Carducci 50', 'Lissone', 'MB', '20851'),
-    ((SELECT id FROM chains WHERE slug = 'coop'), 'Coop Monza', 'Via Italia 30', 'Monza', 'MB', '20900'),
     ((SELECT id FROM chains WHERE slug = 'coop'), 'Coop Seregno', 'Via Stefano da Seregno 44', 'Seregno', 'MB', '20831'),
     ((SELECT id FROM chains WHERE slug = 'iperal'), 'Iperal Seregno', 'Via Milano 5', 'Seregno', 'MB', '20831'),
     ((SELECT id FROM chains WHERE slug = 'iperal'), 'Iperal Meda', 'Via Indipendenza 20', 'Meda', 'MB', '20821');

@@ -4,8 +4,8 @@ import { Platform } from "react-native";
 // On web/simulator, localhost works. On a physical device, use the LAN IP.
 const API_HOST = Platform.select({
   web: "localhost",
-  ios: "192.168.1.19",
-  android: "192.168.1.19",
+  ios: "192.168.178.40",
+  android: "192.168.178.40",
   default: "localhost",
 });
 

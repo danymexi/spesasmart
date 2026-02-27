@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: spesasmart
+      POSTGRES_USER: spesasmart
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spesasmart_secret}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/init_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - spesasmart-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spesasmart -d spesasmart"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql+asyncpg://spesasmart:${POSTGRES_PASSWORD:-spesasmart_secret}@db:5432/spesasmart
+    ports:
+      - "8000:8000"
+    networks:
+      - spesasmart-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/v1/scraping/status')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  telegram-bot:
+    build:
+      context: ./telegram-bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    environment:
+      API_BASE_URL: http://backend:8000/api/v1
+    networks:
+      - spesasmart-net
+
+volumes:
+  pgdata:
+
+networks:
+  spesasmart-net:
+    driver: bridge
