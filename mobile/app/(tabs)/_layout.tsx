@@ -23,7 +23,7 @@ export default function TabLayout() {
         headerShadowVisible: false,
         tabBarStyle: glassTabBar as any,
         tabBarItemStyle: { paddingVertical: 4 },
-        sceneStyle: { backgroundColor: "transparent" },
+        sceneStyle: gradientBackground,
       }}
     >
       <Tabs.Screen
