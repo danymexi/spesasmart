@@ -55,7 +55,7 @@ export default function HomeScreen() {
           <Chip
             key={chain}
             style={styles.chip}
-            onPress={() => router.push(`/search?chain=${chain.toLowerCase()}`)}
+            onPress={() => router.push({ pathname: "/search", params: { chain: chain.toLowerCase() } })}
           >
             {chain}
           </Chip>
