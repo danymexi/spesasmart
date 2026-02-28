@@ -186,12 +186,14 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginTop: 12,
     padding: 0,
-    overflow: "hidden",
     ...glassCard,
   } as any,
   heroImageWrap: {
     padding: 16,
     alignItems: "center",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: "hidden",
   },
   heroImage: {
     width: "100%",

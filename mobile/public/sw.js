@@ -1,5 +1,5 @@
 /* eslint-disable no-restricted-globals */
-const CACHE_NAME = "spesasmart-v8";
+const CACHE_NAME = "spesasmart-v9";
 const PRECACHE_URLS = ["/", "/manifest.json"];
 
 // ── Install: precache shell ──────────────────────────────────────────────────
