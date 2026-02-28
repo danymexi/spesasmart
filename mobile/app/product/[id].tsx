@@ -3,7 +3,6 @@ import { Button, Text, useTheme, ActivityIndicator } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { getProduct, getProductHistory, getProductBestPrice, addToWatchlist } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import PriceChart from "../../components/PriceChart";
@@ -13,7 +12,6 @@ import {
   glassCard,
   glassColors,
   imagePlaceholder,
-  productImage,
 } from "../../styles/glassStyles";
 
 export default function ProductDetailScreen() {
@@ -58,51 +56,69 @@ export default function ProductDetailScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.wrapper} edges={["bottom"]}>
-    <ScrollView style={styles.container}>
-      {/* Product hero image */}
-      {product.image_url ? (
-        <View style={styles.heroContainer}>
-          <Image
-            source={{ uri: product.image_url }}
-            style={styles.heroImage}
-            resizeMode="contain"
-          />
-        </View>
-      ) : (
-        <View style={[styles.heroContainer, styles.heroPlaceholder]}>
-          <MaterialCommunityIcons name="food-variant" size={64} color="#ccc" />
-        </View>
-      )}
-
-      {/* Product header */}
-      <View style={styles.headerCard}>
-        <Text variant="headlineSmall" style={styles.productName}>
-          {product.name}
-        </Text>
-        {product.brand && (
-          <Text variant="titleMedium" style={styles.brand}>
-            {product.brand}
-          </Text>
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      {/* Hero card: image + info + watchlist button */}
+      <View style={styles.heroCard}>
+        {product.image_url ? (
+          <View style={styles.heroImageWrap}>
+            <Image
+              source={{ uri: product.image_url }}
+              style={styles.heroImage}
+              resizeMode="contain"
+            />
+          </View>
+        ) : (
+          <View style={[styles.heroImageWrap, styles.heroPlaceholder]}>
+            <MaterialCommunityIcons name="food-variant" size={64} color="#ccc" />
+          </View>
         )}
-        <View style={styles.metaRow}>
-          {product.category && (
-            <Text variant="bodySmall" style={styles.category}>
-              {product.category}
+
+        <View style={styles.heroInfoSection}>
+          <View style={styles.nameRow}>
+            <Text variant="headlineSmall" style={styles.productName}>
+              {product.name}
+            </Text>
+            <PriceIndicator productId={id!} />
+          </View>
+          {product.brand && (
+            <Text variant="titleMedium" style={styles.brandText}>
+              {product.brand}
             </Text>
           )}
-          {product.unit && (
-            <Text variant="bodySmall" style={styles.unit}>
-              Unita: {product.unit}
-            </Text>
+          <View style={styles.metaRow}>
+            {product.category && (
+              <Text variant="bodySmall" style={styles.metaText}>
+                {product.category}
+              </Text>
+            )}
+            {product.unit && (
+              <Text variant="bodySmall" style={styles.metaText}>
+                Unita: {product.unit}
+              </Text>
+            )}
+          </View>
+
+          {isLoggedIn && (
+            <>
+              <View style={styles.divider} />
+              <Button
+                mode="contained"
+                icon="star-plus-outline"
+                onPress={() => addMutation.mutate()}
+                loading={addMutation.isPending}
+                style={styles.watchlistBtn}
+              >
+                Aggiungi alla Lista
+              </Button>
+            </>
           )}
         </View>
       </View>
 
       {/* Best price card */}
       {bestPrice && (
-        <View style={styles.priceCard}>
-          <Text variant="titleMedium" style={styles.sectionLabel}>
+        <View style={styles.sectionCard}>
+          <Text variant="titleMedium" style={styles.sectionHeader}>
             Miglior Prezzo Attuale
           </Text>
           <View style={styles.bestPriceRow}>
@@ -131,64 +147,52 @@ export default function ProductDetailScreen() {
                 </Text>
               )}
             </View>
-            <PriceIndicator productId={id!} />
           </View>
         </View>
       )}
 
-      {/* Price comparison across chains */}
-      <Text variant="titleMedium" style={styles.sectionTitle}>
-        Confronto Prezzi
-      </Text>
-      <ProductComparison productId={id!} />
-
-      {/* Price history chart */}
-      <Text variant="titleMedium" style={styles.sectionTitle}>
-        Storico Prezzi
-      </Text>
-      {history && history.history.length > 0 ? (
-        <PriceChart data={history.history} />
-      ) : (
-        <Text variant="bodyMedium" style={styles.noDataText}>
-          Storico non disponibile
+      {/* Price comparison */}
+      <View style={styles.sectionCard}>
+        <Text variant="titleMedium" style={styles.sectionHeader}>
+          Confronto Prezzi
         </Text>
-      )}
-
-      <View style={{ height: isLoggedIn ? 80 : 16 }} />
-    </ScrollView>
-
-    {/* Sticky bottom button */}
-    {isLoggedIn && (
-      <View style={styles.bottomBar}>
-        <Button
-          mode="contained"
-          icon="star-plus-outline"
-          onPress={() => addMutation.mutate()}
-          loading={addMutation.isPending}
-          style={styles.watchlistButton}
-        >
-          Aggiungi alla Lista
-        </Button>
+        <ProductComparison productId={id!} />
       </View>
-    )}
-    </SafeAreaView>
+
+      {/* Price history */}
+      <View style={styles.sectionCard}>
+        <Text variant="titleMedium" style={styles.sectionHeader}>
+          Storico Prezzi
+        </Text>
+        {history && history.history.length > 0 ? (
+          <PriceChart data={history.history} />
+        ) : (
+          <Text variant="bodyMedium" style={styles.noDataText}>
+            Storico non disponibile
+          </Text>
+        )}
+      </View>
+
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: { flex: 1 },
   container: { flex: 1, backgroundColor: "transparent" },
+  contentContainer: { paddingBottom: 150 },
   loader: { marginTop: 60 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-  heroContainer: {
+  heroCard: {
     marginHorizontal: 12,
     marginTop: 12,
-    borderRadius: 16,
+    padding: 0,
     overflow: "hidden",
-    alignItems: "center",
     ...glassCard,
-    padding: 16,
   } as any,
+  heroImageWrap: {
+    padding: 16,
+    alignItems: "center",
+  },
   heroImage: {
     width: "100%",
     height: 200,
@@ -199,35 +203,48 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     ...imagePlaceholder,
   },
-  headerCard: {
-    margin: 12,
+  heroInfoSection: {
     padding: 16,
-    ...glassCard,
-  } as any,
-  productName: { fontWeight: "bold" },
-  brand: { color: "#555", marginTop: 4 },
+  },
+  nameRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  productName: { fontWeight: "bold", flex: 1, marginRight: 8 },
+  brandText: {
+    color: glassColors.greenMedium,
+    fontWeight: "600",
+    marginTop: 2,
+  },
   metaRow: { flexDirection: "row", gap: 16, marginTop: 8 },
-  category: { color: "#888" },
-  unit: { color: "#888" },
-  priceCard: {
+  metaText: { color: "#888" },
+  divider: {
+    height: 1,
+    backgroundColor: glassColors.subtleBorder,
+    marginVertical: 12,
+  },
+  watchlistBtn: {
+    marginTop: 4,
+  },
+  sectionCard: {
     marginHorizontal: 12,
-    marginBottom: 8,
+    marginTop: 12,
     padding: 16,
     ...glassCard,
   } as any,
-  sectionLabel: { marginBottom: 8, color: "#555" },
-  bestPriceRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  originalPrice: { textDecorationLine: "line-through", color: "#999", marginTop: 4 },
+  sectionHeader: { marginBottom: 8, fontWeight: "600", color: "#555" },
+  bestPriceRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  originalPrice: {
+    textDecorationLine: "line-through",
+    color: "#999",
+    marginTop: 4,
+  },
   discount: { color: "#E65100", fontWeight: "bold", marginTop: 2 },
   validUntil: { color: "#888", marginTop: 4 },
-  sectionTitle: { paddingHorizontal: 16, paddingVertical: 8, fontWeight: "600" },
-  noDataText: { paddingHorizontal: 16, color: "#888" },
-  bottomBar: {
-    backgroundColor: "rgba(255,255,255,0.95)",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#ddd",
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-  },
-  watchlistButton: {},
+  noDataText: { color: "#888" },
 });

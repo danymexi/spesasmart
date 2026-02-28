@@ -14,7 +14,9 @@ COPY mobile/ ./
 RUN npx expo export --platform web
 
 # Inject PWA tags into generated index.html (Expo doesn't include manifest link)
-RUN sed -i 's|</head>|<link rel="manifest" href="/manifest.json" />\n<link rel="apple-touch-icon" sizes="192x192" href="/pwa-icons/icon-192.png" />\n<meta name="apple-mobile-web-app-capable" content="yes" />\n<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />\n<meta name="apple-mobile-web-app-title" content="SpesaSmart" />\n</head>|' /web/dist/index.html
+RUN sed -i 's|</head>|<link rel="manifest" href="/manifest.json" />\n<link rel="apple-touch-icon" sizes="192x192" href="/pwa-icons/icon-192.png" />\n<meta name="apple-mobile-web-app-capable" content="yes" />\n<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />\n<meta name="apple-mobile-web-app-title" content="SpesaSmart" />\n</head>|' /web/dist/index.html \
+    && sed -i 's|width=device-width, initial-scale=1, shrink-to-fit=no|width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover|' /web/dist/index.html \
+    && sed -i 's|</style>|html, body { height: 100dvh !important; } #root { height: 100dvh !important; padding-bottom: env(safe-area-inset-bottom, 0px) !important; box-sizing: border-box !important; }\n</style>|' /web/dist/index.html
 
 # ── Stage 2: Python backend + static dist ─────────────────────────────────────
 FROM python:3.12-slim
