@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { FlatList, Image, StyleSheet, TouchableOpacity, View } from "react-native";
-import { Searchbar, Chip, Text, useTheme, ActivityIndicator, IconButton } from "react-native-paper";
+import { Searchbar, Chip, Text, useTheme, ActivityIndicator, IconButton, Snackbar } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -30,6 +30,10 @@ export default function CatalogScreen() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [snackbar, setSnackbar] = useState<{ visible: boolean; message: string }>({
+    visible: false,
+    message: "",
+  });
 
   // Fetch categories dynamically
   const { data: categories } = useQuery({
@@ -73,18 +77,28 @@ export default function CatalogScreen() {
   // Add to watchlist mutation
   const addMutation = useMutation({
     mutationFn: (productId: string) => addToWatchlist(productId),
-    onSuccess: () => {
+    onSuccess: (_data, productId) => {
       queryClient.invalidateQueries({ queryKey: ["watchlistIds"] });
       queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+      const product = products.find((p) => p.id === productId);
+      setSnackbar({
+        visible: true,
+        message: `"${product?.name ?? "Prodotto"}" aggiunto alla lista`,
+      });
     },
   });
 
   // Remove from watchlist mutation
   const removeMutation = useMutation({
     mutationFn: (productId: string) => removeFromWatchlist(productId),
-    onSuccess: () => {
+    onSuccess: (_data, productId) => {
       queryClient.invalidateQueries({ queryKey: ["watchlistIds"] });
       queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+      const product = products.find((p) => p.id === productId);
+      setSnackbar({
+        visible: true,
+        message: `"${product?.name ?? "Prodotto"}" rimosso dalla lista`,
+      });
     },
   });
 
@@ -247,6 +261,15 @@ export default function CatalogScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      <Snackbar
+        visible={snackbar.visible}
+        onDismiss={() => setSnackbar((s) => ({ ...s, visible: false }))}
+        duration={2000}
+        style={styles.snackbar}
+      >
+        {snackbar.message}
+      </Snackbar>
     </View>
   );
 }
@@ -296,4 +319,5 @@ const styles = StyleSheet.create({
   watchlistBtn: { margin: 0 },
   emptyText: { textAlign: "center", marginTop: 40, color: "#888", paddingHorizontal: 20 },
   listContent: { paddingBottom: 96 },
+  snackbar: { marginBottom: 80 },
 });
