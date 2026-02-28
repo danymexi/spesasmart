@@ -218,6 +218,24 @@ export default function SettingsScreen() {
             left={(props) => <List.Icon {...props} icon="cart" />}
           />
         </List.Section>
+        {Platform.OS === "web" && (
+          <Button
+            mode="outlined"
+            icon="refresh"
+            onPress={async () => {
+              if ("serviceWorker" in navigator) {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                for (const reg of regs) await reg.unregister();
+              }
+              const keys = await caches.keys();
+              for (const key of keys) await caches.delete(key);
+              window.location.reload();
+            }}
+            style={styles.reloadButton}
+          >
+            Ricarica App
+          </Button>
+        )}
       </View>
 
       <View style={styles.bottomPadding} />
@@ -241,5 +259,6 @@ const styles = StyleSheet.create({
   authButton: { flex: 1 },
   loggedInSection: { paddingBottom: 8 },
   logoutButton: { marginHorizontal: 16, marginBottom: 8 },
+  reloadButton: { marginHorizontal: 16, marginBottom: 12 },
   bottomPadding: { height: 96 },
 });
