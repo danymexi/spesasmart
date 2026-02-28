@@ -9,7 +9,7 @@ import { glassCard, glassColors, alertBadgeGlass } from "../../styles/glassStyle
 
 export default function WatchlistScreen() {
   const theme = useTheme();
-  const userId = useAppStore((s) => s.userId);
+  const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const queryClient = useQueryClient();
 
   const {
@@ -17,25 +17,25 @@ export default function WatchlistScreen() {
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ["watchlist", userId],
-    queryFn: () => getWatchlist(userId!),
-    enabled: !!userId,
+    queryKey: ["watchlist"],
+    queryFn: () => getWatchlist(),
+    enabled: isLoggedIn,
   });
 
   const removeMutation = useMutation({
     mutationFn: ({ productId }: { productId: string }) =>
-      removeFromWatchlist(userId!, productId),
+      removeFromWatchlist(productId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watchlist"] }),
   });
 
-  if (!userId) {
+  if (!isLoggedIn) {
     return (
       <View style={styles.centered}>
         <Text variant="titleMedium" style={styles.emptyTitle}>
-          Crea un profilo
+          Accedi per usare la lista
         </Text>
         <Text variant="bodyMedium" style={styles.emptyText}>
-          Per salvare prodotti nella tua lista, crea prima un profilo nelle Impostazioni.
+          Per salvare prodotti nella tua lista, accedi o registrati nelle Impostazioni.
         </Text>
         <Button mode="contained" onPress={() => router.push("/(tabs)/settings")}>
           Vai alle Impostazioni

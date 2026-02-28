@@ -10,34 +10,66 @@ function showAlert(title: string, message: string) {
   }
 }
 import { useAppStore } from "../../stores/useAppStore";
-import { createUser } from "../../services/api";
+import { registerUser, loginUser } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors } from "../../styles/glassStyles";
 
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { userId, setUserId } = useAppStore();
-  const [telegramId, setTelegramId] = useState("");
+  const { isLoggedIn, userEmail, setAuth, logout } = useAppStore();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [creating, setCreating] = useState(false);
 
-  const handleCreateProfile = async () => {
-    setCreating(true);
+  const handleRegister = async () => {
+    setError(null);
+    setLoading(true);
     try {
-      const user = await createUser({
-        telegram_chat_id: telegramId ? parseInt(telegramId, 10) : undefined,
-      });
-      setUserId(user.id);
-      showAlert("Profilo creato", "Il tuo profilo è stato creato con successo.");
-    } catch {
-      showAlert("Errore", "Impossibile creare il profilo. Riprova.");
+      const res = await registerUser(email, password);
+      setAuth(res.access_token, res.user.id, res.user.email!);
+      setEmail("");
+      setPassword("");
+      showAlert("Registrazione completata", "Il tuo account è stato creato.");
+    } catch (err: any) {
+      if (err.response?.status === 409) {
+        setError("Email già registrata. Prova ad accedere.");
+      } else if (err.response?.status === 400) {
+        setError(err.response.data?.detail || "Dati non validi.");
+      } else {
+        setError("Errore di rete. Riprova.");
+      }
     }
-    setCreating(false);
+    setLoading(false);
+  };
+
+  const handleLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await loginUser(email, password);
+      setAuth(res.access_token, res.user.id, res.user.email!);
+      setEmail("");
+      setPassword("");
+    } catch (err: any) {
+      if (err.response?.status === 401) {
+        setError("Email o password errati.");
+      } else {
+        setError("Errore di rete. Riprova.");
+      }
+    }
+    setLoading(false);
+  };
+
+  const handleLogout = () => {
+    logout();
+    showAlert("Disconnesso", "Hai effettuato il logout.");
   };
 
   const handleEnablePush = async () => {
-    if (!userId) return;
-    const token = await registerForPushNotifications(userId);
+    if (!isLoggedIn) return;
+    const token = await registerForPushNotifications(useAppStore.getState().userId);
     if (token) {
       setPushEnabled(true);
       showAlert("Notifiche attivate", "Riceverai notifiche per le offerte.");
@@ -52,33 +84,69 @@ export default function SettingsScreen() {
       <View style={styles.section}>
         <List.Section>
           <List.Subheader>Profilo</List.Subheader>
-          {userId ? (
-            <List.Item
-              title="ID Utente"
-              description={userId}
-              left={(props) => <List.Icon {...props} icon="account" />}
-            />
+          {isLoggedIn ? (
+            <View style={styles.loggedInSection}>
+              <List.Item
+                title="Email"
+                description={userEmail}
+                left={(props) => <List.Icon {...props} icon="account" />}
+              />
+              <Button
+                mode="outlined"
+                onPress={handleLogout}
+                style={styles.logoutButton}
+                icon="logout"
+              >
+                Esci
+              </Button>
+            </View>
           ) : (
             <View style={styles.createSection}>
               <Text variant="bodyMedium" style={styles.createText}>
-                Crea un profilo per salvare la tua lista e ricevere notifiche.
+                Accedi o registrati per salvare la tua lista e ricevere notifiche.
               </Text>
+              {error && (
+                <Text variant="bodySmall" style={styles.errorText}>
+                  {error}
+                </Text>
+              )}
               <TextInput
-                label="Telegram Chat ID (opzionale)"
-                value={telegramId}
-                onChangeText={setTelegramId}
-                keyboardType="numeric"
+                label="Email"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
                 mode="outlined"
                 style={styles.input}
               />
-              <Button
-                mode="contained"
-                onPress={handleCreateProfile}
-                loading={creating}
-                style={styles.createButton}
-              >
-                Crea Profilo
-              </Button>
+              <TextInput
+                label="Password"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                mode="outlined"
+                style={styles.input}
+              />
+              <View style={styles.buttonRow}>
+                <Button
+                  mode="contained"
+                  onPress={handleLogin}
+                  loading={loading}
+                  disabled={!email || !password || loading}
+                  style={styles.authButton}
+                >
+                  Accedi
+                </Button>
+                <Button
+                  mode="outlined"
+                  onPress={handleRegister}
+                  loading={loading}
+                  disabled={!email || !password || loading}
+                  style={styles.authButton}
+                >
+                  Registrati
+                </Button>
+              </View>
             </View>
           )}
         </List.Section>
@@ -96,7 +164,7 @@ export default function SettingsScreen() {
               <Switch
                 value={pushEnabled}
                 onValueChange={handleEnablePush}
-                disabled={!userId}
+                disabled={!isLoggedIn}
               />
             )}
           />
@@ -167,7 +235,11 @@ const styles = StyleSheet.create({
   } as any,
   createSection: { paddingHorizontal: 16, paddingBottom: 16 },
   createText: { color: "#666", marginBottom: 12 },
+  errorText: { color: "#D32F2F", marginBottom: 8 },
   input: { marginBottom: 12 },
-  createButton: { alignSelf: "flex-start" },
+  buttonRow: { flexDirection: "row", gap: 12 },
+  authButton: { flex: 1 },
+  loggedInSection: { paddingBottom: 8 },
+  logoutButton: { marginHorizontal: 16, marginBottom: 8 },
   bottomPadding: { height: 96 },
 });

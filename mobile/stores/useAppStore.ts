@@ -17,8 +17,13 @@ interface PreferredStore {
 }
 
 interface AppState {
-  // User
+  // Auth
+  accessToken: string | null;
+  userEmail: string | null;
+  isLoggedIn: boolean;
   userId: string;
+
+  // User
   pushToken: string | null;
   notificationsEnabled: boolean;
   telegramEnabled: boolean;
@@ -38,6 +43,8 @@ interface AppState {
   availableChains: Chain[];
 
   // Actions
+  setAuth: (token: string, userId: string, email: string) => void;
+  logout: () => void;
   setUserId: (id: string) => void;
   setPushToken: (token: string | null) => void;
   setNotificationsEnabled: (enabled: boolean) => void;
@@ -64,21 +71,25 @@ interface AppState {
 // ── Initial state ────────────────────────────────────────────────────────────
 
 const initialState = {
+  accessToken: null as string | null,
+  userEmail: null as string | null,
+  isLoggedIn: false,
   userId: "",
-  pushToken: null,
+
+  pushToken: null as string | null,
   notificationsEnabled: true,
   telegramEnabled: false,
 
-  selectedChains: [],
-  selectedCategory: null,
+  selectedChains: [] as number[],
+  selectedCategory: null as string | null,
   offersOnly: false,
 
-  watchlistItems: [],
+  watchlistItems: [] as WatchlistItem[],
   watchlistLoading: false,
 
-  preferredStores: [],
-  preferredCategories: [],
-  availableChains: [],
+  preferredStores: [] as PreferredStore[],
+  preferredCategories: [] as string[],
+  availableChains: [] as Chain[],
 };
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -87,6 +98,20 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       ...initialState,
+
+      // ── Auth actions ──────────────────────────────────────────────────
+
+      setAuth: (token: string, userId: string, email: string) =>
+        set({ accessToken: token, userId, userEmail: email, isLoggedIn: true }),
+
+      logout: () =>
+        set({
+          accessToken: null,
+          userEmail: null,
+          isLoggedIn: false,
+          userId: "",
+          watchlistItems: [],
+        }),
 
       // ── User actions ────────────────────────────────────────────────────
 
@@ -123,12 +148,11 @@ export const useAppStore = create<AppState>()(
       // ── Watchlist actions ───────────────────────────────────────────────
 
       refreshWatchlist: async () => {
-        const userId = get().userId;
-        if (!userId) return;
+        if (!get().isLoggedIn) return;
 
         set({ watchlistLoading: true });
         try {
-          const items = await getWatchlist(userId);
+          const items = await getWatchlist();
           set({ watchlistItems: items, watchlistLoading: false });
         } catch (error) {
           console.error("Errore nel caricamento della lista:", error);
@@ -184,6 +208,9 @@ export const useAppStore = create<AppState>()(
       name: "spesasmart-app-store",
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
+        accessToken: state.accessToken,
+        userEmail: state.userEmail,
+        isLoggedIn: state.isLoggedIn,
         userId: state.userId,
         pushToken: state.pushToken,
         notificationsEnabled: state.notificationsEnabled,

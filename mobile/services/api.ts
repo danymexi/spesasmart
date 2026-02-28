@@ -148,6 +148,7 @@ export interface WatchlistItem {
 
 export interface UserProfile {
   id: string;
+  email: string | null;
   telegram_chat_id: number | null;
   push_token: string | null;
   preferred_zone: string;
@@ -164,6 +165,11 @@ export interface UserDeal {
   valid_to: string | null;
 }
 
+export interface AuthResponse {
+  access_token: string;
+  user: UserProfile;
+}
+
 // ── API Client ───────────────────────────────────────────────────────────────
 
 const apiClient = axios.create({
@@ -172,10 +178,29 @@ const apiClient = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// Request interceptor: attach JWT token
+apiClient.interceptors.request.use((config) => {
+  // Dynamic import to avoid circular dependency
+  const { useAppStore } = require("../stores/useAppStore");
+  const token = useAppStore.getState().accessToken;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Response interceptor: auto-logout on 401
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response) {
+      if (error.response.status === 401) {
+        const { useAppStore } = require("../stores/useAppStore");
+        const state = useAppStore.getState();
+        if (state.isLoggedIn) {
+          state.logout();
+        }
+      }
       console.error(`API Error ${error.response.status}:`, error.response.data);
     } else if (error.request) {
       console.error("API Network Error:", error.message);
@@ -183,6 +208,23 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+export async function registerUser(email: string, password: string): Promise<AuthResponse> {
+  const res = await apiClient.post<AuthResponse>("/auth/register", { email, password });
+  return res.data;
+}
+
+export async function loginUser(email: string, password: string): Promise<AuthResponse> {
+  const res = await apiClient.post<AuthResponse>("/auth/login", { email, password });
+  return res.data;
+}
+
+export async function getMe(): Promise<UserProfile> {
+  const res = await apiClient.get<UserProfile>("/auth/me");
+  return res.data;
+}
 
 // ── Chains ───────────────────────────────────────────────────────────────────
 
@@ -267,35 +309,18 @@ export async function getBestOffers(limit: number = 20, category?: string): Prom
   return res.data;
 }
 
-// ── Users ────────────────────────────────────────────────────────────────────
+// ── Watchlist (JWT-protected, /me routes) ────────────────────────────────────
 
-export async function createUser(data: {
-  telegram_chat_id?: number;
-  push_token?: string;
-  preferred_zone?: string;
-}): Promise<UserProfile> {
-  const res = await apiClient.post<UserProfile>("/users", data);
-  return res.data;
-}
-
-export async function getUser(userId: string): Promise<UserProfile> {
-  const res = await apiClient.get<UserProfile>(`/users/${userId}`);
-  return res.data;
-}
-
-// ── Watchlist ────────────────────────────────────────────────────────────────
-
-export async function getWatchlist(userId: string): Promise<WatchlistItem[]> {
-  const res = await apiClient.get<WatchlistItem[]>(`/users/${userId}/watchlist`);
+export async function getWatchlist(): Promise<WatchlistItem[]> {
+  const res = await apiClient.get<WatchlistItem[]>("/users/me/watchlist");
   return res.data;
 }
 
 export async function addToWatchlist(
-  userId: string,
   productId: string,
   targetPrice?: number
 ): Promise<WatchlistItem> {
-  const res = await apiClient.post<WatchlistItem>(`/users/${userId}/watchlist`, {
+  const res = await apiClient.post<WatchlistItem>("/users/me/watchlist", {
     product_id: productId,
     target_price: targetPrice,
     notify_any_offer: true,
@@ -303,33 +328,30 @@ export async function addToWatchlist(
   return res.data;
 }
 
-export async function removeFromWatchlist(userId: string, productId: string): Promise<void> {
-  await apiClient.delete(`/users/${userId}/watchlist/${productId}`);
+export async function removeFromWatchlist(productId: string): Promise<void> {
+  await apiClient.delete(`/users/me/watchlist/${productId}`);
 }
 
 // ── User Stores ──────────────────────────────────────────────────────────────
 
-export async function addUserStore(userId: string, storeId: string): Promise<void> {
-  await apiClient.post(`/users/${userId}/stores`, { store_id: storeId });
+export async function addUserStore(storeId: string): Promise<void> {
+  await apiClient.post("/users/me/stores", { store_id: storeId });
 }
 
 // ── User Deals ───────────────────────────────────────────────────────────────
 
-export async function getUserDeals(userId: string): Promise<UserDeal[]> {
-  const res = await apiClient.get<UserDeal[]>(`/users/${userId}/deals`);
+export async function getUserDeals(): Promise<UserDeal[]> {
+  const res = await apiClient.get<UserDeal[]>("/users/me/deals");
   return res.data;
 }
 
 // ── Push Token ───────────────────────────────────────────────────────────────
 
 export async function registerPushToken(
-  userId: string,
   token: string,
   _platform: "ios" | "android"
 ): Promise<void> {
-  // Update user with push token
-  // This would need a PATCH endpoint in practice
-  console.log(`Registering push token for user ${userId}: ${token}`);
+  console.log(`Registering push token: ${token}`);
 }
 
 export default apiClient;

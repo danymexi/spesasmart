@@ -86,7 +86,7 @@ export async function registerForPushNotifications(
   try {
     const platform: "ios" | "android" =
       Platform.OS === "ios" ? "ios" : "android";
-    await registerPushToken(userId, token, platform);
+    await registerPushToken(token, platform);
   } catch (error) {
     console.error(
       "Errore nella registrazione del token push:",

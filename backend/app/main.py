@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import chains, flyers, offers, products, scraping, stores, users
+from app.api import auth, chains, flyers, offers, products, scraping, stores, users
 from app.api import web_push
 from app.config import get_settings
 
@@ -47,6 +47,7 @@ app.add_middleware(
 )
 
 # Register API routers
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(chains.router, prefix="/api/v1")
 app.include_router(stores.router, prefix="/api/v1")
 app.include_router(flyers.router, prefix="/api/v1")

@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     vapid_public_key: str = ""
     vapid_claims_email: str = "mailto:info@spesasmart.it"
 
+    # JWT Auth
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_hours: int = 720  # 30 days
+
     # Scheduler
     scheduler_enabled: bool = True
 

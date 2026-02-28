@@ -1,37 +1,39 @@
-"""API routes for user profiles, watchlist, and stores."""
+"""API routes for user profiles, watchlist, and stores (JWT-protected)."""
 
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.auth import get_current_user
 from app.database import get_db
-from app.models import Chain, Offer, Product, Store, UserProfile, UserStore, UserWatchlist
+from app.models import Offer, Product, UserProfile, UserStore, UserWatchlist
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
 # --- Schemas ---
 
-class UserCreateRequest(BaseModel):
-    telegram_chat_id: int | None = None
-    push_token: str | None = None
-    preferred_zone: str = "Monza e Brianza"
-
-
 class UserResponse(BaseModel):
     id: uuid.UUID
+    email: str | None
     telegram_chat_id: int | None
     push_token: str | None
     preferred_zone: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class UserUpdateRequest(BaseModel):
+    telegram_chat_id: int | None = None
+    push_token: str | None = None
+    preferred_zone: str | None = None
 
 
 class WatchlistAddRequest(BaseModel):
@@ -67,53 +69,14 @@ class UserDealResponse(BaseModel):
     valid_to: date | None
 
 
-# --- Endpoints ---
+# --- Endpoints (all /me routes, JWT-protected) ---
 
-@router.post("", response_model=UserResponse, status_code=201)
-async def create_user(
-    data: UserCreateRequest, db: AsyncSession = Depends(get_db)
-):
-    user = UserProfile(
-        telegram_chat_id=data.telegram_chat_id,
-        push_token=data.push_token,
-        preferred_zone=data.preferred_zone,
-    )
-    db.add(user)
-    await db.flush()
-    await db.refresh(user)
-    return user
-
-
-@router.get("/{user_id}", response_model=UserResponse)
-async def get_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(UserProfile).where(UserProfile.id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
-
-
-class UserUpdateRequest(BaseModel):
-    telegram_chat_id: int | None = None
-    push_token: str | None = None
-    preferred_zone: str | None = None
-
-
-@router.patch("/{user_id}", response_model=UserResponse)
-async def update_user(
-    user_id: uuid.UUID,
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
     data: UserUpdateRequest,
+    user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(UserProfile).where(UserProfile.id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     if data.telegram_chat_id is not None:
         user.telegram_chat_id = data.telegram_chat_id
     if data.push_token is not None:
@@ -128,19 +91,21 @@ async def update_user(
 
 # --- Watchlist ---
 
-@router.get("/{user_id}/watchlist", response_model=list[WatchlistItemResponse])
-async def get_watchlist(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+@router.get("/me/watchlist", response_model=list[WatchlistItemResponse])
+async def get_watchlist(
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(UserWatchlist)
         .options(joinedload(UserWatchlist.product))
-        .where(UserWatchlist.user_id == user_id)
+        .where(UserWatchlist.user_id == user.id)
     )
     items = result.unique().scalars().all()
 
     today = date.today()
     response = []
     for item in items:
-        # Find best current price
         offer_result = await db.execute(
             select(Offer)
             .options(joinedload(Offer.chain))
@@ -169,19 +134,12 @@ async def get_watchlist(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     return response
 
 
-@router.post("/{user_id}/watchlist", response_model=WatchlistItemResponse, status_code=201)
+@router.post("/me/watchlist", response_model=WatchlistItemResponse, status_code=201)
 async def add_to_watchlist(
-    user_id: uuid.UUID,
     data: WatchlistAddRequest,
+    user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Check user exists
-    user_result = await db.execute(
-        select(UserProfile).where(UserProfile.id == user_id)
-    )
-    if not user_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="User not found")
-
     # Check product exists
     prod_result = await db.execute(
         select(Product).where(Product.id == data.product_id)
@@ -193,7 +151,7 @@ async def add_to_watchlist(
     # Check duplicate
     existing = await db.execute(
         select(UserWatchlist).where(
-            UserWatchlist.user_id == user_id,
+            UserWatchlist.user_id == user.id,
             UserWatchlist.product_id == data.product_id,
         )
     )
@@ -201,7 +159,7 @@ async def add_to_watchlist(
         raise HTTPException(status_code=409, detail="Product already in watchlist")
 
     entry = UserWatchlist(
-        user_id=user_id,
+        user_id=user.id,
         product_id=data.product_id,
         target_price=data.target_price,
         notify_any_offer=data.notify_any_offer,
@@ -220,15 +178,15 @@ async def add_to_watchlist(
     )
 
 
-@router.delete("/{user_id}/watchlist/{product_id}", status_code=204)
+@router.delete("/me/watchlist/{product_id}", status_code=204)
 async def remove_from_watchlist(
-    user_id: uuid.UUID,
     product_id: uuid.UUID,
+    user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(UserWatchlist).where(
-            UserWatchlist.user_id == user_id,
+            UserWatchlist.user_id == user.id,
             UserWatchlist.product_id == product_id,
         )
     )
@@ -240,13 +198,13 @@ async def remove_from_watchlist(
 
 # --- User Stores ---
 
-@router.post("/{user_id}/stores", status_code=201)
+@router.post("/me/stores", status_code=201)
 async def add_user_store(
-    user_id: uuid.UUID,
     data: StoreAddRequest,
+    user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    user_store = UserStore(user_id=user_id, store_id=data.store_id)
+    user_store = UserStore(user_id=user.id, store_id=data.store_id)
     db.add(user_store)
     await db.flush()
     return {"status": "ok"}
@@ -254,23 +212,22 @@ async def add_user_store(
 
 # --- User Deals ---
 
-@router.get("/{user_id}/deals", response_model=list[UserDealResponse])
+@router.get("/me/deals", response_model=list[UserDealResponse])
 async def get_user_deals(
-    user_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get personalized deals for products in user's watchlist."""
     today = date.today()
 
-    # Get watchlist product IDs
     wl_result = await db.execute(
-        select(UserWatchlist.product_id).where(UserWatchlist.user_id == user_id)
+        select(UserWatchlist.product_id).where(UserWatchlist.user_id == user.id)
     )
     product_ids = [row[0] for row in wl_result.all()]
 
     if not product_ids:
         return []
 
-    # Find active offers for watchlist products
     offers_result = await db.execute(
         select(Offer)
         .options(joinedload(Offer.product), joinedload(Offer.chain))

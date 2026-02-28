@@ -18,7 +18,7 @@ import {
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
-  const userId = useAppStore((s) => s.userId);
+  const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const queryClient = useQueryClient();
 
   const { data: product, isLoading: loadingProduct } = useQuery({
@@ -40,7 +40,7 @@ export default function ProductDetailScreen() {
   });
 
   const addMutation = useMutation({
-    mutationFn: () => addToWatchlist(userId!, id!),
+    mutationFn: () => addToWatchlist(id!),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watchlist"] }),
   });
 
@@ -153,7 +153,7 @@ export default function ProductDetailScreen() {
       )}
 
       {/* Add to watchlist */}
-      {userId && (
+      {isLoggedIn && (
         <Button
           mode="contained"
           icon="star-plus-outline"

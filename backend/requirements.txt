@@ -35,6 +35,12 @@ python-telegram-bot==21.9
 pywebpush==2.0.1
 py-vapid==1.9.2
 
+# Auth
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+email-validator>=2.0.0
+
 # Utilities
 python-dotenv==1.0.1
 
