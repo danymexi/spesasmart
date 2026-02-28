@@ -397,6 +397,7 @@ class TiendeoScraper(BaseScraper):
                             "brand": prod_data.get("brand"),
                             "category": prod_data.get("category"),
                             "image_url": prod_data.get("image_url"),
+                            "source": "tiendeo",
                         },
                         session=session,
                     )

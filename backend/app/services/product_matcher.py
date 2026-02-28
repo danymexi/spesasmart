@@ -7,6 +7,7 @@ entries coming from different flyers, chains and OCR extractions.
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from rapidfuzz import fuzz
@@ -300,6 +301,9 @@ class ProductMatcher:
             close_session = True
 
         try:
+            now = datetime.now(timezone.utc)
+            source = raw_data.get("source")
+
             # --- 1. Exact barcode look-up (fastest) ---
             barcode = raw_data.get("barcode")
             if barcode:
@@ -310,6 +314,8 @@ class ProductMatcher:
                     logger.info(
                         "Barcode match '%s' -> product %s", barcode, existing.id
                     )
+                    existing.last_seen_at = now
+                    await session.commit()
                     return existing
 
             # --- 2. Fuzzy name match ---
@@ -317,6 +323,8 @@ class ProductMatcher:
                 name, brand, session=session
             )
             if matched is not None:
+                matched.last_seen_at = now
+                await session.commit()
                 return matched
 
             # --- 3. Create new product ---
@@ -330,6 +338,8 @@ class ProductMatcher:
                 unit=raw_data.get("unit"),
                 barcode=barcode,
                 image_url=raw_data.get("image_url"),
+                source=source,
+                last_seen_at=now,
             )
             session.add(product)
             await session.commit()

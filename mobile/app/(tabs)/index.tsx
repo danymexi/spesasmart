@@ -3,14 +3,17 @@ import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-na
 import { Chip, Text, useTheme } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { getActiveOffers, getBestOffers } from "../../services/api";
+import { getActiveOffers, getBestOffers, getWatchlist } from "../../services/api";
 import OfferCard from "../../components/OfferCard";
+import PersonalDeals from "../../components/PersonalDeals";
+import { useAppStore } from "../../stores/useAppStore";
 import { glassColors, glassChip, glassPanel } from "../../styles/glassStyles";
 
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const [selectedChain, setSelectedChain] = useState<string | null>(null);
 
   const {
@@ -30,6 +33,15 @@ export default function HomeScreen() {
     queryKey: ["activeOffers"],
     queryFn: () => getActiveOffers({ limit: 20 }),
   });
+
+  // Check if user has watchlist items (lightweight check)
+  const { data: watchlistItems } = useQuery({
+    queryKey: ["watchlist"],
+    queryFn: getWatchlist,
+    enabled: isLoggedIn,
+  });
+
+  const hasWatchlist = isLoggedIn && watchlistItems && watchlistItems.length > 0;
 
   const onRefresh = useCallback(() => {
     refetchBest();
@@ -68,6 +80,9 @@ export default function HomeScreen() {
           Monza e Brianza
         </Text>
       </View>
+
+      {/* Personalized deals section (only for logged-in users with watchlist) */}
+      {hasWatchlist && <PersonalDeals />}
 
       {/* Chain filters */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>

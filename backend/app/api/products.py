@@ -28,6 +28,22 @@ class ProductResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CatalogProductResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    brand: str | None
+    category: str | None
+    image_url: str | None
+    has_active_offer: bool
+    best_offer_price: Decimal | None
+    best_chain_name: str | None
+
+
+class CategoryResponse(BaseModel):
+    name: str
+    count: int
+
+
 class PriceHistoryPoint(BaseModel):
     date: date
     price: Decimal
@@ -54,6 +70,99 @@ class ProductSearchResult(BaseModel):
     best_current_price: Decimal | None = None
     chain_name: str | None = None
     offers_count: int = 0
+
+
+@router.get("/catalog", response_model=list[CatalogProductResponse])
+async def get_catalog_products(
+    category: str | None = Query(None),
+    brand: str | None = Query(None),
+    q: str | None = Query(None),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Browse the full product catalog with optional filters."""
+    today = date.today()
+
+    # Build subquery for best active offer per product
+    best_offer_sq = (
+        select(
+            Offer.product_id,
+            func.min(Offer.offer_price).label("best_price"),
+        )
+        .where(Offer.valid_from <= today, Offer.valid_to >= today)
+        .group_by(Offer.product_id)
+        .subquery()
+    )
+
+    # Main query
+    query = (
+        select(
+            Product,
+            best_offer_sq.c.best_price,
+        )
+        .outerjoin(best_offer_sq, Product.id == best_offer_sq.c.product_id)
+    )
+
+    if category:
+        query = query.where(Product.category.ilike(category))
+    if brand:
+        query = query.where(Product.brand.ilike(f"%{brand}%"))
+    if q:
+        query = query.where(Product.name.ilike(f"%{q}%"))
+
+    query = query.order_by(Product.name).offset(offset).limit(limit)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    # For rows that have an active offer, find the chain name
+    products_with_offers = [r[0].id for r in rows if r[1] is not None]
+    chain_map: dict[uuid.UUID, str] = {}
+    if products_with_offers:
+        chain_query = (
+            select(Offer.product_id, Chain.name)
+            .join(Chain, Offer.chain_id == Chain.id)
+            .where(
+                Offer.product_id.in_(products_with_offers),
+                Offer.valid_from <= today,
+                Offer.valid_to >= today,
+            )
+            .order_by(Offer.offer_price)
+        )
+        chain_result = await db.execute(chain_query)
+        for pid, cname in chain_result.all():
+            if pid not in chain_map:
+                chain_map[pid] = cname
+
+    return [
+        CatalogProductResponse(
+            id=product.id,
+            name=product.name,
+            brand=product.brand,
+            category=product.category,
+            image_url=product.image_url,
+            has_active_offer=best_price is not None,
+            best_offer_price=best_price,
+            best_chain_name=chain_map.get(product.id),
+        )
+        for product, best_price in rows
+    ]
+
+
+@router.get("/categories", response_model=list[CategoryResponse])
+async def get_categories(
+    db: AsyncSession = Depends(get_db),
+):
+    """Return distinct product categories with counts."""
+    result = await db.execute(
+        select(Product.category, func.count(Product.id).label("count"))
+        .where(Product.category.isnot(None), Product.category != "")
+        .group_by(Product.category)
+        .order_by(Product.category)
+    )
+    rows = result.all()
+    return [CategoryResponse(name=name, count=count) for name, count in rows]
 
 
 @router.get("/search", response_model=list[ProductSearchResult])

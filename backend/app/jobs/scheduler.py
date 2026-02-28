@@ -121,6 +121,26 @@ async def scrape_chain(chain_slug: str):
         logger.exception("Notification dispatch failed for '%s'.", chain_slug)
 
 
+async def sync_catalog():
+    """Run catalog sync for all chains to populate the full product catalog."""
+    logger.info("Starting weekly catalog sync for all chains.")
+
+    from app.scrapers.catalog_scraper import CatalogScraper
+
+    total = 0
+    for slug in ["esselunga", "lidl", "coop", "iperal"]:
+        try:
+            store_id = await _resolve_store_id(slug)
+            scraper = CatalogScraper(slug, store_id=store_id)
+            count = await scraper.scrape()
+            total += count
+            logger.info("Catalog sync for '%s': %d products.", slug, count)
+        except Exception:
+            logger.exception("Catalog sync failed for '%s'.", slug)
+
+    logger.info("Weekly catalog sync complete: %d total products processed.", total)
+
+
 async def scrape_all_chains():
     """Scrape all chains sequentially."""
     for slug in ["esselunga", "lidl", "coop", "iperal"]:
@@ -168,6 +188,15 @@ def start_scheduler() -> AsyncIOScheduler:
         args=["iperal"],
         id="scrape_iperal",
         name="Scrape Iperal flyers",
+        replace_existing=True,
+    )
+
+    # Catalog sync: every Sunday at 3:00 AM
+    scheduler.add_job(
+        sync_catalog,
+        CronTrigger(day_of_week="sun", hour=3, minute=0),
+        id="sync_catalog",
+        name="Weekly catalog sync (all chains)",
         replace_existing=True,
     )
 

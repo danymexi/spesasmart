@@ -545,6 +545,7 @@ class PromoQuiScraper(BaseScraper):
                             "category": prod_data.get("category"),
                             "unit": prod_data.get("quantity"),
                             "image_url": prod_data.get("image_url"),
+                            "source": "promoqui",
                         },
                         session=session,
                     )

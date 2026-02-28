@@ -24,6 +24,8 @@ class Product(Base):
     unit: Mapped[str | None] = mapped_column(String(50))
     barcode: Mapped[str | None] = mapped_column(String(50))
     image_url: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str | None] = mapped_column(String(50))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

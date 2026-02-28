@@ -120,7 +120,7 @@ export default function WatchlistScreen() {
               Cerca prodotti e aggiungili alla tua lista per monitorare i prezzi.
             </Text>
             <Button mode="contained" onPress={() => router.push("/(tabs)/search")}>
-              Cerca Prodotti
+              Sfoglia il Catalogo
             </Button>
           </View>
         }

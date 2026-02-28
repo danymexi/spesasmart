@@ -60,6 +60,7 @@ class StoreAddRequest(BaseModel):
 
 
 class UserDealResponse(BaseModel):
+    product_id: str
     product_name: str
     brand: str | None
     chain_name: str
@@ -67,6 +68,7 @@ class UserDealResponse(BaseModel):
     original_price: Decimal | None
     discount_pct: Decimal | None
     valid_to: date | None
+    image_url: str | None
 
 
 # --- Endpoints (all /me routes, JWT-protected) ---
@@ -178,6 +180,19 @@ async def add_to_watchlist(
     )
 
 
+@router.get("/me/watchlist/ids")
+async def get_watchlist_ids(
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return just the product IDs in the user's watchlist (lightweight)."""
+    result = await db.execute(
+        select(UserWatchlist.product_id).where(UserWatchlist.user_id == user.id)
+    )
+    product_ids = [str(row[0]) for row in result.all()]
+    return {"product_ids": product_ids}
+
+
 @router.delete("/me/watchlist/{product_id}", status_code=204)
 async def remove_from_watchlist(
     product_id: uuid.UUID,
@@ -236,12 +251,13 @@ async def get_user_deals(
             Offer.valid_from <= today,
             Offer.valid_to >= today,
         )
-        .order_by(Offer.offer_price)
+        .order_by(Offer.discount_pct.desc().nulls_last(), Offer.offer_price)
     )
     offers = offers_result.unique().scalars().all()
 
     return [
         UserDealResponse(
+            product_id=str(o.product_id),
             product_name=o.product.name if o.product else "Unknown",
             brand=o.product.brand if o.product else None,
             chain_name=o.chain.name if o.chain else "Unknown",
@@ -249,6 +265,7 @@ async def get_user_deals(
             original_price=o.original_price,
             discount_pct=o.discount_pct,
             valid_to=o.valid_to,
+            image_url=o.product.image_url if o.product else None,
         )
         for o in offers
     ]

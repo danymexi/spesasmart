@@ -159,6 +159,7 @@ export interface UserProfile {
 }
 
 export interface UserDeal {
+  product_id: string;
   product_name: string;
   brand: string | null;
   chain_name: string;
@@ -166,6 +167,23 @@ export interface UserDeal {
   original_price: number | null;
   discount_pct: number | null;
   valid_to: string | null;
+  image_url: string | null;
+}
+
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  has_active_offer: boolean;
+  best_offer_price: number | null;
+  best_chain_name: string | null;
+}
+
+export interface CategoryInfo {
+  name: string;
+  count: number;
 }
 
 export interface AuthResponse {
@@ -345,6 +363,29 @@ export async function addUserStore(storeId: string): Promise<void> {
 
 export async function getUserDeals(): Promise<UserDeal[]> {
   const res = await apiClient.get<UserDeal[]>("/users/me/deals");
+  return res.data;
+}
+
+// ── Catalog ──────────────────────────────────────────────────────────────────
+
+export async function getCatalogProducts(params?: {
+  category?: string;
+  brand?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<CatalogProduct[]> {
+  const res = await apiClient.get<CatalogProduct[]>("/products/catalog", { params });
+  return res.data;
+}
+
+export async function getCategories(): Promise<CategoryInfo[]> {
+  const res = await apiClient.get<CategoryInfo[]>("/products/categories");
+  return res.data;
+}
+
+export async function getWatchlistIds(): Promise<{ product_ids: string[] }> {
+  const res = await apiClient.get<{ product_ids: string[] }>("/users/me/watchlist/ids");
   return res.data;
 }
 
