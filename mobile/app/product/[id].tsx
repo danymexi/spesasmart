@@ -3,6 +3,7 @@ import { Button, Text, useTheme, ActivityIndicator } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { getProduct, getProductHistory, getProductBestPrice, addToWatchlist } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import PriceChart from "../../components/PriceChart";
@@ -57,6 +58,7 @@ export default function ProductDetailScreen() {
   }
 
   return (
+    <SafeAreaView style={styles.wrapper} edges={["bottom"]}>
     <ScrollView style={styles.container}>
       {/* Product hero image */}
       {product.image_url ? (
@@ -152,8 +154,12 @@ export default function ProductDetailScreen() {
         </Text>
       )}
 
-      {/* Add to watchlist */}
-      {isLoggedIn && (
+      <View style={{ height: isLoggedIn ? 80 : 16 }} />
+    </ScrollView>
+
+    {/* Sticky bottom button */}
+    {isLoggedIn && (
+      <View style={styles.bottomBar}>
         <Button
           mode="contained"
           icon="star-plus-outline"
@@ -163,14 +169,14 @@ export default function ProductDetailScreen() {
         >
           Aggiungi alla Lista
         </Button>
-      )}
-
-      <View style={styles.bottomPadding} />
-    </ScrollView>
+      </View>
+    )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: { flex: 1 },
   container: { flex: 1, backgroundColor: "transparent" },
   loader: { marginTop: 60 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
@@ -216,6 +222,12 @@ const styles = StyleSheet.create({
   validUntil: { color: "#888", marginTop: 4 },
   sectionTitle: { paddingHorizontal: 16, paddingVertical: 8, fontWeight: "600" },
   noDataText: { paddingHorizontal: 16, color: "#888" },
-  watchlistButton: { margin: 16 },
-  bottomPadding: { height: 30 },
+  bottomBar: {
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#ddd",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  watchlistButton: {},
 });

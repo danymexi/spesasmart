@@ -27,6 +27,9 @@ interface Offer {
   valid_from?: string | null;
   valid_to?: string | null;
   image_url?: string | null;
+  previous_price?: number | null;
+  previous_date?: string | null;
+  previous_chain?: string | null;
 }
 
 interface Props {
@@ -34,9 +37,36 @@ interface Props {
   compact?: boolean;
 }
 
+const MONTH_ABBR = [
+  "gen", "feb", "mar", "apr", "mag", "giu",
+  "lug", "ago", "set", "ott", "nov", "dic",
+];
+
+function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  const month = MONTH_ABBR[d.getMonth()];
+  const year = String(d.getFullYear()).slice(2);
+  return `${month} '${year}`;
+}
+
 export default function OfferCard({ offer, compact }: Props) {
   const theme = useTheme();
   const imgSize = compact ? productImage.compact : productImage.card;
+
+  // Previous price trend
+  const prevPrice = offer.previous_price != null ? Number(offer.previous_price) : null;
+  const curPrice = Number(offer.offer_price);
+  let trendIcon: "arrow-down" | "arrow-up" | "minus" = "minus";
+  let trendColor = "#888";
+  if (prevPrice != null) {
+    if (curPrice < prevPrice) {
+      trendIcon = "arrow-down";
+      trendColor = "#2E7D32"; // green
+    } else if (curPrice > prevPrice) {
+      trendIcon = "arrow-up";
+      trendColor = "#C62828"; // red
+    }
+  }
 
   return (
     <Pressable
@@ -74,7 +104,7 @@ export default function OfferCard({ offer, compact }: Props) {
             {offer.product_name}
           </Text>
 
-          {offer.brand && !compact && (
+          {offer.brand && (
             <Text variant="bodySmall" style={styles.brand}>
               {offer.brand}
             </Text>
@@ -98,6 +128,16 @@ export default function OfferCard({ offer, compact }: Props) {
               </View>
             )}
           </View>
+
+          {/* Previous price trend */}
+          {prevPrice != null && offer.previous_date && (
+            <View style={styles.previousPriceRow}>
+              <MaterialCommunityIcons name={trendIcon} size={14} color={trendColor} />
+              <Text variant="labelSmall" style={[styles.previousPrice, { color: trendColor }]}>
+                Prima: {"\u20AC"}{prevPrice.toFixed(2)} ({formatShortDate(offer.previous_date)})
+              </Text>
+            </View>
+          )}
 
           {/* Quantity & dates */}
           {!compact && (
@@ -154,6 +194,8 @@ const styles = StyleSheet.create({
   productName: { fontWeight: "500", marginBottom: 2 },
   brand: { color: "#666", marginBottom: 4 },
   priceRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
+  previousPriceRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  previousPrice: { fontSize: 11 },
   originalPrice: { textDecorationLine: "line-through", color: "#999" },
   discountBadge: {
     ...discountBadgeGlass,

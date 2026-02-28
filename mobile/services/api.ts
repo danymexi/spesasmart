@@ -133,6 +133,9 @@ export interface Offer {
   valid_from: string | null;
   valid_to: string | null;
   image_url: string | null;
+  previous_price: number | null;
+  previous_date: string | null;
+  previous_chain: string | null;
 }
 
 export interface WatchlistItem {
