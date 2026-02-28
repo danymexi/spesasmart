@@ -98,20 +98,6 @@ export default function ProductDetailScreen() {
             )}
           </View>
 
-          {isLoggedIn && (
-            <>
-              <View style={styles.divider} />
-              <Button
-                mode="contained"
-                icon="star-plus-outline"
-                onPress={() => addMutation.mutate()}
-                loading={addMutation.isPending}
-                style={styles.watchlistBtn}
-              >
-                Aggiungi alla Lista
-              </Button>
-            </>
-          )}
         </View>
       </View>
 
@@ -149,6 +135,19 @@ export default function ProductDetailScreen() {
             </View>
           </View>
         </View>
+      )}
+
+      {/* Add to watchlist */}
+      {isLoggedIn && (
+        <Button
+          mode="contained"
+          icon="star-plus-outline"
+          onPress={() => addMutation.mutate()}
+          loading={addMutation.isPending}
+          style={styles.watchlistBtn}
+        >
+          Aggiungi alla Lista
+        </Button>
       )}
 
       {/* Price comparison */}
@@ -221,13 +220,9 @@ const styles = StyleSheet.create({
   },
   metaRow: { flexDirection: "row", gap: 16, marginTop: 8 },
   metaText: { color: "#888" },
-  divider: {
-    height: 1,
-    backgroundColor: glassColors.subtleBorder,
-    marginVertical: 12,
-  },
   watchlistBtn: {
-    marginTop: 4,
+    marginHorizontal: 12,
+    marginTop: 12,
   },
   sectionCard: {
     marginHorizontal: 12,
