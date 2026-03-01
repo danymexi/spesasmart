@@ -57,6 +57,7 @@ keys (use ``null`` when the value cannot be determined):
 - "quantity"       (string | null) -- pack size / weight as printed, \
   e.g. "500 g", "6 x 1,5 L", "1 kg".
 - "price_per_unit" (string | null) -- price per kg/L/unit if printed.
+- "unit_reference" (string | null) -- the unit for price_per_unit: "kg", "l", or "pz".
 - "raw_text"       (string) -- the text visible on the flyer for this product \
   (for traceability).
 - "confidence"     (number) -- your confidence in the extraction, 0.0 to 1.0.
@@ -371,6 +372,20 @@ class ScrapingPipeline:
         return bool(data.get("name")) and data.get("offer_price") is not None
 
     @staticmethod
+    def _infer_unit_reference(quantity: str | None, raw_text: str | None) -> str | None:
+        """Infer unit_reference from quantity or raw_text via regex."""
+        for text in (quantity, raw_text):
+            if not text:
+                continue
+            if re.search(r"(?:al\s+kg|/kg|euro/kg|eur/kg)", text, re.IGNORECASE):
+                return "kg"
+            if re.search(r"(?:al\s+l(?:t|itro)?|/l\b|euro/l|eur/l)", text, re.IGNORECASE):
+                return "l"
+            if re.search(r"(?:al\s+pz|/pz|cadauno|cad\.)", text, re.IGNORECASE):
+                return "pz"
+        return None
+
+    @staticmethod
     def clean_product_name(name: str) -> str:
         """Normalize whitespace and casing of a product name."""
         cleaned = " ".join(name.split())
@@ -429,6 +444,13 @@ class ScrapingPipeline:
 
         price_per_unit = self._parse_italian_price(prod_data.get("price_per_unit"))
 
+        # Determine unit_reference from Gemini output or fallback regex
+        unit_reference = prod_data.get("unit_reference")
+        if not unit_reference:
+            unit_reference = self._infer_unit_reference(
+                prod_data.get("quantity"), prod_data.get("raw_text")
+            )
+
         offer = Offer(
             product_id=product.id,
             flyer_id=flyer_id,
@@ -440,6 +462,7 @@ class ScrapingPipeline:
             discount_type=prod_data.get("discount_type"),
             quantity=prod_data.get("quantity"),
             price_per_unit=price_per_unit,
+            unit_reference=unit_reference,
             valid_from=valid_from,
             valid_to=valid_to,
             raw_text=prod_data.get("raw_text"),

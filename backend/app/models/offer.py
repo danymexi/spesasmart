@@ -36,6 +36,7 @@ class Offer(Base):
     discount_type: Mapped[str | None] = mapped_column(String(50))
     quantity: Mapped[str | None] = mapped_column(String(100))
     price_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    unit_reference: Mapped[str | None] = mapped_column(String(20))
     valid_from: Mapped[date | None] = mapped_column(Date)
     valid_to: Mapped[date | None] = mapped_column(Date)
     raw_text: Mapped[str | None] = mapped_column(Text)

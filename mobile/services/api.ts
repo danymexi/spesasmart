@@ -100,6 +100,8 @@ export interface PriceHistoryPoint {
   price: number;
   chain_name: string;
   discount_type: string | null;
+  price_per_unit: number | null;
+  unit_reference: string | null;
 }
 
 export interface PriceHistoryResponse {
@@ -114,6 +116,8 @@ export interface BestPriceResponse {
   valid_until: string | null;
   original_price: number | null;
   discount_pct: number | null;
+  price_per_unit: number | null;
+  unit_reference: string | null;
 }
 
 export interface Offer {
@@ -179,6 +183,26 @@ export interface CatalogProduct {
   has_active_offer: boolean;
   best_offer_price: number | null;
   best_chain_name: string | null;
+  best_price_per_unit: number | null;
+  unit_reference: string | null;
+  unit: string | null;
+}
+
+export interface PriceTrendPoint {
+  period: string;
+  avg_price_per_unit: number | null;
+  min_price_per_unit: number | null;
+  max_price_per_unit: number | null;
+  avg_offer_price: number | null;
+  min_offer_price: number | null;
+  max_offer_price: number | null;
+  data_points: number;
+}
+
+export interface PriceTrendResponse {
+  product: Product;
+  trends: PriceTrendPoint[];
+  unit_reference: string | null;
 }
 
 export interface CategoryInfo {
@@ -308,6 +332,17 @@ export async function getProductHistory(productId: string): Promise<PriceHistory
 
 export async function getProductBestPrice(productId: string): Promise<BestPriceResponse> {
   const res = await apiClient.get<BestPriceResponse>(`/products/${productId}/best-price`);
+  return res.data;
+}
+
+export async function getProductPriceTrends(
+  productId: string,
+  months: number = 12
+): Promise<PriceTrendResponse> {
+  const res = await apiClient.get<PriceTrendResponse>(
+    `/products/${productId}/price-trends`,
+    { params: { months } }
+  );
   return res.data;
 }
 

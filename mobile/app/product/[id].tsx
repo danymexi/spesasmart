@@ -3,9 +3,10 @@ import { Button, Text, useTheme, ActivityIndicator } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { getProduct, getProductHistory, getProductBestPrice, addToWatchlist } from "../../services/api";
+import { getProduct, getProductHistory, getProductBestPrice, getProductPriceTrends, addToWatchlist } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import PriceChart from "../../components/PriceChart";
+import PriceTrendChart from "../../components/PriceTrendChart";
 import PriceIndicator from "../../components/PriceIndicator";
 import ProductComparison from "../../components/ProductComparison";
 import {
@@ -35,6 +36,12 @@ export default function ProductDetailScreen() {
   const { data: bestPrice } = useQuery({
     queryKey: ["bestPrice", id],
     queryFn: () => getProductBestPrice(id!),
+    enabled: !!id,
+  });
+
+  const { data: priceTrends } = useQuery({
+    queryKey: ["priceTrends", id],
+    queryFn: () => getProductPriceTrends(id!),
     enabled: !!id,
   });
 
@@ -116,6 +123,11 @@ export default function ProductDetailScreen() {
                 {"\u20AC"}{Number(bestPrice.best_price).toFixed(2)}
               </Text>
               <Text variant="titleMedium">{bestPrice.chain_name}</Text>
+              {bestPrice.price_per_unit != null && (
+                <Text variant="bodyMedium" style={styles.pricePerUnit}>
+                  {Number(bestPrice.price_per_unit).toFixed(2)} {bestPrice.unit_reference === "l" ? "EUR/L" : bestPrice.unit_reference === "pz" ? "EUR/pz" : "EUR/kg"}
+                </Text>
+              )}
               {bestPrice.original_price && (
                 <Text variant="bodyMedium" style={styles.originalPrice}>
                   Prezzo pieno: {"\u20AC"}{Number(bestPrice.original_price).toFixed(2)}
@@ -171,6 +183,19 @@ export default function ProductDetailScreen() {
           </Text>
         )}
       </View>
+
+      {/* Price trends */}
+      {priceTrends && priceTrends.trends.length >= 2 && (
+        <View style={styles.sectionCard}>
+          <Text variant="titleMedium" style={styles.sectionHeader}>
+            Andamento Prezzo al {priceTrends.unit_reference === "l" ? "litro" : "kg"}
+          </Text>
+          <PriceTrendChart
+            trends={priceTrends.trends}
+            unitReference={priceTrends.unit_reference}
+          />
+        </View>
+      )}
 
     </ScrollView>
   );
@@ -241,6 +266,7 @@ const styles = StyleSheet.create({
     color: "#999",
     marginTop: 4,
   },
+  pricePerUnit: { color: "#666", marginTop: 4, fontStyle: "italic" },
   discount: { color: "#E65100", fontWeight: "bold", marginTop: 2 },
   validUntil: { color: "#888", marginTop: 4 },
   noDataText: { color: "#888" },

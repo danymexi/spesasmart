@@ -1,7 +1,7 @@
 """API routes for products."""
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -37,6 +37,9 @@ class CatalogProductResponse(BaseModel):
     has_active_offer: bool
     best_offer_price: Decimal | None
     best_chain_name: str | None
+    best_price_per_unit: Decimal | None = None
+    unit_reference: str | None = None
+    unit: str | None = None
 
 
 class CategoryResponse(BaseModel):
@@ -49,6 +52,8 @@ class PriceHistoryPoint(BaseModel):
     price: Decimal
     chain_name: str
     discount_type: str | None
+    price_per_unit: Decimal | None = None
+    unit_reference: str | None = None
 
 
 class PriceHistoryResponse(BaseModel):
@@ -63,6 +68,8 @@ class BestPriceResponse(BaseModel):
     valid_until: date | None
     original_price: Decimal | None
     discount_pct: Decimal | None
+    price_per_unit: Decimal | None = None
+    unit_reference: str | None = None
 
 
 class ProductSearchResult(BaseModel):
@@ -89,9 +96,26 @@ async def get_catalog_products(
         select(
             Offer.product_id,
             func.min(Offer.offer_price).label("best_price"),
+            func.min(Offer.price_per_unit).label("best_ppu"),
         )
         .where(Offer.valid_from <= today, Offer.valid_to >= today)
         .group_by(Offer.product_id)
+        .subquery()
+    )
+
+    # Subquery for unit_reference of the cheapest offer per product
+    unit_ref_sq = (
+        select(
+            Offer.product_id,
+            Offer.unit_reference,
+        )
+        .where(
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+            Offer.price_per_unit.isnot(None),
+        )
+        .distinct(Offer.product_id)
+        .order_by(Offer.product_id, Offer.price_per_unit)
         .subquery()
     )
 
@@ -100,8 +124,11 @@ async def get_catalog_products(
         select(
             Product,
             best_offer_sq.c.best_price,
+            best_offer_sq.c.best_ppu,
+            unit_ref_sq.c.unit_reference,
         )
         .outerjoin(best_offer_sq, Product.id == best_offer_sq.c.product_id)
+        .outerjoin(unit_ref_sq, Product.id == unit_ref_sq.c.product_id)
     )
 
     if category:
@@ -117,7 +144,7 @@ async def get_catalog_products(
     rows = result.all()
 
     # For rows that have an active offer, find the chain name
-    products_with_offers = [r[0].id for r in rows if r[1] is not None]
+    products_with_offers = [r.Product.id for r in rows if r.best_price is not None]
     chain_map: dict[uuid.UUID, str] = {}
     if products_with_offers:
         chain_query = (
@@ -137,16 +164,19 @@ async def get_catalog_products(
 
     return [
         CatalogProductResponse(
-            id=product.id,
-            name=product.name,
-            brand=product.brand,
-            category=product.category,
-            image_url=product.image_url,
-            has_active_offer=best_price is not None,
-            best_offer_price=best_price,
-            best_chain_name=chain_map.get(product.id),
+            id=row.Product.id,
+            name=row.Product.name,
+            brand=row.Product.brand,
+            category=row.Product.category,
+            image_url=row.Product.image_url,
+            has_active_offer=row.best_price is not None,
+            best_offer_price=row.best_price,
+            best_chain_name=chain_map.get(row.Product.id),
+            best_price_per_unit=row.best_ppu,
+            unit_reference=row.unit_reference,
+            unit=row.Product.unit,
         )
-        for product, best_price in rows
+        for row in rows
     ]
 
 
@@ -255,6 +285,8 @@ async def get_price_history(
             price=o.offer_price,
             chain_name=o.chain.name if o.chain else "Unknown",
             discount_type=o.discount_type,
+            price_per_unit=o.price_per_unit,
+            unit_reference=o.unit_reference,
         )
         for o in offers
     ]
@@ -297,4 +329,95 @@ async def get_best_price(
         valid_until=best.valid_to,
         original_price=best.original_price,
         discount_pct=best.discount_pct,
+        price_per_unit=best.price_per_unit,
+        unit_reference=best.unit_reference,
+    )
+
+
+class PriceTrendPoint(BaseModel):
+    period: str
+    avg_price_per_unit: Decimal | None = None
+    min_price_per_unit: Decimal | None = None
+    max_price_per_unit: Decimal | None = None
+    avg_offer_price: Decimal | None = None
+    min_offer_price: Decimal | None = None
+    max_offer_price: Decimal | None = None
+    data_points: int = 0
+
+
+class PriceTrendResponse(BaseModel):
+    product: ProductResponse
+    trends: list[PriceTrendPoint]
+    unit_reference: str | None = None
+
+
+@router.get("/{product_id}/price-trends", response_model=PriceTrendResponse)
+async def get_price_trends(
+    product_id: uuid.UUID,
+    months: int = Query(12, ge=1, le=36, description="Months of trend data"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return monthly aggregated price trends for a product."""
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    since = date.today() - timedelta(days=months * 31)
+
+    trend_query = (
+        select(
+            func.to_char(
+                func.date_trunc("month", Offer.valid_from), "YYYY-MM"
+            ).label("period"),
+            func.avg(Offer.price_per_unit).label("avg_ppu"),
+            func.min(Offer.price_per_unit).label("min_ppu"),
+            func.max(Offer.price_per_unit).label("max_ppu"),
+            func.avg(Offer.offer_price).label("avg_price"),
+            func.min(Offer.offer_price).label("min_price"),
+            func.max(Offer.offer_price).label("max_price"),
+            func.count(Offer.id).label("cnt"),
+        )
+        .where(
+            Offer.product_id == product_id,
+            Offer.valid_from >= since,
+            Offer.valid_from.isnot(None),
+        )
+        .group_by(func.date_trunc("month", Offer.valid_from))
+        .order_by(func.date_trunc("month", Offer.valid_from))
+    )
+    trend_result = await db.execute(trend_query)
+    rows = trend_result.all()
+
+    # Determine the dominant unit_reference for this product
+    unit_ref_result = await db.execute(
+        select(Offer.unit_reference)
+        .where(
+            Offer.product_id == product_id,
+            Offer.unit_reference.isnot(None),
+        )
+        .group_by(Offer.unit_reference)
+        .order_by(func.count(Offer.id).desc())
+        .limit(1)
+    )
+    unit_ref = unit_ref_result.scalar_one_or_none()
+
+    trends = [
+        PriceTrendPoint(
+            period=row.period,
+            avg_price_per_unit=round(row.avg_ppu, 2) if row.avg_ppu else None,
+            min_price_per_unit=row.min_ppu,
+            max_price_per_unit=row.max_ppu,
+            avg_offer_price=round(row.avg_price, 2) if row.avg_price else None,
+            min_offer_price=row.min_price,
+            max_offer_price=row.max_price,
+            data_points=row.cnt,
+        )
+        for row in rows
+    ]
+
+    return PriceTrendResponse(
+        product=ProductResponse.model_validate(product),
+        trends=trends,
+        unit_reference=unit_ref,
     )

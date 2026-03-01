@@ -163,19 +163,26 @@ export default function CatalogScreen() {
                   )}
                 </View>
                 {item.has_active_offer ? (
-                  <View style={styles.offerRow}>
-                    <Text variant="bodySmall" style={styles.offerLabel}>
-                      In offerta:{" "}
-                    </Text>
-                    <Text variant="bodyMedium" style={styles.offerPrice}>
-                      {"\u20AC"}{Number(item.best_offer_price).toFixed(2)}
-                    </Text>
-                    {item.best_chain_name && (
-                      <Text variant="bodySmall" style={styles.chainLabel}>
-                        {" "}({item.best_chain_name})
+                  <>
+                    <View style={styles.offerRow}>
+                      <Text variant="bodySmall" style={styles.offerLabel}>
+                        In offerta:{" "}
+                      </Text>
+                      <Text variant="bodyMedium" style={styles.offerPrice}>
+                        {"\u20AC"}{Number(item.best_offer_price).toFixed(2)}
+                      </Text>
+                      {item.best_chain_name && (
+                        <Text variant="bodySmall" style={styles.chainLabel}>
+                          {" "}({item.best_chain_name})
+                        </Text>
+                      )}
+                    </View>
+                    {item.best_price_per_unit != null && (
+                      <Text variant="bodySmall" style={styles.pricePerUnit}>
+                        {Number(item.best_price_per_unit).toFixed(2)} {item.unit_reference === "l" ? "EUR/L" : item.unit_reference === "pz" ? "EUR/pz" : "EUR/kg"}
                       </Text>
                     )}
-                  </View>
+                  </>
                 ) : (
                   <Text variant="bodySmall" style={styles.noOffer}>
                     Nessuna offerta attiva
@@ -315,6 +322,7 @@ const styles = StyleSheet.create({
   offerLabel: { color: "#666" },
   offerPrice: { color: glassColors.greenDark, fontWeight: "bold" },
   chainLabel: { color: "#666" },
+  pricePerUnit: { color: "#888", marginTop: 2, fontStyle: "italic" },
   noOffer: { color: "#999", marginTop: 4 },
   watchlistBtn: { margin: 0 },
   emptyText: { textAlign: "center", marginTop: 40, color: "#888", paddingHorizontal: 20 },
