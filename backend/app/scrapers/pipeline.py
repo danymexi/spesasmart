@@ -379,7 +379,7 @@ class ScrapingPipeline:
                 continue
             if re.search(r"(?:al\s+kg|/kg|euro/kg|eur/kg)", text, re.IGNORECASE):
                 return "kg"
-            if re.search(r"(?:al\s+l(?:t|itro)?|/l\b|euro/l|eur/l)", text, re.IGNORECASE):
+            if re.search(r"(?:al\s+lt\b|al\s+litro|/l\b|euro/l\b|eur/l\b)", text, re.IGNORECASE):
                 return "l"
             if re.search(r"(?:al\s+pz|/pz|cadauno|cad\.)", text, re.IGNORECASE):
                 return "pz"

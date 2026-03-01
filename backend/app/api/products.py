@@ -365,11 +365,13 @@ async def get_price_trends(
 
     since = date.today() - timedelta(days=months * 31)
 
+    period_expr = func.to_char(
+        func.date_trunc("month", Offer.valid_from), "YYYY-MM"
+    )
+
     trend_query = (
         select(
-            func.to_char(
-                func.date_trunc("month", Offer.valid_from), "YYYY-MM"
-            ).label("period"),
+            period_expr.label("period"),
             func.avg(Offer.price_per_unit).label("avg_ppu"),
             func.min(Offer.price_per_unit).label("min_ppu"),
             func.max(Offer.price_per_unit).label("max_ppu"),
@@ -383,8 +385,8 @@ async def get_price_trends(
             Offer.valid_from >= since,
             Offer.valid_from.isnot(None),
         )
-        .group_by(func.date_trunc("month", Offer.valid_from))
-        .order_by(func.date_trunc("month", Offer.valid_from))
+        .group_by(period_expr)
+        .order_by(period_expr)
     )
     trend_result = await db.execute(trend_query)
     rows = trend_result.all()

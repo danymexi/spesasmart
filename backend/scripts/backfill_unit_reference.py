@@ -25,7 +25,7 @@ KG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 L_PATTERN = re.compile(
-    r"(?:al\s+l(?:t|itro)?|/l\b|euro/l|eur/l|\bprezzo\s+al\s+l(?:t|itro)?)",
+    r"(?:al\s+lt\b|al\s+litro|/l\b|euro/l\b|eur/l\b|\bprezzo\s+al\s+litro|\bprezzo\s+al\s+lt\b)",
     re.IGNORECASE,
 )
 PZ_PATTERN = re.compile(
