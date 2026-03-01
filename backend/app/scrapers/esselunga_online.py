@@ -19,9 +19,16 @@ import asyncio
 import json
 import logging
 import re
+import uuid
+from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from sqlalchemy import select
+
 from app.database import async_session
+from app.models.chain import Chain
+from app.models.offer import Offer
 from app.services.product_matcher import ProductMatcher
 
 logger = logging.getLogger(__name__)
@@ -38,11 +45,18 @@ SUPERMERCATO_ID = 300000001003363
 class EsselungaOnlineScraper:
     """Scrapes the Esselunga Spesa Online product catalog via Playwright + REST."""
 
+    # Map Esselunga unitText values to normalised unit references
+    UNIT_MAP: dict[str, str] = {
+        "kg": "kg", "g": "kg", "l": "l", "ml": "l",
+        "cl": "l", "pz": "pz", "pezzi": "pz",
+    }
+
     def __init__(self) -> None:
         self._matcher = ProductMatcher()
         self._page = None
         self._browser = None
         self._playwright = None
+        self._chain_id: uuid.UUID | None = None
 
     async def _init_browser(self) -> bool:
         """Launch Playwright, load the Esselunga SPA to establish a session."""
@@ -231,6 +245,18 @@ class EsselungaOnlineScraper:
                 logger.error("Could not establish Esselunga browser session.")
                 return 0
 
+            # Look up Esselunga chain_id
+            async with async_session() as session:
+                result = await session.execute(
+                    select(Chain.id).where(Chain.slug == "esselunga")
+                )
+                row = result.scalar_one_or_none()
+                if not row:
+                    logger.error("Chain 'esselunga' not found in DB.")
+                    return 0
+                self._chain_id = row
+            logger.info("Esselunga chain_id=%s", self._chain_id)
+
             # Build category lookup from the nav tree
             cat_lookup = await self._build_category_lookup()
             logger.info(
@@ -355,9 +381,9 @@ class EsselungaOnlineScraper:
                 break
 
             # Products are in displayables.entities
-            displayables = data.get("displayables", data)
-            products = displayables.get("entities", [])
-            row_count = displayables.get("rowCount", 0)
+            displayables = data.get("displayables") or data
+            products = displayables.get("entities", []) if isinstance(displayables, dict) else []
+            row_count = displayables.get("rowCount", 0) if isinstance(displayables, dict) else 0
 
             if not products:
                 break
@@ -447,7 +473,10 @@ class EsselungaOnlineScraper:
         parent_name: str,
         session,
     ) -> int:
-        """Save a single product via ProductMatcher. Returns 1 on success, 0 on skip."""
+        """Save a single product via ProductMatcher and create/update an Offer.
+
+        Returns 1 on success, 0 on skip.
+        """
         description = (prod.get("description") or "").strip()
         if not description or len(description) < 2:
             return 0
@@ -478,7 +507,7 @@ class EsselungaOnlineScraper:
         # Use parent category name as main category
         category = parent_name or category_name
 
-        await self._matcher.create_or_match_product(
+        product = await self._matcher.create_or_match_product(
             {
                 "name": description,
                 "brand": brand,
@@ -491,7 +520,130 @@ class EsselungaOnlineScraper:
             },
             session=session,
         )
+
+        # --- Create or update Offer with price data ---
+        if self._chain_id and product:
+            await self._upsert_offer(prod, product.id, session)
+
         return 1
+
+    async def _upsert_offer(
+        self,
+        prod: dict[str, Any],
+        product_id: uuid.UUID,
+        session,
+    ) -> None:
+        """Create or update an Offer from Esselunga API price fields."""
+        raw_price = prod.get("price")
+        raw_discounted = prod.get("discountedPrice")
+
+        # Need at least one price
+        if raw_price is None and raw_discounted is None:
+            return
+
+        try:
+            price = Decimal(str(raw_price)) if raw_price is not None else None
+            discounted = (
+                Decimal(str(raw_discounted)) if raw_discounted is not None else None
+            )
+        except (InvalidOperation, ValueError, TypeError):
+            return
+
+        # Determine offer_price and original_price
+        if discounted and price and discounted < price:
+            offer_price = discounted
+            original_price = price
+        elif price:
+            offer_price = price
+            original_price = None
+        elif discounted:
+            offer_price = discounted
+            original_price = None
+        else:
+            return
+
+        if offer_price <= 0:
+            return
+
+        # Discount percentage
+        discount_pct = None
+        if original_price and original_price > 0:
+            discount_pct = (
+                (original_price - offer_price) / original_price * 100
+            ).quantize(Decimal("0.01"))
+
+        # Promotion detail → discount_type (max 50 chars to fit DB column)
+        promos_raw = prod.get("promotionsDetail")
+        discount_type = None
+        if promos_raw:
+            if isinstance(promos_raw, list) and promos_raw:
+                discount_type = str(promos_raw[0])[:50]
+            elif isinstance(promos_raw, dict):
+                # May be a dict with a description key
+                discount_type = str(
+                    promos_raw.get("description") or promos_raw.get("label") or ""
+                )[:50] or None
+            elif isinstance(promos_raw, str):
+                discount_type = promos_raw[:50]
+
+        # Parse label → price_per_unit  ("1,65 € / l" → 1.65)
+        price_per_unit = self._parse_price_per_unit(prod.get("label"))
+
+        # Map unitText → unit_reference
+        unit_text = (prod.get("unitText") or "").strip().lower()
+        unit_reference = self.UNIT_MAP.get(unit_text)
+
+        today = date.today()
+        valid_to = today + timedelta(days=7)
+
+        # Dedup: look for existing offer for this product+chain with flyer_id IS NULL
+        result = await session.execute(
+            select(Offer).where(
+                Offer.product_id == product_id,
+                Offer.chain_id == self._chain_id,
+                Offer.flyer_id.is_(None),
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            existing.offer_price = offer_price
+            existing.original_price = original_price
+            existing.discount_pct = discount_pct
+            existing.discount_type = discount_type
+            existing.price_per_unit = price_per_unit
+            existing.unit_reference = unit_reference
+            existing.valid_from = today
+            existing.valid_to = valid_to
+        else:
+            session.add(Offer(
+                product_id=product_id,
+                chain_id=self._chain_id,
+                flyer_id=None,
+                offer_price=offer_price,
+                original_price=original_price,
+                discount_pct=discount_pct,
+                discount_type=discount_type,
+                price_per_unit=price_per_unit,
+                unit_reference=unit_reference,
+                valid_from=today,
+                valid_to=valid_to,
+            ))
+
+        await session.commit()
+
+    @staticmethod
+    def _parse_price_per_unit(label: str | None) -> Decimal | None:
+        """Parse a label like '1,65 € / l' into Decimal('1.65')."""
+        if not label:
+            return None
+        match = re.search(r"([\d.,]+)\s*€", label)
+        if not match:
+            return None
+        try:
+            return Decimal(match.group(1).replace(",", "."))
+        except InvalidOperation:
+            return None
 
     @staticmethod
     def _extract_unit(description: str, label: str | None = None) -> str | None:
