@@ -24,6 +24,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MATCH_THRESHOLD = 85  # similarity >= 85 % ⇒ treat as the same product
+BRAND_MATCH_THRESHOLD = 80  # lower threshold when brands match exactly
+
+# Italian food-variant words that DISTINGUISH products (not stopwords).
+# If these appear only in one name, the products are likely different.
+_VARIANT_WORDS: set[str] = {
+    # Flavors / ingredients
+    "basilico", "limone", "arancia", "fragola", "vaniglia", "cioccolato",
+    "pistacchio", "nocciola", "caffè", "caffe", "menta", "pesca",
+    "frutti", "bosco", "miele", "zenzero", "aglio", "peperoncino",
+    "pomodoro", "funghi", "tartufo", "olive", "capperi", "tonno",
+    "prosciutto", "salmone", "formaggio", "mozzarella",
+    # Variants
+    "bio", "integrale", "integrali", "classico", "classica",
+    "originale", "light", "zero", "senza", "glutine",
+    "decaffeinato", "decaf",
+    # Sizes / quantities that matter
+    "mini", "maxi", "grande", "piccolo", "famiglia",
+}
 
 # Italian stopwords commonly seen in product names on flyers
 _STOPWORDS: set[str] = {
@@ -135,6 +153,52 @@ class ProductMatcher:
         return " ".join(tokens)
 
     @staticmethod
+    def _strip_brand(name: str, brand: str | None) -> str:
+        """Remove brand name from the beginning of a product name.
+
+        Esselunga embeds brand in the name (e.g. "Granarolo Latte Intero UHT
+        1 L") while Iperal keeps brand separate.  Stripping it before matching
+        greatly improves cross-source dedup.
+        """
+        if not brand or not name:
+            return name
+        name_lower = name.lower()
+        brand_lower = brand.lower().strip()
+
+        # Build brand variants: original + hyphen/space swapped
+        brand_variants = {brand_lower}
+        brand_variants.add(brand_lower.replace("-", " "))
+        brand_variants.add(brand_lower.replace(" ", "-"))
+
+        # Strip brand at beginning of name (possibly followed by comma/dash)
+        for bv in brand_variants:
+            for sep in ["", ",", " -", " –"]:
+                prefix = bv + sep
+                if name_lower.startswith(prefix):
+                    cleaned = name[len(prefix):].lstrip(" ,.-–")
+                    if cleaned:
+                        return cleaned
+        return name
+
+    @staticmethod
+    def _strip_units(text: str) -> str:
+        """Remove unit/weight/volume patterns from text for cleaner matching.
+
+        Strips patterns like '500g', '1 L', '1000 ml', '1,5 kg', '6 x 1,5 l'.
+        """
+        # Remove multi-pack patterns: "6 x 1,5 l", "4x500 ml"
+        text = re.sub(
+            r"\b\d+\s*x\s*\d+(?:[.,]\d+)?\s*(?:g|kg|ml|cl|l)\b",
+            "", text, flags=re.IGNORECASE,
+        )
+        # Remove simple unit patterns: "500g", "1 L", "1000 ml", "1,5 kg"
+        text = re.sub(
+            r"\b\d+(?:[.,]\d+)?\s*(?:g|kg|ml|cl|l|pz|pezzi|conf)\b",
+            "", text, flags=re.IGNORECASE,
+        )
+        return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
     def extract_brand_from_name(raw_name: str) -> tuple[str | None, str]:
         """Split ``"Brand - Product Name"`` into (brand, product_name).
 
@@ -168,17 +232,90 @@ class ProductMatcher:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def fuzzy_match(name1: str, name2: str) -> float:
-        """Return a similarity score (0-100) using token-sort ratio.
+    def fuzzy_match(
+        name1: str,
+        name2: str,
+        brand1: str | None = None,
+        brand2: str | None = None,
+    ) -> float:
+        """Return a similarity score (0-100) for two product names.
 
-        ``token_sort_ratio`` is more robust than plain ``ratio`` because it
-        handles word-order differences that are common in OCR output.
+        When both brands are known and match, strip the brand from names and
+        use ``token_set_ratio`` (robust to one name being a subset of the
+        other, e.g. "Latte Intero" ⊂ "Latte Intero UHT a Lunga Conservazione").
+
+        Otherwise fall back to ``token_sort_ratio`` which handles word-order
+        differences common in OCR output.
         """
-        n1 = ProductMatcher.normalize_text(name1)
-        n2 = ProductMatcher.normalize_text(name2)
+        # Clean names: strip brand and unit patterns
+        c1 = ProductMatcher._strip_units(ProductMatcher._strip_brand(name1, brand1))
+        c2 = ProductMatcher._strip_units(ProductMatcher._strip_brand(name2, brand2))
+
+        n1 = ProductMatcher.normalize_text(c1)
+        n2 = ProductMatcher.normalize_text(c2)
         if not n1 or not n2:
             return 0.0
-        return fuzz.token_sort_ratio(n1, n2)
+
+        cb1 = ProductMatcher.normalize_brand(brand1) if brand1 else None
+        cb2 = ProductMatcher.normalize_brand(brand2) if brand2 else None
+        brands_match = cb1 and cb2 and cb1 == cb2
+        brands_conflict = cb1 and cb2 and cb1 != cb2
+
+        sort_score = fuzz.token_sort_ratio(n1, n2)
+
+        # When brands are explicitly different, cap score to prevent false
+        # merges of generic names (e.g. "Acqua Naturale" from two brands)
+        if brands_conflict:
+            return min(sort_score, 70.0)
+
+        if brands_match:
+            set_score = fuzz.token_set_ratio(n1, n2)
+
+            t1 = set(n1.split())
+            t2 = set(n2.split())
+
+            # Guard against overly-generic short names (< 2 significant tokens)
+            shorter = n1 if len(n1) < len(n2) else n2
+            sig_tokens = [t for t in shorter.split() if len(t) > 2]
+            if len(sig_tokens) < 2:
+                # Too short to trust token_set_ratio alone — dampen it
+                set_score = min(set_score, sort_score + 15)
+
+            # Guard against generic overlap: if the shorter name's
+            # product-identifying tokens (alphabetic, len>3) have low
+            # overlap with the other name, token_set_ratio is misleading.
+            # e.g. "latte 100% italiano" vs "olio extra vergine oliva 100%
+            # italiano" share generic tokens but are different products.
+            shorter_tokens = t1 if len(n1) < len(n2) else t2
+            longer_tokens = t2 if len(n1) < len(n2) else t1
+            product_tokens = [
+                t for t in shorter_tokens if len(t) > 3 and t.isalpha()
+            ]
+            if product_tokens:
+                overlap = sum(1 for t in product_tokens if t in longer_tokens)
+                overlap_ratio = overlap / len(product_tokens)
+                if overlap_ratio <= 0.5:
+                    # Half or fewer product-identifying tokens match —
+                    # these are different products sharing generic words
+                    set_score = min(set_score, sort_score + 10)
+
+            # Penalize when one name has variant-distinguishing words
+            # that the other doesn't (e.g. "basilico", "integrale", "bio").
+            # Use stems (first 6 chars) so "integrale"/"integrali" are
+            # treated as the same variant, not different ones.
+            diff1 = t1 - t2  # tokens only in name1
+            diff2 = t2 - t1  # tokens only in name2
+            var1_stems = {w[:6] for w in diff1 if w in _VARIANT_WORDS}
+            var2_stems = {w[:6] for w in diff2 if w in _VARIANT_WORDS}
+            # Only penalize when a variant stem appears in ONE side only
+            unmatched_variants = var1_stems.symmetric_difference(var2_stems)
+            if unmatched_variants:
+                penalty = 25.0 * len(unmatched_variants)
+                return max(sort_score - penalty, set_score - penalty, 0.0)
+
+            return max(sort_score, set_score)
+
+        return sort_score
 
     # ------------------------------------------------------------------
     # Database look-ups
@@ -197,7 +334,7 @@ class ProductMatcher:
         share the same canonical brand first; if nothing is found it falls
         back to a brand-agnostic search.
 
-        Returns ``None`` when no product scores above ``MATCH_THRESHOLD``.
+        Returns ``None`` when no product scores above the match threshold.
         """
         close_session = False
         if session is None:
@@ -207,9 +344,10 @@ class ProductMatcher:
         try:
             canonical_brand = self.normalize_brand(brand)
 
-            # Pre-filter: use significant tokens from the name to narrow
-            # candidates via SQL ILIKE instead of loading every product.
-            tokens = self.normalize_text(name).split()
+            # Pre-filter: use significant tokens from the name (after
+            # stripping brand and units) to narrow candidates via SQL ILIKE.
+            cleaned = self._strip_units(self._strip_brand(name, brand))
+            tokens = self.normalize_text(cleaned).split()
             significant = [t for t in tokens if len(t) > 3][:3]
 
             # Fetch candidates – restrict to same brand when available
@@ -246,7 +384,10 @@ class ProductMatcher:
             best_product: Product | None = None
 
             for product in candidates:
-                score = self.fuzzy_match(name, product.name)
+                score = self.fuzzy_match(
+                    name, product.name,
+                    brand1=brand, brand2=product.brand,
+                )
 
                 # Give a bonus when brands match exactly
                 if canonical_brand and product.brand == canonical_brand:
@@ -256,12 +397,23 @@ class ProductMatcher:
                     best_score = score
                     best_product = product
 
-            if best_score >= MATCH_THRESHOLD and best_product is not None:
+            # Use a lower threshold when brands match (the brand-aware
+            # token_set_ratio already ensures quality)
+            threshold = MATCH_THRESHOLD
+            if (
+                canonical_brand
+                and best_product is not None
+                and best_product.brand == canonical_brand
+            ):
+                threshold = BRAND_MATCH_THRESHOLD
+
+            if best_score >= threshold and best_product is not None:
                 logger.info(
-                    "Matched '%s' -> '%s' (score=%.1f)",
+                    "Matched '%s' -> '%s' (score=%.1f, threshold=%d)",
                     name,
                     best_product.name,
                     best_score,
+                    threshold,
                 )
                 return best_product
 
@@ -272,6 +424,38 @@ class ProductMatcher:
         finally:
             if close_session:
                 await session.close()
+
+    # ------------------------------------------------------------------
+    # Product enrichment on re-match
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _enrich_product(product: Product, raw_data: dict, now) -> None:
+        """Fill in missing fields on a matched product from new raw data.
+
+        Updates ``last_seen_at`` and fills blanks for category, subcategory,
+        image_url, and unit — but never overwrites existing good data.
+        """
+        product.last_seen_at = now
+
+        # Fill category if currently missing or generic
+        new_cat = raw_data.get("category")
+        if new_cat and (not product.category or product.category == "Supermercato"):
+            product.category = new_cat
+
+        new_sub = raw_data.get("subcategory")
+        if new_sub and (not product.subcategory or product.subcategory == "Supermercato"):
+            product.subcategory = new_sub
+
+        # Fill image if missing
+        new_img = raw_data.get("image_url")
+        if new_img and not product.image_url:
+            product.image_url = new_img
+
+        # Fill unit if missing
+        new_unit = raw_data.get("unit")
+        if new_unit and not product.unit:
+            product.unit = new_unit
 
     # ------------------------------------------------------------------
     # Create-or-match entry point
@@ -314,7 +498,7 @@ class ProductMatcher:
                     logger.info(
                         "Barcode match '%s' -> product %s", barcode, existing.id
                     )
-                    existing.last_seen_at = now
+                    self._enrich_product(existing, raw_data, now)
                     await session.commit()
                     return existing
 
@@ -323,7 +507,7 @@ class ProductMatcher:
                 name, brand, session=session
             )
             if matched is not None:
-                matched.last_seen_at = now
+                self._enrich_product(matched, raw_data, now)
                 await session.commit()
                 return matched
 

@@ -128,6 +128,30 @@ async def sync_catalog():
     from app.scrapers.catalog_scraper import CatalogScraper
 
     total = 0
+
+    # --- Iperal Online (REST API — fast, structured, thousands of products) ---
+    try:
+        from app.scrapers.iperal_online import IperalOnlineScraper
+
+        iperal_online = IperalOnlineScraper()
+        count = await iperal_online.scrape()
+        total += count
+        logger.info("Iperal Online catalog: %d products.", count)
+    except Exception:
+        logger.exception("Iperal Online catalog sync failed.")
+
+    # --- Esselunga Online (REST API — session-based, thousands of products) ---
+    try:
+        from app.scrapers.esselunga_online import EsselungaOnlineScraper
+
+        esselunga_online = EsselungaOnlineScraper()
+        count = await esselunga_online.scrape()
+        total += count
+        logger.info("Esselunga Online catalog: %d products.", count)
+    except Exception:
+        logger.exception("Esselunga Online catalog sync failed.")
+
+    # --- Tiendeo catalogs (all chains) ---
     for slug in ["esselunga", "lidl", "coop", "iperal"]:
         try:
             store_id = await _resolve_store_id(slug)

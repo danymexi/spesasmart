@@ -57,3 +57,6 @@ backend/data/
 
 # Supabase CLI temp
 backend/supabase/.temp/
+
+# Cloudflared credentials
+cloudflared/

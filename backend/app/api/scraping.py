@@ -195,6 +195,50 @@ async def test_telegram_notification(user_id: str):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.post("/catalog-sync/iperal-online", response_model=ScrapeResult)
+async def trigger_iperal_online_sync():
+    """Trigger Iperal Online catalog sync and wait for it to finish.
+
+    Scrapes the full Iperal Spesa Online product catalog via REST API.
+    """
+    try:
+        from app.scrapers.iperal_online import IperalOnlineScraper
+
+        scraper = IperalOnlineScraper()
+        count = await scraper.scrape()
+        return ScrapeResult(
+            status="completed",
+            chain="iperal",
+            products_found=count,
+            message=f"Iperal Online catalog sync complete: {count} products processed.",
+        )
+    except Exception as exc:
+        logger.exception("Iperal Online catalog sync failed.")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/catalog-sync/esselunga-online", response_model=ScrapeResult)
+async def trigger_esselunga_online_sync():
+    """Trigger Esselunga Online catalog sync and wait for it to finish.
+
+    Scrapes the Esselunga Spesa Online product catalog via REST API.
+    """
+    try:
+        from app.scrapers.esselunga_online import EsselungaOnlineScraper
+
+        scraper = EsselungaOnlineScraper()
+        count = await scraper.scrape()
+        return ScrapeResult(
+            status="completed",
+            chain="esselunga",
+            products_found=count,
+            message=f"Esselunga Online catalog sync complete: {count} products processed.",
+        )
+    except Exception as exc:
+        logger.exception("Esselunga Online catalog sync failed.")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/status")
 async def scraping_status():
     """Get the current status of the scheduler and its jobs."""

@@ -1,12 +1,21 @@
 """SpesaSmart API - Main FastAPI application."""
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+# Configure root logger so application logs (scrapers, services, etc.)
+# are visible alongside uvicorn's access logs.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:%(name)s: %(message)s",
+)
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api import auth, chains, flyers, offers, products, scraping, stores, users
 from app.api import web_push
@@ -37,6 +46,26 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+class NoCdnCacheMiddleware(BaseHTTPMiddleware):
+    """Tell Cloudflare CDN to never cache HTML pages and service worker."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        ct = response.headers.get("content-type", "")
+        # Never let CDN cache HTML, service worker, or manifest
+        if (
+            "text/html" in ct
+            or path in ("/sw.js", "/manifest.json")
+            or path == "/"
+        ):
+            response.headers["CDN-Cache-Control"] = "no-store"
+            response.headers["Cloudflare-CDN-Cache-Control"] = "no-store"
+        return response
+
+
+app.add_middleware(NoCdnCacheMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,7 +108,10 @@ if DIST_DIR.is_dir():
         return FileResponse(
             DIST_DIR / "sw.js",
             media_type="application/javascript",
-            headers={"Service-Worker-Allowed": "/"},
+            headers={
+                "Service-Worker-Allowed": "/",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
         )
 
     # Serve PWA icons
@@ -101,7 +133,10 @@ if DIST_DIR.is_dir():
         # Otherwise serve index.html (SPA routing)
         index = DIST_DIR / "index.html"
         if index.is_file():
-            return FileResponse(index)
+            return FileResponse(
+                index,
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
 
         return HTMLResponse(status_code=404, content="Not Found")
 else:
