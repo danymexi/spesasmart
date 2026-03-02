@@ -378,9 +378,9 @@ const styles = StyleSheet.create({
   chipSelected: {
     backgroundColor: glassColors.greenAccent,
   },
-  sectionTitle: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, fontWeight: "600" },
+  sectionTitle: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, fontWeight: "700", color: glassColors.greenDark },
   sectionHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 6 },
-  sectionTitleInline: { fontWeight: "600" },
+  sectionTitleInline: { fontWeight: "700", color: glassColors.greenDark },
   horizontalList: { paddingHorizontal: 12 },
   horizontalCard: { width: 260, marginRight: 12 },
   emptyText: { paddingHorizontal: 16, color: "#888" },

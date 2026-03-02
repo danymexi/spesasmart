@@ -10,7 +10,7 @@ export const gradientColors = {
 // Glass surface tokens
 export const glassColors = {
   // Light glass
-  glass: "rgba(255,255,255,0.72)",
+  glass: "rgba(255,255,255,0.78)",
   glassBorder: "rgba(255,255,255,0.45)",
   glassLight: "rgba(255,255,255,0.5)",
   glassDark: "rgba(30,30,30,0.6)",
@@ -25,6 +25,9 @@ export const glassColors = {
   greenDark: "#1B5E20",
   greenMedium: "#2E7D32",
   greenSubtle: "rgba(27,94,32,0.7)",
+  textPrimary: "#1a1a1a",
+  textSecondary: "#444",
+  textMuted: "#666",
 
   // Subtle backgrounds
   subtleBg: "rgba(0,0,0,0.04)",

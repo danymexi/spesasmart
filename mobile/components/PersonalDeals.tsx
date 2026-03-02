@@ -139,7 +139,7 @@ function DealCard({ group }: { group: GroupedDeal }) {
         )}
 
         <View style={styles.dealInfo}>
-          <Text variant="titleSmall" numberOfLines={1}>
+          <Text variant="titleSmall" numberOfLines={1} style={styles.productName}>
             {group.product_name}
           </Text>
           {group.brand && (
@@ -201,7 +201,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
-    fontWeight: "600",
+    fontWeight: "700",
+    color: glassColors.greenDark,
   },
   card: {
     marginHorizontal: 12,
@@ -221,7 +222,8 @@ const styles = StyleSheet.create({
     ...imagePlaceholder,
   },
   dealInfo: { flex: 1, marginRight: 8 },
-  brand: { color: "#666", marginTop: 1 },
+  productName: { color: "#1a1a1a", fontWeight: "600" },
+  brand: { color: "#444", marginTop: 1 },
   chainPricesRow: {
     flexDirection: "row",
     marginTop: 8,
@@ -239,7 +241,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(27,94,32,0.08)",
   },
   chainLabel: {
-    color: "#888",
+    color: "#555",
     fontSize: 11,
     marginBottom: 2,
   },

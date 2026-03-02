@@ -1,8 +1,8 @@
-import { StyleSheet, TouchableOpacity, View } from "react-native";
-import { Text } from "react-native-paper";
+import { Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import { IconButton, Text } from "react-native-paper";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { glassCard, glassColors } from "../styles/glassStyles";
+import { glassCard, glassColors, productImage, imagePlaceholder } from "../styles/glassStyles";
 import type { SmartSearchResult } from "../services/api";
 
 const INDICATOR_STYLE: Record<string, { color: string; bg: string; label: string }> = {
@@ -13,9 +13,11 @@ const INDICATOR_STYLE: Record<string, { color: string; bg: string; label: string
 
 interface Props {
   result: SmartSearchResult;
+  isInWatchlist?: boolean;
+  onWatchlistToggle?: (productId: string) => void;
 }
 
-export default function SmartCompareCard({ result }: Props) {
+export default function SmartCompareCard({ result, isInWatchlist, onWatchlistToggle }: Props) {
   const { product, offers, price_indicator, best_price_per_unit, unit_reference } = result;
 
   const bestPrice = offers.length > 0
@@ -30,8 +32,19 @@ export default function SmartCompareCard({ result }: Props) {
       onPress={() => router.push(`/product/${product.id}`)}
       activeOpacity={0.7}
     >
-      {/* Header: product name + indicator badge */}
+      {/* Header: image + product name + indicator badge + watchlist */}
       <View style={styles.header}>
+        {product.image_url ? (
+          <Image
+            source={{ uri: product.image_url }}
+            style={styles.productImage}
+            resizeMode="contain"
+          />
+        ) : (
+          <View style={[styles.productImage, styles.productImagePlaceholder]}>
+            <MaterialCommunityIcons name="food-variant" size={20} color="#ccc" />
+          </View>
+        )}
         <View style={styles.nameSection}>
           <Text variant="titleSmall" numberOfLines={1} style={styles.productName}>
             {product.name}
@@ -48,6 +61,15 @@ export default function SmartCompareCard({ result }: Props) {
               {indConfig.label}
             </Text>
           </View>
+        )}
+        {onWatchlistToggle && (
+          <IconButton
+            icon={isInWatchlist ? "check-circle" : "plus-circle-outline"}
+            iconColor={isInWatchlist ? glassColors.greenMedium : "#999"}
+            size={24}
+            onPress={() => onWatchlistToggle(product.id)}
+            style={styles.watchlistBtn}
+          />
         )}
       </View>
 
@@ -116,13 +138,20 @@ const styles = StyleSheet.create({
   } as any,
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 4,
   },
+  productImage: {
+    ...productImage.compact,
+    marginRight: 10,
+  },
+  productImagePlaceholder: {
+    ...imagePlaceholder,
+  },
   nameSection: { flex: 1, marginRight: 8 },
-  productName: { fontWeight: "600" },
-  brand: { color: "#666", marginTop: 1 },
+  watchlistBtn: { margin: 0, marginLeft: 4 },
+  productName: { fontWeight: "700", color: "#1a1a1a" },
+  brand: { color: "#444", marginTop: 1 },
   indicatorBadge: {
     borderRadius: 10,
     paddingHorizontal: 8,
@@ -150,7 +179,7 @@ const styles = StyleSheet.create({
   chainCellBest: {
     backgroundColor: "rgba(27,94,32,0.08)",
   },
-  chainName: { fontSize: 11, color: "#888", marginBottom: 2 },
+  chainName: { fontSize: 11, color: "#555", marginBottom: 2 },
   chainNameBest: { color: glassColors.greenDark, fontWeight: "600" },
   chainPrice: { fontSize: 16, fontWeight: "bold", color: "#333" },
   chainPriceBest: { color: glassColors.greenDark },

@@ -1,7 +1,7 @@
-import { ScrollView, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, Text, useTheme } from "react-native-paper";
+import { Platform, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Button, IconButton, Text, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useLocalSearchParams, router } from "expo-router";
+import { Stack, useLocalSearchParams, router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getProductCompare, addToShoppingList, CompareOffer } from "../../../services/api";
 import { useAppStore } from "../../../stores/useAppStore";
@@ -62,6 +62,21 @@ export default function CompareScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Stack.Screen
+        options={{
+          title: "Confronto Prezzi",
+          headerLeft: Platform.OS === "web"
+            ? () => (
+                <IconButton
+                  icon="arrow-left"
+                  onPress={() =>
+                    router.canGoBack() ? router.back() : router.replace("/(tabs)/search")
+                  }
+                />
+              )
+            : undefined,
+        }}
+      />
       <Text variant="headlineSmall" style={styles.title}>
         {data.product.name}
       </Text>

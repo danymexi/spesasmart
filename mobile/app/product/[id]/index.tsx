@@ -1,7 +1,7 @@
 import { Image, Platform, ScrollView, Share, StyleSheet, View } from "react-native";
-import { Button, Text, useTheme, ActivityIndicator } from "react-native-paper";
+import { Button, IconButton, Text, useTheme, ActivityIndicator } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useLocalSearchParams, router } from "expo-router";
+import { Stack, useLocalSearchParams, router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getProduct, getProductHistory, getProductBestPrice, getProductPriceTrends, addToWatchlist, addToShoppingList } from "../../../services/api";
 import { useAppStore } from "../../../stores/useAppStore";
@@ -87,6 +87,21 @@ export default function ProductDetailScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      <Stack.Screen
+        options={{
+          title: product?.name ?? "Dettaglio Prodotto",
+          headerLeft: Platform.OS === "web"
+            ? () => (
+                <IconButton
+                  icon="arrow-left"
+                  onPress={() =>
+                    router.canGoBack() ? router.back() : router.replace("/(tabs)/search")
+                  }
+                />
+              )
+            : undefined,
+        }}
+      />
       {/* Hero card: image + info + watchlist button */}
       <View style={styles.heroCard}>
         {product.image_url ? (

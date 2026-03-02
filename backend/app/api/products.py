@@ -1,8 +1,11 @@
 """API routes for products."""
 
+import re
 import uuid
+from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
+from difflib import SequenceMatcher
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -226,6 +229,180 @@ async def get_catalog_products(
         )
         for row in rows
     ]
+
+
+def _normalize_product_name(name: str) -> str:
+    """Normalize a product name for fuzzy grouping."""
+    n = name.lower().strip()
+    # Remove common quantity/size suffixes
+    n = re.sub(r"\b\d+\s*(pz|pezzi|rotoli|x|ml|cl|l|g|kg|gr)\b", "", n)
+    n = re.sub(r"\bx\s*\d+\b", "", n)
+    n = re.sub(r"\s+", " ", n).strip()
+    return n
+
+
+def _group_similar_products(
+    products: list[Product], threshold: float = 0.78
+) -> list[list[Product]]:
+    """Group products with similar names (same brand required if both have one)."""
+    groups: list[list[Product]] = []
+    used: set[int] = set()
+    normalized = [_normalize_product_name(p.name) for p in products]
+
+    for i, p in enumerate(products):
+        if i in used:
+            continue
+        group = [p]
+        used.add(i)
+        brand_i = (p.brand or "").lower().strip()
+        for j in range(i + 1, len(products)):
+            if j in used:
+                continue
+            q = products[j]
+            brand_j = (q.brand or "").lower().strip()
+            # Both have brands -> must match
+            if brand_i and brand_j and brand_i != brand_j:
+                continue
+            ratio = SequenceMatcher(None, normalized[i], normalized[j]).ratio()
+            if ratio >= threshold:
+                group.append(q)
+                used.add(j)
+        groups.append(group)
+    return groups
+
+
+@router.get("/catalog-grouped")
+async def get_catalog_grouped(
+    category: str | None = Query(None),
+    brand: str | None = Query(None),
+    q: str | None = Query(None),
+    sort: str | None = Query(None, enum=["name", "price", "price_per_unit"]),
+    chain: str | None = Query(None, description="Comma-separated chain slugs"),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Browse catalog with offers grouped per product (fuzzy name matching)."""
+    today = date.today()
+    from app.services.price_analyzer import PriceAnalyzer
+
+    # ── 1. Fetch products using same filters as /catalog ──
+    prod_query = select(Product)
+    if category:
+        prod_query = prod_query.where(Product.category.ilike(category))
+    if brand:
+        prod_query = prod_query.where(Product.brand.ilike(f"%{brand}%"))
+    if q:
+        prod_query = prod_query.where(Product.name.ilike(f"%{q}%"))
+
+    # If chain filter, only products that have an active offer in that chain
+    if chain:
+        chain_slugs = [s.strip() for s in chain.split(",")]
+        chain_ids_sq = select(Chain.id).where(Chain.slug.in_(chain_slugs))
+        has_offer_sq = (
+            select(Offer.product_id)
+            .where(
+                Offer.valid_from <= today,
+                Offer.valid_to >= today,
+                Offer.chain_id.in_(chain_ids_sq),
+            )
+            .distinct()
+        )
+        prod_query = prod_query.where(Product.id.in_(has_offer_sq))
+
+    prod_query = prod_query.order_by(Product.name).offset(offset).limit(limit)
+    result = await db.execute(prod_query)
+    products = list(result.scalars().all())
+
+    if not products:
+        return []
+
+    # ── 2. Group similar products by fuzzy name matching ──
+    groups = _group_similar_products(products)
+
+    # Collect all product IDs across all groups
+    all_product_ids = [p.id for p in products]
+
+    # ── 3. Fetch ALL active offers for these products in one query ──
+    offers_where = [
+        Offer.product_id.in_(all_product_ids),
+        Offer.valid_from <= today,
+        Offer.valid_to >= today,
+    ]
+    if chain:
+        chain_slugs = [s.strip() for s in chain.split(",")]
+        offers_where.append(
+            Offer.chain_id.in_(select(Chain.id).where(Chain.slug.in_(chain_slugs)))
+        )
+
+    offers_result = await db.execute(
+        select(Offer)
+        .options(joinedload(Offer.chain))
+        .where(*offers_where)
+        .order_by(
+            Offer.product_id,
+            Offer.price_per_unit.asc().nulls_last(),
+            Offer.offer_price.asc(),
+        )
+    )
+    all_offers = offers_result.unique().scalars().all()
+
+    offers_by_product: dict[uuid.UUID, list[Offer]] = defaultdict(list)
+    for o in all_offers:
+        offers_by_product[o.product_id].append(o)
+
+    # ── 4. Compute price indicators ──
+    ids_with_offers = [pid for pid in all_product_ids if pid in offers_by_product]
+    analyzer = PriceAnalyzer()
+    indicators = (
+        await analyzer.compute_indicators_batch(ids_with_offers, session=db)
+        if ids_with_offers
+        else {}
+    )
+
+    # ── 5. Build results – one SmartSearchResult per group ──
+    results: list[SmartSearchResult] = []
+    for group in groups:
+        # Representative product = first in group (alphabetical)
+        representative = group[0]
+        # Merge offers from all products in the group
+        merged_offers: list[Offer] = []
+        for p in group:
+            merged_offers.extend(offers_by_product.get(p.id, []))
+        # Sort merged offers by price
+        merged_offers.sort(key=lambda o: (o.offer_price, o.price_per_unit or 0))
+        # Use best indicator from the group
+        best_indicator = None
+        for p in group:
+            ind = indicators.get(p.id)
+            if ind == "top":
+                best_indicator = "top"
+                break
+            if ind and not best_indicator:
+                best_indicator = ind
+
+        # Use image from any product in the group if representative lacks one
+        if not representative.image_url:
+            for p in group:
+                if p.image_url:
+                    representative.image_url = p.image_url
+                    break
+
+        results.append(
+            _build_smart_result(representative, merged_offers, best_indicator)
+        )
+
+    # Sort results based on sort param
+    if sort == "price":
+        results.sort(
+            key=lambda r: min((o.offer_price for o in r.offers), default=Decimal("9999"))
+        )
+    elif sort == "price_per_unit":
+        results.sort(
+            key=lambda r: r.best_price_per_unit or Decimal("9999")
+        )
+
+    return results
 
 
 class BrandInfoResponse(BaseModel):

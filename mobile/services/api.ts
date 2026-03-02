@@ -541,6 +541,19 @@ export async function getCatalogProducts(params?: {
   return res.data;
 }
 
+export async function getCatalogGrouped(params?: {
+  category?: string;
+  brand?: string;
+  q?: string;
+  sort?: string;
+  chain?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<SmartSearchResult[]> {
+  const res = await apiClient.get<SmartSearchResult[]>("/products/catalog-grouped", { params });
+  return res.data;
+}
+
 export async function getCategories(): Promise<CategoryInfo[]> {
   const res = await apiClient.get<CategoryInfo[]>("/products/categories");
   return res.data;
