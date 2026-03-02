@@ -3,7 +3,7 @@ import { Button, IconButton, Text, useTheme, ActivityIndicator } from "react-nat
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams, router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { getProduct, getProductHistory, getProductBestPrice, getProductPriceTrends, addToWatchlist, addToShoppingList } from "../../../services/api";
+import { getProduct, getProductHistory, getProductBestPrice, getProductPriceTrends, addToWatchlist, removeFromWatchlist, getWatchlistIds, addToShoppingList } from "../../../services/api";
 import { useAppStore } from "../../../stores/useAppStore";
 import PriceChart from "../../../components/PriceChart";
 import PriceTrendChart from "../../../components/PriceTrendChart";
@@ -45,9 +45,30 @@ export default function ProductDetailScreen() {
     enabled: !!id,
   });
 
+  // Watchlist state
+  const { data: watchlistData } = useQuery({
+    queryKey: ["watchlistIds"],
+    queryFn: getWatchlistIds,
+    enabled: isLoggedIn,
+  });
+  const isInWatchlist = watchlistData?.product_ids?.includes(id!) ?? false;
+
   const addMutation = useMutation({
     mutationFn: () => addToWatchlist(id!),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watchlist"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+      queryClient.invalidateQueries({ queryKey: ["watchlistIds"] });
+      queryClient.invalidateQueries({ queryKey: ["userDeals"] });
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: () => removeFromWatchlist(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+      queryClient.invalidateQueries({ queryKey: ["watchlistIds"] });
+      queryClient.invalidateQueries({ queryKey: ["userDeals"] });
+    },
   });
 
   const addToListMutation = useMutation({
@@ -191,14 +212,16 @@ export default function ProductDetailScreen() {
       <View style={styles.buttonRow}>
         {isLoggedIn && (
           <Button
-            mode="contained"
-            icon="star-plus-outline"
-            onPress={() => addMutation.mutate()}
-            loading={addMutation.isPending}
+            mode={isInWatchlist ? "outlined" : "contained"}
+            icon={isInWatchlist ? "check-circle" : "star-plus-outline"}
+            onPress={() =>
+              isInWatchlist ? removeMutation.mutate() : addMutation.mutate()
+            }
+            loading={addMutation.isPending || removeMutation.isPending}
             style={styles.actionBtn}
             compact
           >
-            Watchlist
+            {isInWatchlist ? "Monitorato" : "Monitora"}
           </Button>
         )}
         {isLoggedIn && (
@@ -316,7 +339,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   metaRow: { flexDirection: "row", gap: 16, marginTop: 8 },
-  metaText: { color: "#888" },
+  metaText: { color: "#555" },
   buttonRow: {
     flexDirection: "row",
     marginHorizontal: 12,
@@ -334,7 +357,7 @@ const styles = StyleSheet.create({
     padding: 16,
     ...glassCard,
   } as any,
-  sectionHeader: { marginBottom: 8, fontWeight: "600", color: "#555" },
+  sectionHeader: { marginBottom: 8, fontWeight: "700", color: "#333" },
   bestPriceRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -345,8 +368,8 @@ const styles = StyleSheet.create({
     color: "#999",
     marginTop: 4,
   },
-  pricePerUnit: { color: "#666", marginTop: 4, fontStyle: "italic" },
+  pricePerUnit: { color: "#555", marginTop: 4, fontStyle: "italic" },
   discount: { color: "#E65100", fontWeight: "bold", marginTop: 2 },
-  validUntil: { color: "#888", marginTop: 4 },
-  noDataText: { color: "#888" },
+  validUntil: { color: "#666", marginTop: 4 },
+  noDataText: { color: "#666" },
 });

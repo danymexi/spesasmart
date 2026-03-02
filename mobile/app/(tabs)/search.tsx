@@ -87,6 +87,7 @@ export default function CatalogScreen() {
     onSuccess: (_data, productId) => {
       queryClient.invalidateQueries({ queryKey: ["watchlistIds"] });
       queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+      queryClient.invalidateQueries({ queryKey: ["userDeals"] });
       const item = results.find((r) => r.product.id === productId);
       setSnackbar({
         visible: true,
@@ -101,6 +102,7 @@ export default function CatalogScreen() {
     onSuccess: (_data, productId) => {
       queryClient.invalidateQueries({ queryKey: ["watchlistIds"] });
       queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+      queryClient.invalidateQueries({ queryKey: ["userDeals"] });
       const item = results.find((r) => r.product.id === productId);
       setSnackbar({
         visible: true,
@@ -254,10 +256,10 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: "row", paddingHorizontal: 12, paddingVertical: 4, gap: 6 },
   chipSelected: { backgroundColor: glassColors.greenAccent },
   categoryRow: { paddingHorizontal: 12, paddingVertical: 4, gap: 6 },
-  resultCount: { paddingHorizontal: 16, paddingVertical: 4, color: "#555" },
+  resultCount: { paddingHorizontal: 16, paddingVertical: 4, color: "#444" },
   loader: { marginTop: 40 },
   footerLoader: { paddingVertical: 16 },
-  emptyText: { textAlign: "center", marginTop: 40, color: "#666", paddingHorizontal: 20 },
+  emptyText: { textAlign: "center", marginTop: 40, color: "#555", paddingHorizontal: 20 },
   listContent: { paddingBottom: 96 },
   snackbar: { marginBottom: 80 },
 });

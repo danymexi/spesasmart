@@ -104,10 +104,10 @@ const styles = StyleSheet.create({
     ...glassPanel,
   } as any,
   loader: { marginVertical: 20 },
-  emptyText: { color: "#888" },
+  emptyText: { color: "#666" },
   row: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
   chainLabel: { width: 90 },
-  chainName: { fontSize: 13 },
+  chainName: { fontSize: 13, color: "#1a1a1a" },
   barContainer: {
     flex: 1,
     height: 24,

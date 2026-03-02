@@ -340,22 +340,81 @@ async def get_user_deals(
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get personalized deals for products in user's watchlist."""
+    """Get personalized deals for products in user's watchlist.
+
+    Also finds similar products (same brand + similar name) across chains
+    so the user sees a full multi-chain comparison.
+    """
     today = date.today()
 
     wl_result = await db.execute(
         select(UserWatchlist.product_id).where(UserWatchlist.user_id == user.id)
     )
-    product_ids = [row[0] for row in wl_result.all()]
+    watchlist_ids = [row[0] for row in wl_result.all()]
 
-    if not product_ids:
+    if not watchlist_ids:
         return []
 
+    # Fetch watchlist products to find similar ones
+    from app.api.products import (
+        _normalize_product_name, _names_match, SequenceMatcher,
+    )
+
+    prod_result = await db.execute(
+        select(Product).where(Product.id.in_(watchlist_ids))
+    )
+    watchlist_products = list(prod_result.scalars().all())
+
+    # For each watchlist product, find similar products across ALL chains
+    all_product_ids = set(watchlist_ids)
+    similar_to_watchlist: dict = {}
+
+    if watchlist_products:
+        # Build name search patterns from watchlist products
+        name_patterns = []
+        for wp in watchlist_products:
+            # Use first significant word (>=4 chars) as ILIKE search term
+            words = wp.name.split()
+            for w in words:
+                if len(w) >= 4 and w.lower() not in ("alla", "allo", "alle", "della", "dello", "delle", "con", "per"):
+                    name_patterns.append(w)
+                    break
+
+        if name_patterns:
+            from sqlalchemy import or_
+            candidates_result = await db.execute(
+                select(Product).where(
+                    or_(*[Product.name.ilike(f"%{pat}%") for pat in name_patterns]),
+                    Product.id.notin_(watchlist_ids),
+                )
+            )
+            candidates = list(candidates_result.scalars().all())
+
+            for wp in watchlist_products:
+                wp_norm = _normalize_product_name(wp.name)
+                wp_brand = (wp.brand or "").lower().strip()
+                for cp in candidates:
+                    if cp.id in similar_to_watchlist:
+                        continue
+                    cp_norm = _normalize_product_name(cp.name)
+                    if not _names_match(wp_norm, cp_norm):
+                        continue
+                    # Check brand: allow mismatch only on strong name match
+                    cp_brand = (cp.brand or "").lower().strip()
+                    if wp_brand and cp_brand and wp_brand != cp_brand:
+                        shorter, longer = sorted([wp_norm, cp_norm], key=len)
+                        ratio = SequenceMatcher(None, wp_norm, cp_norm).ratio()
+                        if not (ratio >= 0.85 or (len(shorter) >= 6 and shorter in longer)):
+                            continue
+                    all_product_ids.add(cp.id)
+                    similar_to_watchlist[cp.id] = wp.id
+
+    # Fetch all active offers for watchlist + similar products
     offers_result = await db.execute(
         select(Offer)
         .options(joinedload(Offer.product), joinedload(Offer.chain))
         .where(
-            Offer.product_id.in_(product_ids),
+            Offer.product_id.in_(list(all_product_ids)),
             Offer.valid_from <= today,
             Offer.valid_to >= today,
         )
@@ -363,20 +422,27 @@ async def get_user_deals(
     )
     offers = offers_result.unique().scalars().all()
 
-    return [
-        UserDealResponse(
-            product_id=str(o.product_id),
-            product_name=o.product.name if o.product else "Unknown",
-            brand=o.product.brand if o.product else None,
-            chain_name=o.chain.name if o.chain else "Unknown",
-            offer_price=o.offer_price,
-            original_price=o.original_price,
-            discount_pct=o.discount_pct,
-            valid_to=o.valid_to,
-            image_url=o.product.image_url if o.product else None,
+    # Map similar product offers to their watchlist product_id
+    results = []
+    for o in offers:
+        mapped_pid = similar_to_watchlist.get(o.product_id, o.product_id)
+        # Use the watchlist product's name/brand for display consistency
+        wp = next((p for p in watchlist_products if p.id == mapped_pid), None)
+        results.append(
+            UserDealResponse(
+                product_id=str(mapped_pid),
+                product_name=wp.name if wp else (o.product.name if o.product else "Unknown"),
+                brand=wp.brand if wp else (o.product.brand if o.product else None),
+                chain_name=o.chain.name if o.chain else "Unknown",
+                offer_price=o.offer_price,
+                original_price=o.original_price,
+                discount_pct=o.discount_pct,
+                valid_to=o.valid_to,
+                image_url=wp.image_url if wp and wp.image_url else (o.product.image_url if o.product else None),
+            )
         )
-        for o in offers
-    ]
+
+    return results
 
 
 # --- User Brands ---

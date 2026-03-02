@@ -91,6 +91,7 @@ export default function WatchlistScreen() {
                       variant="titleMedium"
                       numberOfLines={2}
                       onPress={() => router.push(`/product/${item.product_id}`)}
+                      style={styles.productName}
                     >
                       {item.product_name}
                     </Text>
@@ -184,17 +185,18 @@ const styles = StyleSheet.create({
   } as any,
   cardContent: { flexDirection: "row", alignItems: "center" },
   infoSection: { flex: 1 },
-  brand: { color: "#666", marginTop: 2 },
-  targetPrice: { color: "#999", marginTop: 4 },
+  productName: { color: "#1a1a1a", fontWeight: "600" },
+  brand: { color: "#444", marginTop: 2 },
+  targetPrice: { color: "#666", marginTop: 4 },
   priceSection: { alignItems: "flex-end", marginRight: 4 },
-  chainText: { color: "#666", marginTop: 2 },
+  chainText: { color: "#555", marginTop: 2 },
   actionButtons: { flexDirection: "column", marginLeft: 4 },
   alertBadge: {
     marginTop: 4,
     ...alertBadgeGlass,
   },
   alertText: { color: glassColors.greenMedium, fontSize: 10, fontWeight: "bold" },
-  emptyTitle: { marginBottom: 8 },
-  emptyText: { color: "#888", textAlign: "center", marginBottom: 16 },
+  emptyTitle: { marginBottom: 8, color: "#1a1a1a" },
+  emptyText: { color: "#555", textAlign: "center", marginBottom: 16 },
   listContent: { paddingTop: 12, paddingBottom: 96 },
 });

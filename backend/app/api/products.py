@@ -277,7 +277,13 @@ def _names_match(norm_a: str, norm_b: str, threshold: float = 0.75) -> bool:
 
 
 def _group_similar_products(products: list[Product]) -> list[list[Product]]:
-    """Group products with similar names (same brand required if both have one)."""
+    """Group products with similar names.
+
+    Brand check is soft: if names are very similar (high match), different
+    brands are allowed (e.g. same yogurt listed as "Yomo" on Lidl and
+    "Delta" on Esselunga).  Only when names are borderline similar do we
+    require matching brands to avoid false positives.
+    """
     groups: list[list[Product]] = []
     used: set[int] = set()
     normalized = [_normalize_product_name(p.name) for p in products]
@@ -293,12 +299,29 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
                 continue
             q = products[j]
             brand_j = (q.brand or "").lower().strip()
-            # Both have brands -> must match
-            if brand_i and brand_j and brand_i != brand_j:
+            brands_differ = brand_i and brand_j and brand_i != brand_j
+
+            if not _names_match(normalized[i], normalized[j]):
                 continue
-            if _names_match(normalized[i], normalized[j]):
-                group.append(q)
-                used.add(j)
+
+            if brands_differ:
+                # Allow grouping despite brand mismatch only if names are
+                # very similar (strong match: high ratio or long substring)
+                shorter, longer = sorted(
+                    [normalized[i], normalized[j]], key=len
+                )
+                ratio = SequenceMatcher(
+                    None, normalized[i], normalized[j]
+                ).ratio()
+                strong = (
+                    ratio >= 0.85
+                    or (len(shorter) >= 6 and shorter in longer)
+                )
+                if not strong:
+                    continue
+
+            group.append(q)
+            used.add(j)
         groups.append(group)
     return groups
 

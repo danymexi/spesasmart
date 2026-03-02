@@ -13,7 +13,7 @@ function showAlert(title: string, message: string) {
 import { useAppStore } from "../../stores/useAppStore";
 import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
-import { glassPanel, glassColors } from "../../styles/glassStyles";
+import { glassPanel, glassColors, glassCard } from "../../styles/glassStyles";
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -157,12 +157,14 @@ export default function SettingsScreen() {
       {/* Profile section */}
       <View style={styles.section}>
         <List.Section>
-          <List.Subheader>Profilo</List.Subheader>
+          <List.Subheader style={styles.listSubheader}>Profilo</List.Subheader>
           {isLoggedIn ? (
             <View style={styles.loggedInSection}>
               <List.Item
                 title="Email"
                 description={userEmail}
+                titleStyle={styles.listTitle}
+                descriptionStyle={styles.listDescription}
                 left={(props) => <List.Icon {...props} icon="account" />}
               />
               <Button
@@ -229,10 +231,12 @@ export default function SettingsScreen() {
       {/* Notifications */}
       <View style={styles.section}>
         <List.Section>
-          <List.Subheader>Notifiche</List.Subheader>
+          <List.Subheader style={styles.listSubheader}>Notifiche</List.Subheader>
           <List.Item
             title="Notifiche Push"
             description="Ricevi avvisi quando i tuoi prodotti sono in offerta"
+            titleStyle={styles.listTitle}
+            descriptionStyle={styles.listDescription}
             left={(props) => <List.Icon {...props} icon="bell" />}
             right={() => (
               <Switch
@@ -245,6 +249,8 @@ export default function SettingsScreen() {
           <List.Item
             title="Telegram Bot"
             description="Cerca @SpesaSmartBot su Telegram"
+            titleStyle={styles.listTitle}
+            descriptionStyle={styles.listDescription}
             left={(props) => <List.Icon {...props} icon="send" />}
           />
           <List.Item
@@ -254,6 +260,8 @@ export default function SettingsScreen() {
                 ? "Attivo: ricevi un riepilogo ogni lunedi'"
                 : "Disattivo: ricevi notifiche immediate"
             }
+            titleStyle={styles.listTitle}
+            descriptionStyle={styles.listDescription}
             left={(props) => <List.Icon {...props} icon="calendar-week" />}
             right={() => (
               <Switch
@@ -272,7 +280,7 @@ export default function SettingsScreen() {
       {isLoggedIn && (
         <View style={styles.section}>
           <List.Section>
-            <List.Subheader>Marche Preferite</List.Subheader>
+            <List.Subheader style={styles.listSubheader}>Marche Preferite</List.Subheader>
             <View style={styles.brandInputRow}>
               <TextInput
                 label="Aggiungi marca"
@@ -316,6 +324,8 @@ export default function SettingsScreen() {
                   key={ub.id}
                   title={ub.brand_name}
                   description={ub.category || undefined}
+                  titleStyle={styles.listTitle}
+                  descriptionStyle={styles.listDescription}
                   left={(props) => <List.Icon {...props} icon="tag-heart" />}
                   right={() => (
                     <Button
@@ -342,10 +352,12 @@ export default function SettingsScreen() {
       {/* Zone */}
       <View style={styles.section}>
         <List.Section>
-          <List.Subheader>Zona</List.Subheader>
+          <List.Subheader style={styles.listSubheader}>Zona</List.Subheader>
           <List.Item
             title="Monza e Brianza"
             description="Zona monitorata per le offerte"
+            titleStyle={styles.listTitle}
+            descriptionStyle={styles.listDescription}
             left={(props) => <List.Icon {...props} icon="map-marker" />}
           />
         </List.Section>
@@ -354,7 +366,7 @@ export default function SettingsScreen() {
       {/* Preferred Chains */}
       <View style={styles.section}>
         <List.Section>
-          <List.Subheader>Catene Preferite</List.Subheader>
+          <List.Subheader style={styles.listSubheader}>Catene Preferite</List.Subheader>
           <Text variant="bodySmall" style={styles.chainHint}>
             Seleziona le catene da mostrare in home. Se nessuna selezionata, le mostra tutte.
           </Text>
@@ -365,15 +377,19 @@ export default function SettingsScreen() {
       {/* App info */}
       <View style={styles.section}>
         <List.Section>
-          <List.Subheader>Info</List.Subheader>
+          <List.Subheader style={styles.listSubheader}>Info</List.Subheader>
           <List.Item
             title="Versione"
             description="1.0.0"
+            titleStyle={styles.listTitle}
+            descriptionStyle={styles.listDescription}
             left={(props) => <List.Icon {...props} icon="information" />}
           />
           <List.Item
             title="SpesaSmart"
             description="Confronto prezzi supermercati - Monza e Brianza"
+            titleStyle={styles.listTitle}
+            descriptionStyle={styles.listDescription}
             left={(props) => <List.Icon {...props} icon="cart" />}
           />
         </List.Section>
@@ -451,6 +467,7 @@ function PreferredChainsSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
         <List.Item
           key={chain.slug}
           title={chain.label}
+          titleStyle={{ color: "#1a1a1a" }}
           left={(props) => <List.Icon {...props} icon="store" />}
           right={() => (
             <Switch
@@ -473,8 +490,11 @@ const styles = StyleSheet.create({
     ...glassPanel,
     overflow: "hidden",
   } as any,
+  listSubheader: { color: glassColors.greenDark, fontWeight: "700", fontSize: 14 },
+  listTitle: { color: "#1a1a1a" },
+  listDescription: { color: "#555" },
   createSection: { paddingHorizontal: 16, paddingBottom: 16 },
-  createText: { color: "#666", marginBottom: 12 },
+  createText: { color: "#555", marginBottom: 12 },
   errorText: { color: "#D32F2F", marginBottom: 8 },
   input: { marginBottom: 12 },
   buttonRow: { flexDirection: "row", gap: 12 },
@@ -487,7 +507,7 @@ const styles = StyleSheet.create({
   brandAddButton: { marginTop: 6 },
   suggestionsRow: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, gap: 6, marginBottom: 8, marginTop: 4 },
   suggestionChip: { marginBottom: 2 },
-  brandEmptyText: { color: "#888", paddingHorizontal: 16, paddingBottom: 12 },
-  chainHint: { color: "#888", paddingHorizontal: 16, paddingBottom: 4 },
+  brandEmptyText: { color: "#666", paddingHorizontal: 16, paddingBottom: 12 },
+  chainHint: { color: "#666", paddingHorizontal: 16, paddingBottom: 4 },
   bottomPadding: { height: 96 },
 });

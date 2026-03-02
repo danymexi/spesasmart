@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
   sectionTitleInline: { fontWeight: "700", color: glassColors.greenDark },
   horizontalList: { paddingHorizontal: 12 },
   horizontalCard: { width: 260, marginRight: 12 },
-  emptyText: { paddingHorizontal: 16, color: "#888" },
+  emptyText: { paddingHorizontal: 16, color: "#555" },
   ppuBadge: {
     backgroundColor: "rgba(230,81,0,0.10)",
     borderRadius: 8,
