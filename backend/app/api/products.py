@@ -84,7 +84,7 @@ async def get_catalog_products(
     category: str | None = Query(None),
     brand: str | None = Query(None),
     q: str | None = Query(None),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):

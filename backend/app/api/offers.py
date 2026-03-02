@@ -128,7 +128,7 @@ async def get_active_offers(
     category: str | None = Query(None),
     min_discount: float | None = Query(None, description="Minimum discount %"),
     sort: str = Query("price", enum=["price", "discount", "name"]),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, le=1000),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_db),
 ):
