@@ -99,12 +99,21 @@ _WEIGHT_KEYWORDS: set[str] = {
 _VOLUME_KEYWORDS: set[str] = {
     "acqua", "birra", "vino", "spumante", "prosecco",
     "olio", "aceto",
-    "succo", "aranciata", "cola", "sprite", "fanta", "the", "tè",
+    "succo", "aranciata", "cola", "sprite", "fanta", "the", "tè", "thè",
     "latte",  # latte is also volume (litri) — handled by checking both
     "detersivo", "ammorbidente", "candeggina", "sgrassatore",
     "shampoo", "bagnoschiuma", "sapone", "balsamo",
+    "lacca", "crema", "gel", "schiuma", "mousse",
+    "dentifricio", "collutorio", "detergente", "doccia",
+    "lozione", "tonico", "siero", "spray", "profumo",
+    "deodorante", "conditioner", "maschera",
+    "nettare", "sciroppo", "bevanda",
     "liquore", "amaro", "gin", "vodka", "rum", "whisky",
 }
+
+# Regex to detect volume/weight units inside a product_unit string like "ml 300", "500 g"
+_RE_VOLUME_IN_UNIT = re.compile(r"\b(ml|cl|dl|l|lt|litri|litro)\b", re.IGNORECASE)
+_RE_WEIGHT_IN_UNIT = re.compile(r"\b(g|gr|grammi|hg|kg|etto|etti)\b", re.IGNORECASE)
 
 
 class UnitPriceCalculator:
@@ -116,12 +125,14 @@ class UnitPriceCalculator:
         price_per_unit: Decimal,
         product_name: str | None,
         scraper_unit: str | None,
+        product_unit: str | None = None,
     ) -> str:
         """Validate and correct the unit_reference provided by a scraper.
 
         Many scrapers (especially Iperal) report ``"pz"`` for ALL products,
         even when the PPU is clearly per-kg or per-litre.  This method uses
-        a price-ratio heuristic + product-name keywords to infer the real unit.
+        the product's unit field, a price-ratio heuristic, and product-name
+        keywords to infer the real unit.
 
         Returns one of ``"kg"``, ``"l"``, ``"pz"``.
         """
@@ -137,17 +148,33 @@ class UnitPriceCalculator:
 
         # PPU > offer_price * 1.5 → clearly not per-piece, infer kg or l
         if price_per_unit > offer_price * Decimal("1.5"):
-            return UnitPriceCalculator._infer_kg_or_l(product_name)
+            return UnitPriceCalculator._infer_kg_or_l(
+                product_name, product_unit
+            )
 
         # PPU between offer_price and offer_price*1.5 → ambiguous, trust scraper
         if scraper_unit:
             return scraper_unit
 
-        return UnitPriceCalculator._infer_kg_or_l(product_name)
+        return UnitPriceCalculator._infer_kg_or_l(product_name, product_unit)
 
     @staticmethod
-    def _infer_kg_or_l(product_name: str | None) -> str:
-        """Guess whether a product is sold by weight (kg) or volume (l)."""
+    def _infer_kg_or_l(
+        product_name: str | None, product_unit: str | None = None
+    ) -> str:
+        """Guess whether a product is sold by weight (kg) or volume (l).
+
+        Checks the product's ``unit`` field first (most reliable), then
+        falls back to keyword matching on the product name.
+        """
+        # 1. Check product_unit field (e.g. "ml 300", "500 g", "1 lt")
+        if product_unit:
+            if _RE_VOLUME_IN_UNIT.search(product_unit):
+                return "l"
+            if _RE_WEIGHT_IN_UNIT.search(product_unit):
+                return "kg"
+
+        # 2. Keyword matching on product name
         if not product_name:
             return "kg"
 

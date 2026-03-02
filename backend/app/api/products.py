@@ -234,16 +234,49 @@ async def get_catalog_products(
 def _normalize_product_name(name: str) -> str:
     """Normalize a product name for fuzzy grouping."""
     n = name.lower().strip()
-    # Remove common quantity/size suffixes
-    n = re.sub(r"\b\d+\s*(pz|pezzi|rotoli|x|ml|cl|l|g|kg|gr)\b", "", n)
+    # Remove common quantity/size suffixes and trailing numbers
+    n = re.sub(r"\b\d+\s*(pz|pezzi|rotoli|rotoloni|x|ml|cl|l|g|kg|gr)\b", "", n)
     n = re.sub(r"\bx\s*\d+\b", "", n)
+    # Remove "carta igienica", "carta cucina" etc. (generic product type)
+    n = re.sub(r"\bcarta\s+(igienica|cucina|assorbente)\b", "", n)
     n = re.sub(r"\s+", " ", n).strip()
     return n
 
 
-def _group_similar_products(
-    products: list[Product], threshold: float = 0.78
-) -> list[list[Product]]:
+def _names_match(norm_a: str, norm_b: str, threshold: float = 0.75) -> bool:
+    """Check if two normalized names refer to the same product.
+
+    Uses three strategies:
+    1. Substring containment (shorter name inside longer, min 4 chars)
+    2. Shared-prefix match (first 2+ words in common)
+    3. SequenceMatcher ratio above threshold
+    """
+    shorter, longer = sorted([norm_a, norm_b], key=len)
+
+    # Strategy 1: substring containment (e.g. "rotoloni" in "rotoloni regina")
+    if len(shorter) >= 4 and shorter in longer:
+        return True
+
+    # Strategy 2: shared significant words (first 2+ words match)
+    words_a = norm_a.split()
+    words_b = norm_b.split()
+    if len(words_a) >= 1 and len(words_b) >= 1:
+        common_prefix = 0
+        for wa, wb in zip(words_a, words_b):
+            if wa == wb:
+                common_prefix += 1
+            else:
+                break
+        # At least 2 leading words match, or 1 word if it's long (>=6 chars)
+        if common_prefix >= 2 or (common_prefix == 1 and len(words_a[0]) >= 6):
+            return True
+
+    # Strategy 3: fuzzy ratio
+    ratio = SequenceMatcher(None, norm_a, norm_b).ratio()
+    return ratio >= threshold
+
+
+def _group_similar_products(products: list[Product]) -> list[list[Product]]:
     """Group products with similar names (same brand required if both have one)."""
     groups: list[list[Product]] = []
     used: set[int] = set()
@@ -263,8 +296,7 @@ def _group_similar_products(
             # Both have brands -> must match
             if brand_i and brand_j and brand_i != brand_j:
                 continue
-            ratio = SequenceMatcher(None, normalized[i], normalized[j]).ratio()
-            if ratio >= threshold:
+            if _names_match(normalized[i], normalized[j]):
                 group.append(q)
                 used.add(j)
         groups.append(group)

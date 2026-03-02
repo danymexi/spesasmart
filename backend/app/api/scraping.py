@@ -432,7 +432,7 @@ async def fix_ppu_units():
     async with async_session() as session:
         # Find suspect offers: pz but PPU >> offer_price
         stmt = (
-            select(Offer, Product.name)
+            select(Offer, Product.name, Product.unit)
             .join(Product, Offer.product_id == Product.id)
             .where(
                 Offer.unit_reference == "pz",
@@ -445,12 +445,13 @@ async def fix_ppu_units():
         rows = result.all()
         total_suspect = len(rows)
 
-        for offer, product_name in rows:
+        for offer, product_name, product_unit in rows:
             new_unit = UnitPriceCalculator.infer_unit_reference(
                 offer.offer_price,
                 offer.price_per_unit,
                 product_name,
                 "pz",
+                product_unit=product_unit,
             )
             if new_unit != "pz":
                 offer.unit_reference = new_unit

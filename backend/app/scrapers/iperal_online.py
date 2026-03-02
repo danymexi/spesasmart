@@ -406,7 +406,7 @@ class IperalOnlineScraper:
 
         # Create or update Offer with price data
         if self._chain_id and product:
-            await self._upsert_offer(prod, product.id, session)
+            await self._upsert_offer(prod, product.id, session, product_unit=unit)
 
         return 1
 
@@ -419,6 +419,7 @@ class IperalOnlineScraper:
         prod: dict[str, Any],
         product_id: uuid.UUID,
         session,
+        product_unit: str | None = None,
     ) -> None:
         """Create or update an Offer from Iperal API price fields.
 
@@ -460,6 +461,7 @@ class IperalOnlineScraper:
             product_name = (prod.get("name") or "").strip()
             unit_reference = UnitPriceCalculator.infer_unit_reference(
                 offer_price, price_per_unit, product_name, unit_reference,
+                product_unit=product_unit,
             )
 
         today = date.today()

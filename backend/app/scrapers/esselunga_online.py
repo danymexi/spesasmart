@@ -523,7 +523,7 @@ class EsselungaOnlineScraper:
 
         # --- Create or update Offer with price data ---
         if self._chain_id and product:
-            await self._upsert_offer(prod, product.id, session)
+            await self._upsert_offer(prod, product.id, session, product_unit=unit)
 
         return 1
 
@@ -532,6 +532,7 @@ class EsselungaOnlineScraper:
         prod: dict[str, Any],
         product_id: uuid.UUID,
         session,
+        product_unit: str | None = None,
     ) -> None:
         """Create or update an Offer from Esselunga API price fields."""
         raw_price = prod.get("price")
@@ -597,6 +598,7 @@ class EsselungaOnlineScraper:
             product_name = (prod.get("description") or "").strip()
             unit_reference = UnitPriceCalculator.infer_unit_reference(
                 offer_price, price_per_unit, product_name, unit_reference,
+                product_unit=product_unit,
             )
 
         today = date.today()

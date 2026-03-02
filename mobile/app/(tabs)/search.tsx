@@ -23,7 +23,7 @@ const PAGE_SIZE = 50;
 const SORT_OPTIONS = [
   { key: "name", label: "A-Z" },
   { key: "price", label: "Prezzo" },
-  { key: "price_per_unit", label: "EUR/kg" },
+  { key: "price_per_unit", label: "Prezzo/unita'" },
 ] as const;
 
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
