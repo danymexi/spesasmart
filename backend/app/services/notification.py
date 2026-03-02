@@ -16,7 +16,7 @@ from sqlalchemy.orm import joinedload
 from telegram import Bot
 from telegram.error import TelegramError
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.database import async_session
 from app.models import Chain, Offer, Product, UserBrand, UserProfile, UserWatchlist
 
@@ -30,8 +30,8 @@ class NotificationService:
     """Sends watchlist-based notifications over Telegram and Expo Push."""
 
     def __init__(self) -> None:
-        settings = get_settings()
-        self._telegram_token: str = settings.telegram_bot_token
+        self._settings: Settings = get_settings()
+        self._telegram_token: str = self._settings.telegram_bot_token
         self._bot: Bot | None = None
 
     # ------------------------------------------------------------------
@@ -123,6 +123,30 @@ class NotificationService:
                 exc,
             )
             return False
+
+    # ------------------------------------------------------------------
+    # Web Push
+    # ------------------------------------------------------------------
+
+    async def send_web_push_notification(
+        self,
+        user_id,
+        title: str,
+        body: str,
+        *,
+        session: AsyncSession,
+    ) -> bool:
+        """Send a Web Push notification to all subscriptions for a user."""
+        from app.services.web_push_sender import send_web_push_to_user
+
+        payload = {"title": title, "body": body}
+        sent = await send_web_push_to_user(
+            user_id, payload, self._settings, session
+        )
+        if sent > 0:
+            logger.info("Web push sent to user %s (%d subs)", user_id, sent)
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Watchlist matching
@@ -379,13 +403,22 @@ class NotificationService:
                 )
                 return 0
 
-            # Dispatch notifications
+            # Dispatch notifications (skip users in digest mode)
             sent_count = 0
             for user, _entry, offer in all_alerts:
+                if getattr(user, "notification_mode", "instant") == "digest":
+                    continue
+
                 product: Product = offer.product
                 chain_obj: Chain = offer.chain
                 message = self.format_offer_message(offer, product, chain_obj)
                 title = f"Offerta: {product.name}"
+                plain_body = (
+                    message.replace("<b>", "")
+                    .replace("</b>", "")
+                    .replace("<s>", "")
+                    .replace("</s>", "")
+                )
 
                 if user.telegram_chat_id:
                     ok = await self.send_telegram_notification(user.telegram_chat_id, message)
@@ -393,21 +426,22 @@ class NotificationService:
                         sent_count += 1
 
                 if user.push_token:
-                    plain_body = (
-                        message.replace("<b>", "")
-                        .replace("</b>", "")
-                        .replace("<s>", "")
-                        .replace("</s>", "")
-                    )
                     ok = await self.send_push_notification(user.push_token, title, plain_body)
                     if ok:
                         sent_count += 1
+
+                # Web Push
+                ok = await self.send_web_push_notification(
+                    user.id, title, plain_body, session=session
+                )
+                if ok:
+                    sent_count += 1
 
             logger.info(
                 "Chain '%s': dispatched %d notifications for %d alerts.",
                 chain_slug,
                 sent_count,
-                len(alerts),
+                len(all_alerts),
             )
             return sent_count
 
@@ -472,14 +506,23 @@ class NotificationService:
                 )
                 return 0
 
-            # 3. Dispatch notifications
+            # 3. Dispatch notifications (skip users in digest mode)
             sent_count = 0
 
             for user, _watchlist_entry, offer in all_alerts:
+                if getattr(user, "notification_mode", "instant") == "digest":
+                    continue
+
                 product: Product = offer.product
                 chain: Chain = offer.chain
                 message = self.format_offer_message(offer, product, chain)
                 title = f"Offerta: {product.name}"
+                plain_body = (
+                    message.replace("<b>", "")
+                    .replace("</b>", "")
+                    .replace("<s>", "")
+                    .replace("</s>", "")
+                )
 
                 # Telegram
                 if user.telegram_chat_id:
@@ -491,26 +534,173 @@ class NotificationService:
 
                 # Expo push
                 if user.push_token:
-                    # Strip HTML tags for the push body
-                    plain_body = (
-                        message.replace("<b>", "")
-                        .replace("</b>", "")
-                        .replace("<s>", "")
-                        .replace("</s>", "")
-                    )
                     ok = await self.send_push_notification(
                         user.push_token, title, plain_body
                     )
                     if ok:
                         sent_count += 1
 
+                # Web Push
+                ok = await self.send_web_push_notification(
+                    user.id, title, plain_body, session=session
+                )
+                if ok:
+                    sent_count += 1
+
             logger.info(
                 "Flyer %s: dispatched %d notifications for %d alerts.",
                 flyer_id,
                 sent_count,
-                len(alerts),
+                len(all_alerts),
             )
             return sent_count
         finally:
             if close_session:
                 await session.close()
+
+    # ------------------------------------------------------------------
+    # Weekly digest
+    # ------------------------------------------------------------------
+
+    async def send_weekly_digest(self) -> int:
+        """Collect all active offers for digest-mode users' watchlists/brands
+        and send a single grouped notification per user.
+
+        Returns the number of users notified.
+        """
+        async with async_session() as session:
+            # Get all users with digest mode
+            stmt = select(UserProfile).where(
+                UserProfile.notification_mode == "digest"
+            )
+            result = await session.execute(stmt)
+            digest_users: list[UserProfile] = list(result.scalars().all())
+
+            if not digest_users:
+                logger.info("No digest-mode users found.")
+                return 0
+
+            from datetime import date as date_type
+
+            today = date_type.today()
+
+            # Get all currently valid offers with product and chain info
+            offers_stmt = (
+                select(Offer)
+                .options(
+                    joinedload(Offer.product),
+                    joinedload(Offer.chain),
+                )
+                .where(
+                    Offer.valid_from <= today,
+                    Offer.valid_to >= today,
+                )
+            )
+            offers_result = await session.execute(offers_stmt)
+            all_offers: list[Offer] = list(offers_result.scalars().unique().all())
+
+            if not all_offers:
+                logger.info("No active offers for digest.")
+                return 0
+
+            notified = 0
+            for user in digest_users:
+                # Collect watchlist matches
+                wl_stmt = select(UserWatchlist).where(
+                    UserWatchlist.user_id == user.id
+                )
+                wl_result = await session.execute(wl_stmt)
+                wl_entries = wl_result.scalars().all()
+                wl_product_ids = {e.product_id for e in wl_entries}
+
+                # Collect brand matches
+                brand_stmt = select(UserBrand).where(
+                    UserBrand.user_id == user.id,
+                    UserBrand.notify.is_(True),
+                )
+                brand_result = await session.execute(brand_stmt)
+                user_brands = brand_result.scalars().all()
+
+                # Build product->brand index
+                brand_names = {ub.brand_name.lower() for ub in user_brands}
+
+                matching_offers: list[Offer] = []
+                seen_ids: set = set()
+
+                for offer in all_offers:
+                    if offer.id in seen_ids:
+                        continue
+                    product = offer.product
+                    if not product:
+                        continue
+
+                    matched = False
+                    # Watchlist match
+                    if offer.product_id in wl_product_ids:
+                        matched = True
+                    # Brand match
+                    if not matched and product.brand:
+                        for bn in brand_names:
+                            if bn in product.brand.lower():
+                                matched = True
+                                break
+
+                    if matched:
+                        seen_ids.add(offer.id)
+                        matching_offers.append(offer)
+
+                if not matching_offers:
+                    continue
+
+                # Group by chain
+                by_chain: dict[str, list[Offer]] = {}
+                for o in matching_offers:
+                    chain_name = o.chain.name if o.chain else "Altro"
+                    by_chain.setdefault(chain_name, []).append(o)
+
+                # Format the digest message
+                total = len(matching_offers)
+                lines = [f"<b>Questa settimana {total} offerte per te:</b>\n"]
+                for chain_name, chain_offers in sorted(by_chain.items()):
+                    lines.append(f"\n<b>{chain_name.upper()}</b>")
+                    for o in chain_offers[:10]:  # Limit per chain
+                        product = o.product
+                        price_str = f"{o.offer_price:.2f}\u20ac"
+                        discount_str = f" (-{o.discount_pct:.0f}%)" if o.discount_pct else ""
+                        lines.append(f"- {product.name}: {price_str}{discount_str}")
+                    if len(chain_offers) > 10:
+                        lines.append(f"  ...e altre {len(chain_offers) - 10}")
+
+                message = "\n".join(lines)
+                title = f"Riepilogo settimanale: {total} offerte"
+                plain_body = (
+                    message.replace("<b>", "")
+                    .replace("</b>", "")
+                )
+
+                sent = False
+                if user.telegram_chat_id:
+                    ok = await self.send_telegram_notification(
+                        user.telegram_chat_id, message
+                    )
+                    if ok:
+                        sent = True
+
+                if user.push_token:
+                    ok = await self.send_push_notification(
+                        user.push_token, title, plain_body
+                    )
+                    if ok:
+                        sent = True
+
+                ok = await self.send_web_push_notification(
+                    user.id, title, plain_body, session=session
+                )
+                if ok:
+                    sent = True
+
+                if sent:
+                    notified += 1
+
+            logger.info("Weekly digest: notified %d users.", notified)
+            return notified

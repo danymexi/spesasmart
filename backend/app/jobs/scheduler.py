@@ -165,6 +165,19 @@ async def sync_catalog():
     logger.info("Weekly catalog sync complete: %d total products processed.", total)
 
 
+async def send_weekly_digest():
+    """Send the weekly notification digest to users in digest mode."""
+    logger.info("Starting weekly notification digest.")
+    try:
+        from app.services.notification import NotificationService
+
+        notifier = NotificationService()
+        notified = await notifier.send_weekly_digest()
+        logger.info("Weekly digest complete: %d users notified.", notified)
+    except Exception:
+        logger.exception("Weekly digest failed.")
+
+
 async def scrape_all_chains():
     """Scrape all chains sequentially."""
     for slug in ["esselunga", "lidl", "coop", "iperal"]:
@@ -212,6 +225,15 @@ def start_scheduler() -> AsyncIOScheduler:
         args=["iperal"],
         id="scrape_iperal",
         name="Scrape Iperal flyers",
+        replace_existing=True,
+    )
+
+    # Weekly notification digest: Monday 8:00 AM
+    scheduler.add_job(
+        send_weekly_digest,
+        CronTrigger(day_of_week="mon", hour=8, minute=0),
+        id="weekly_digest",
+        name="Weekly notification digest",
         replace_existing=True,
     )
 

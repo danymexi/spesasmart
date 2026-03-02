@@ -11,7 +11,7 @@ function showAlert(title: string, message: string) {
   }
 }
 import { useAppStore } from "../../stores/useAppStore";
-import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands } from "../../services/api";
+import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors } from "../../styles/glassStyles";
 
@@ -28,6 +28,26 @@ export default function SettingsScreen() {
   const [snackVisible, setSnackVisible] = useState(false);
 
   const queryClient = useQueryClient();
+
+  // Fetch user profile for notification_mode
+  const { data: userProfile } = useQuery({
+    queryKey: ["userProfile"],
+    queryFn: getMe,
+    enabled: isLoggedIn,
+  });
+
+  const notificationModeMutation = useMutation({
+    mutationFn: (mode: string) => updateUserProfile({ notification_mode: mode }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["userProfile"] });
+      setSnackMessage(
+        userProfile?.notification_mode === "instant"
+          ? "Riepilogo settimanale attivato"
+          : "Notifiche immediate attivate"
+      );
+      setSnackVisible(true);
+    },
+  });
 
   // Brand queries
   const { data: userBrands } = useQuery({
@@ -226,6 +246,24 @@ export default function SettingsScreen() {
             title="Telegram Bot"
             description="Cerca @SpesaSmartBot su Telegram"
             left={(props) => <List.Icon {...props} icon="send" />}
+          />
+          <List.Item
+            title="Riepilogo settimanale"
+            description={
+              userProfile?.notification_mode === "digest"
+                ? "Attivo: ricevi un riepilogo ogni lunedi'"
+                : "Disattivo: ricevi notifiche immediate"
+            }
+            left={(props) => <List.Icon {...props} icon="calendar-week" />}
+            right={() => (
+              <Switch
+                value={userProfile?.notification_mode === "digest"}
+                onValueChange={(v) =>
+                  notificationModeMutation.mutate(v ? "digest" : "instant")
+                }
+                disabled={!isLoggedIn || notificationModeMutation.isPending}
+              />
+            )}
           />
         </List.Section>
       </View>

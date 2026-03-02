@@ -2,7 +2,10 @@ import { Tabs } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTheme } from "react-native-paper";
 import { View, StyleSheet } from "react-native";
+import { useQuery } from "@tanstack/react-query";
 import { glassColors, glassHeader, glassTabBar, gradientBackground } from "../../styles/glassStyles";
+import { getShoppingListCount } from "../../services/api";
+import { useAppStore } from "../../stores/useAppStore";
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -31,6 +34,14 @@ const styles = StyleSheet.create({
 
 export default function TabLayout() {
   const theme = useTheme();
+  const isLoggedIn = useAppStore((s) => s.isLoggedIn);
+
+  const { data: shoppingCount } = useQuery({
+    queryKey: ["shoppingListCount"],
+    queryFn: getShoppingListCount,
+    enabled: isLoggedIn,
+    refetchInterval: 30000,
+  });
 
   return (
     <Tabs
@@ -74,6 +85,7 @@ export default function TabLayout() {
         options={{
           title: "La Mia Lista",
           tabBarIcon: ({ color, size, focused }) => <TabIcon name="star" color={color} size={size} focused={focused} />,
+          tabBarBadge: shoppingCount && shoppingCount > 0 ? shoppingCount : undefined,
         }}
       />
       <Tabs.Screen

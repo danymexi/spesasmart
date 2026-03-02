@@ -1,19 +1,19 @@
-import { Image, ScrollView, StyleSheet, View } from "react-native";
+import { Image, Platform, ScrollView, Share, StyleSheet, View } from "react-native";
 import { Button, Text, useTheme, ActivityIndicator } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { getProduct, getProductHistory, getProductBestPrice, getProductPriceTrends, addToWatchlist } from "../../services/api";
-import { useAppStore } from "../../stores/useAppStore";
-import PriceChart from "../../components/PriceChart";
-import PriceTrendChart from "../../components/PriceTrendChart";
-import PriceIndicator from "../../components/PriceIndicator";
-import ProductComparison from "../../components/ProductComparison";
+import { getProduct, getProductHistory, getProductBestPrice, getProductPriceTrends, addToWatchlist, addToShoppingList } from "../../../services/api";
+import { useAppStore } from "../../../stores/useAppStore";
+import PriceChart from "../../../components/PriceChart";
+import PriceTrendChart from "../../../components/PriceTrendChart";
+import PriceIndicator from "../../../components/PriceIndicator";
+import ProductComparison from "../../../components/ProductComparison";
 import {
   glassCard,
   glassColors,
   imagePlaceholder,
-} from "../../styles/glassStyles";
+} from "../../../styles/glassStyles";
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -49,6 +49,29 @@ export default function ProductDetailScreen() {
     mutationFn: () => addToWatchlist(id!),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watchlist"] }),
   });
+
+  const addToListMutation = useMutation({
+    mutationFn: () => addToShoppingList({ product_id: id! }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
+    },
+  });
+
+  const handleShare = async () => {
+    const priceText = bestPrice ? ` a ${Number(bestPrice.best_price).toFixed(2)}\u20AC` : "";
+    const chainText = bestPrice ? ` da ${bestPrice.chain_name}` : "";
+    const text = `${product?.name}${priceText}${chainText} - SpesaSmart`;
+    const url = `https://spesasmart.spazioitech.it/product/${id}`;
+
+    if (Platform.OS === "web" && navigator.share) {
+      try {
+        await navigator.share({ title: product?.name || "SpesaSmart", text, url });
+      } catch { /* user cancelled */ }
+    } else if (Platform.OS !== "web") {
+      Share.share({ message: `${text}\n${url}` });
+    }
+  };
 
   if (loadingProduct) {
     return <ActivityIndicator style={styles.loader} />;
@@ -149,20 +172,54 @@ export default function ProductDetailScreen() {
         </View>
       )}
 
-      {/* Add to watchlist */}
-      {isLoggedIn && (
+      {/* Action buttons */}
+      <View style={styles.buttonRow}>
+        {isLoggedIn && (
+          <Button
+            mode="contained"
+            icon="star-plus-outline"
+            onPress={() => addMutation.mutate()}
+            loading={addMutation.isPending}
+            style={styles.actionBtn}
+            compact
+          >
+            Watchlist
+          </Button>
+        )}
+        {isLoggedIn && (
+          <Button
+            mode="contained"
+            icon="cart-plus"
+            onPress={() => addToListMutation.mutate()}
+            loading={addToListMutation.isPending}
+            style={styles.actionBtn}
+            compact
+          >
+            Spesa
+          </Button>
+        )}
         <Button
-          mode="contained"
-          icon="star-plus-outline"
-          onPress={() => addMutation.mutate()}
-          loading={addMutation.isPending}
-          style={styles.watchlistBtn}
+          mode="outlined"
+          icon="share-variant"
+          onPress={handleShare}
+          style={styles.actionBtn}
+          compact
         >
-          Aggiungi alla Lista
+          Condividi
         </Button>
-      )}
+      </View>
 
-      {/* Price comparison */}
+      {/* Detailed compare */}
+      <Button
+        mode="outlined"
+        icon="scale-balance"
+        onPress={() => router.push(`/product/${id}/compare`)}
+        style={styles.compareBtn}
+      >
+        Confronta Prezzi tra Catene
+      </Button>
+
+      {/* Price comparison (inline) */}
       <View style={styles.sectionCard}>
         <Text variant="titleMedium" style={styles.sectionHeader}>
           Confronto Prezzi
@@ -245,9 +302,16 @@ const styles = StyleSheet.create({
   },
   metaRow: { flexDirection: "row", gap: 16, marginTop: 8 },
   metaText: { color: "#888" },
-  watchlistBtn: {
+  buttonRow: {
+    flexDirection: "row",
     marginHorizontal: 12,
     marginTop: 12,
+    gap: 8,
+  },
+  actionBtn: { flex: 1 },
+  compareBtn: {
+    marginHorizontal: 12,
+    marginTop: 8,
   },
   sectionCard: {
     marginHorizontal: 12,

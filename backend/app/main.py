@@ -20,6 +20,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.api import auth, chains, flyers, offers, products, scraping, stores, users
 from app.api import web_push
 from app.config import get_settings
+from app.database import async_session
 
 # Path to Expo web build output (copied into Docker image)
 DIST_DIR = Path(__file__).resolve().parent.parent / "dist"
@@ -118,6 +119,80 @@ if DIST_DIR.is_dir():
     if (DIST_DIR / "pwa-icons").is_dir():
         app.mount("/pwa-icons", StaticFiles(directory=DIST_DIR / "pwa-icons"), name="pwa-icons")
 
+    async def _get_product_og_html(product_id: str) -> str | None:
+        """Generate HTML with OG meta tags for a product page (for social previews)."""
+        import re
+        import uuid as uuid_mod
+        from datetime import date
+
+        from sqlalchemy import select
+        from sqlalchemy.orm import joinedload
+        from app.models import Chain, Offer, Product
+
+        try:
+            pid = uuid_mod.UUID(product_id)
+        except ValueError:
+            return None
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(Product).where(Product.id == pid)
+            )
+            product = result.scalar_one_or_none()
+            if not product:
+                return None
+
+            # Find best active offer
+            today = date.today()
+            offer_result = await session.execute(
+                select(Offer)
+                .options(joinedload(Offer.chain))
+                .where(
+                    Offer.product_id == pid,
+                    Offer.valid_from <= today,
+                    Offer.valid_to >= today,
+                )
+                .order_by(Offer.offer_price)
+                .limit(1)
+            )
+            best = offer_result.unique().scalar_one_or_none()
+
+            title = f"{product.name} - SpesaSmart"
+            description = product.brand or ""
+            if best:
+                discount = f" (-{best.discount_pct:.0f}%)" if best.discount_pct else ""
+                description = f"{best.offer_price:.2f}\u20ac{discount} da {best.chain.name if best.chain else ''}"
+                if product.brand:
+                    description = f"{product.brand} - {description}"
+
+            image = product.image_url or ""
+            url = f"https://spesasmart.spazioitech.it/product/{product_id}"
+
+            # Read the original index.html and inject OG tags
+            index = DIST_DIR / "index.html"
+            if not index.is_file():
+                return None
+
+            html = index.read_text()
+
+            # Escape for HTML attributes
+            def esc(s: str) -> str:
+                return s.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+
+            og_tags = (
+                f'<meta property="og:title" content="{esc(title)}" />\n'
+                f'<meta property="og:description" content="{esc(description)}" />\n'
+                f'<meta property="og:url" content="{esc(url)}" />\n'
+                f'<meta property="og:type" content="product" />\n'
+                f'<meta property="og:site_name" content="SpesaSmart" />\n'
+            )
+            if image:
+                og_tags += f'<meta property="og:image" content="{esc(image)}" />\n'
+
+            # Insert before </head>
+            html = html.replace("</head>", og_tags + "</head>", 1)
+            return html
+
     # SPA fallback: any non-API, non-docs route serves index.html
     @app.get("/{full_path:path}")
     async def spa_fallback(request: Request, full_path: str):
@@ -129,6 +204,17 @@ if DIST_DIR.is_dir():
         static_file = DIST_DIR / full_path
         if static_file.is_file():
             return FileResponse(static_file)
+
+        # Product pages: inject OG meta tags for social preview
+        import re
+        product_match = re.match(r"^product/([0-9a-f\-]{36})(?:/.*)?$", full_path)
+        if product_match:
+            og_html = await _get_product_og_html(product_match.group(1))
+            if og_html:
+                return HTMLResponse(
+                    content=og_html,
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+                )
 
         # Otherwise serve index.html (SPA routing)
         index = DIST_DIR / "index.html"

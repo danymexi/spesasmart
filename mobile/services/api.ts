@@ -99,6 +99,7 @@ export interface PriceHistoryPoint {
   date: string;
   price: number;
   chain_name: string;
+  chain_slug: string | null;
   discount_type: string | null;
   price_per_unit: number | null;
   unit_reference: string | null;
@@ -159,6 +160,7 @@ export interface UserProfile {
   telegram_chat_id: number | null;
   push_token: string | null;
   preferred_zone: string;
+  notification_mode: "instant" | "digest";
   created_at: string;
 }
 
@@ -257,6 +259,38 @@ export interface CategoryInfo {
 export interface AuthResponse {
   access_token: string;
   user: UserProfile;
+}
+
+export interface ShoppingListItem {
+  id: string;
+  product_id: string | null;
+  product_name: string | null;
+  custom_name: string | null;
+  quantity: number;
+  unit: string | null;
+  checked: boolean;
+  offer_id: string | null;
+  chain_name: string | null;
+  offer_price: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface CompareOffer {
+  chain_name: string;
+  chain_slug: string;
+  offer_price: number;
+  original_price: number | null;
+  discount_pct: number | null;
+  price_per_unit: number | null;
+  unit_reference: string | null;
+  valid_to: string | null;
+  offer_id: string;
+}
+
+export interface CompareResponse {
+  product: Product;
+  offers: CompareOffer[];
 }
 
 // ── API Client ───────────────────────────────────────────────────────────────
@@ -531,6 +565,63 @@ export async function registerPushToken(
   _platform: "ios" | "android"
 ): Promise<void> {
   console.log(`Registering push token: ${token}`);
+}
+
+// ── Shopping List ────────────────────────────────────────────────────────────
+
+export async function getShoppingList(): Promise<ShoppingListItem[]> {
+  const res = await apiClient.get<ShoppingListItem[]>("/users/me/shopping-list");
+  return res.data;
+}
+
+export async function getShoppingListCount(): Promise<number> {
+  const res = await apiClient.get<{ count: number }>("/users/me/shopping-list/count");
+  return res.data.count;
+}
+
+export async function addToShoppingList(params: {
+  product_id?: string;
+  custom_name?: string;
+  quantity?: number;
+  unit?: string;
+  offer_id?: string;
+  notes?: string;
+}): Promise<ShoppingListItem> {
+  const res = await apiClient.post<ShoppingListItem>("/users/me/shopping-list", params);
+  return res.data;
+}
+
+export async function toggleShoppingItem(itemId: string): Promise<{ id: string; checked: boolean }> {
+  const res = await apiClient.patch<{ id: string; checked: boolean }>(
+    `/users/me/shopping-list/${itemId}/check`
+  );
+  return res.data;
+}
+
+export async function removeShoppingItem(itemId: string): Promise<void> {
+  await apiClient.delete(`/users/me/shopping-list/${itemId}`);
+}
+
+export async function clearCheckedItems(): Promise<void> {
+  await apiClient.delete("/users/me/shopping-list/checked");
+}
+
+// ── Compare Prices ──────────────────────────────────────────────────────────
+
+export async function getProductCompare(productId: string): Promise<CompareResponse> {
+  const res = await apiClient.get<CompareResponse>(`/products/${productId}/compare`);
+  return res.data;
+}
+
+// ── User Profile Update ─────────────────────────────────────────────────────
+
+export async function updateUserProfile(data: {
+  notification_mode?: string;
+  telegram_chat_id?: number;
+  push_token?: string;
+}): Promise<UserProfile> {
+  const res = await apiClient.patch<UserProfile>("/users/me", data);
+  return res.data;
 }
 
 export default apiClient;

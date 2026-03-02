@@ -1,8 +1,10 @@
-import { Image, StyleSheet, View } from "react-native";
-import { Text, useTheme } from "react-native-paper";
+import { Image, Platform, Share, StyleSheet, View } from "react-native";
+import { IconButton, Text, useTheme } from "react-native-paper";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable } from "react-native";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { addToShoppingList } from "../services/api";
 import {
   glassCard,
   glassColors,
@@ -51,7 +53,34 @@ function formatShortDate(iso: string): string {
 
 export default function OfferCard({ offer, compact }: Props) {
   const theme = useTheme();
+  const queryClient = useQueryClient();
   const imgSize = compact ? productImage.compact : productImage.card;
+
+  const addToListMutation = useMutation({
+    mutationFn: () =>
+      addToShoppingList({
+        product_id: offer.product_id,
+        offer_id: offer.id,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
+    },
+  });
+
+  const handleShare = async () => {
+    const discountText = offer.discount_pct ? ` (-${Number(offer.discount_pct).toFixed(0)}%)` : "";
+    const text = `${offer.product_name} a ${Number(offer.offer_price).toFixed(2)}\u20AC${discountText} da ${offer.chain_name} - SpesaSmart`;
+    const url = `https://spesasmart.spazioitech.it/product/${offer.product_id}`;
+
+    if (Platform.OS === "web" && navigator.share) {
+      try {
+        await navigator.share({ title: offer.product_name, text, url });
+      } catch { /* user cancelled */ }
+    } else if (Platform.OS !== "web") {
+      Share.share({ message: `${text}\n${url}` });
+    }
+  };
 
   // Previous price trend
   const prevPrice = offer.previous_price != null ? Number(offer.previous_price) : null;
@@ -154,6 +183,30 @@ export default function OfferCard({ offer, compact }: Props) {
               )}
             </View>
           )}
+
+          {/* Action buttons */}
+          {!compact && (
+            <View style={styles.actionRow}>
+              <IconButton
+                icon="cart-plus"
+                size={18}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  addToListMutation.mutate();
+                }}
+                style={styles.actionBtn}
+              />
+              <IconButton
+                icon="share-variant"
+                size={18}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  handleShare();
+                }}
+                style={styles.actionBtn}
+              />
+            </View>
+          )}
         </View>
       </View>
     </Pressable>
@@ -204,4 +257,6 @@ const styles = StyleSheet.create({
   footer: { flexDirection: "row", justifyContent: "space-between", marginTop: 6 },
   quantity: { color: "#888" },
   validTo: { color: "#888" },
+  actionRow: { flexDirection: "row", marginTop: 4, marginLeft: -8 },
+  actionBtn: { margin: 0 },
 });

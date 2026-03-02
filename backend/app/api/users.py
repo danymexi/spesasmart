@@ -12,7 +12,7 @@ from sqlalchemy.orm import joinedload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Chain, Offer, Product, UserBrand, UserProfile, UserStore, UserWatchlist
+from app.models import Chain, Offer, Product, ShoppingListItem, UserBrand, UserProfile, UserStore, UserWatchlist
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -25,6 +25,7 @@ class UserResponse(BaseModel):
     telegram_chat_id: int | None
     push_token: str | None
     preferred_zone: str
+    notification_mode: str = "instant"
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -34,6 +35,7 @@ class UserUpdateRequest(BaseModel):
     telegram_chat_id: int | None = None
     push_token: str | None = None
     preferred_zone: str | None = None
+    notification_mode: str | None = None
 
 
 class WatchlistAddRequest(BaseModel):
@@ -117,6 +119,30 @@ class BrandDealResponse(BaseModel):
     image_url: str | None
 
 
+class ShoppingListAddRequest(BaseModel):
+    product_id: uuid.UUID | None = None
+    custom_name: str | None = None
+    quantity: int = 1
+    unit: str | None = None
+    offer_id: uuid.UUID | None = None
+    notes: str | None = None
+
+
+class ShoppingListItemResponse(BaseModel):
+    id: uuid.UUID
+    product_id: uuid.UUID | None
+    product_name: str | None
+    custom_name: str | None
+    quantity: int
+    unit: str | None
+    checked: bool
+    offer_id: uuid.UUID | None
+    chain_name: str | None
+    offer_price: Decimal | None
+    notes: str | None
+    created_at: datetime
+
+
 # --- Endpoints (all /me routes, JWT-protected) ---
 
 @router.patch("/me", response_model=UserResponse)
@@ -131,6 +157,10 @@ async def update_me(
         user.push_token = data.push_token
     if data.preferred_zone is not None:
         user.preferred_zone = data.preferred_zone
+    if data.notification_mode is not None:
+        if data.notification_mode not in ("instant", "digest"):
+            raise HTTPException(status_code=400, detail="notification_mode must be 'instant' or 'digest'")
+        user.notification_mode = data.notification_mode
 
     await db.flush()
     await db.refresh(user)
@@ -502,3 +532,174 @@ async def get_brand_deals(
         )
         for o in offers
     ]
+
+
+# --- Shopping List ---
+
+@router.get("/me/shopping-list", response_model=list[ShoppingListItemResponse])
+async def get_shopping_list(
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the user's shopping list with product/offer details."""
+    result = await db.execute(
+        select(ShoppingListItem)
+        .options(
+            joinedload(ShoppingListItem.product),
+            joinedload(ShoppingListItem.offer).joinedload(Offer.chain),
+        )
+        .where(ShoppingListItem.user_id == user.id)
+        .order_by(ShoppingListItem.checked, ShoppingListItem.created_at.desc())
+    )
+    items = result.unique().scalars().all()
+
+    return [
+        ShoppingListItemResponse(
+            id=item.id,
+            product_id=item.product_id,
+            product_name=item.product.name if item.product else None,
+            custom_name=item.custom_name,
+            quantity=item.quantity,
+            unit=item.unit,
+            checked=item.checked,
+            offer_id=item.offer_id,
+            chain_name=item.offer.chain.name if item.offer and item.offer.chain else None,
+            offer_price=item.offer.offer_price if item.offer else None,
+            notes=item.notes,
+            created_at=item.created_at,
+        )
+        for item in items
+    ]
+
+
+@router.get("/me/shopping-list/count")
+async def get_shopping_list_count(
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the count of unchecked items in the shopping list."""
+    from sqlalchemy import func as sql_func
+
+    result = await db.execute(
+        select(sql_func.count(ShoppingListItem.id)).where(
+            ShoppingListItem.user_id == user.id,
+            ShoppingListItem.checked.is_(False),
+        )
+    )
+    count = result.scalar() or 0
+    return {"count": count}
+
+
+@router.post("/me/shopping-list", response_model=ShoppingListItemResponse, status_code=201)
+async def add_to_shopping_list(
+    data: ShoppingListAddRequest,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add an item to the shopping list."""
+    if not data.product_id and not data.custom_name:
+        raise HTTPException(status_code=400, detail="Either product_id or custom_name is required")
+
+    product_name = None
+    if data.product_id:
+        prod = await db.execute(select(Product).where(Product.id == data.product_id))
+        product = prod.scalar_one_or_none()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        product_name = product.name
+
+    chain_name = None
+    offer_price = None
+    if data.offer_id:
+        offer_res = await db.execute(
+            select(Offer).options(joinedload(Offer.chain)).where(Offer.id == data.offer_id)
+        )
+        offer = offer_res.unique().scalar_one_or_none()
+        if offer:
+            chain_name = offer.chain.name if offer.chain else None
+            offer_price = offer.offer_price
+
+    item = ShoppingListItem(
+        user_id=user.id,
+        product_id=data.product_id,
+        custom_name=data.custom_name,
+        quantity=data.quantity,
+        unit=data.unit,
+        offer_id=data.offer_id,
+        notes=data.notes,
+    )
+    db.add(item)
+    await db.flush()
+    await db.refresh(item)
+
+    return ShoppingListItemResponse(
+        id=item.id,
+        product_id=item.product_id,
+        product_name=product_name,
+        custom_name=item.custom_name,
+        quantity=item.quantity,
+        unit=item.unit,
+        checked=item.checked,
+        offer_id=item.offer_id,
+        chain_name=chain_name,
+        offer_price=offer_price,
+        notes=item.notes,
+        created_at=item.created_at,
+    )
+
+
+@router.patch("/me/shopping-list/{item_id}/check")
+async def toggle_shopping_item(
+    item_id: uuid.UUID,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Toggle the checked state of a shopping list item."""
+    result = await db.execute(
+        select(ShoppingListItem).where(
+            ShoppingListItem.id == item_id,
+            ShoppingListItem.user_id == user.id,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item.checked = not item.checked
+    await db.flush()
+    return {"id": str(item.id), "checked": item.checked}
+
+
+@router.delete("/me/shopping-list/checked", status_code=204)
+async def clear_checked_items(
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove all checked items from the shopping list."""
+    from sqlalchemy import delete as sql_delete
+
+    await db.execute(
+        sql_delete(ShoppingListItem).where(
+            ShoppingListItem.user_id == user.id,
+            ShoppingListItem.checked.is_(True),
+        )
+    )
+
+
+@router.delete("/me/shopping-list/{item_id}", status_code=204)
+async def remove_shopping_item(
+    item_id: uuid.UUID,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a single item from the shopping list."""
+    result = await db.execute(
+        select(ShoppingListItem).where(
+            ShoppingListItem.id == item_id,
+            ShoppingListItem.user_id == user.id,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    await db.delete(item)

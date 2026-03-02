@@ -52,6 +52,7 @@ class PriceHistoryPoint(BaseModel):
     date: date
     price: Decimal
     chain_name: str
+    chain_slug: str | None = None
     discount_type: str | None
     price_per_unit: Decimal | None = None
     unit_reference: str | None = None
@@ -358,6 +359,7 @@ async def get_price_history(
             date=o.valid_from or o.created_at.date(),
             price=o.offer_price,
             chain_name=o.chain.name if o.chain else "Unknown",
+            chain_slug=o.chain.slug if o.chain else None,
             discount_type=o.discount_type,
             price_per_unit=o.price_per_unit,
             unit_reference=o.unit_reference,
@@ -405,6 +407,75 @@ async def get_best_price(
         discount_pct=best.discount_pct,
         price_per_unit=best.price_per_unit,
         unit_reference=best.unit_reference,
+    )
+
+
+class CompareOfferResponse(BaseModel):
+    chain_name: str
+    chain_slug: str
+    offer_price: Decimal
+    original_price: Decimal | None
+    discount_pct: Decimal | None
+    price_per_unit: Decimal | None
+    unit_reference: str | None
+    valid_to: date | None
+    offer_id: uuid.UUID
+
+
+class CompareResponse(BaseModel):
+    product: ProductResponse
+    offers: list[CompareOfferResponse]
+
+
+@router.get("/{product_id}/compare", response_model=CompareResponse)
+async def compare_prices(
+    product_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+):
+    """Return the best active offer per chain for a product."""
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    today = date.today()
+
+    # Get all active offers for this product, one per chain (cheapest)
+    offers_result = await db.execute(
+        select(Offer)
+        .options(joinedload(Offer.chain))
+        .where(
+            Offer.product_id == product_id,
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+        )
+        .order_by(Offer.offer_price)
+    )
+    all_offers = offers_result.unique().scalars().all()
+
+    # Keep only the cheapest per chain
+    seen_chains: set[uuid.UUID] = set()
+    best_per_chain: list[Offer] = []
+    for o in all_offers:
+        if o.chain_id not in seen_chains:
+            seen_chains.add(o.chain_id)
+            best_per_chain.append(o)
+
+    return CompareResponse(
+        product=ProductResponse.model_validate(product),
+        offers=[
+            CompareOfferResponse(
+                chain_name=o.chain.name if o.chain else "Unknown",
+                chain_slug=o.chain.slug if o.chain else "",
+                offer_price=o.offer_price,
+                original_price=o.original_price,
+                discount_pct=o.discount_pct,
+                price_per_unit=o.price_per_unit,
+                unit_reference=o.unit_reference,
+                valid_to=o.valid_to,
+                offer_id=o.id,
+            )
+            for o in best_per_chain
+        ],
     )
 
 
