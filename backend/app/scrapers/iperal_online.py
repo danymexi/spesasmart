@@ -453,8 +453,14 @@ class IperalOnlineScraper:
         # Price per unit
         price_per_unit = self._parse_price_per_unit(prod)
 
-        # Unit reference from productInfos
+        # Unit reference from productInfos — validate with heuristic
         unit_reference = self._extract_unit_reference(prod)
+        if price_per_unit and unit_reference:
+            from app.services.unit_price_calculator import UnitPriceCalculator
+            product_name = (prod.get("name") or "").strip()
+            unit_reference = UnitPriceCalculator.infer_unit_reference(
+                offer_price, price_per_unit, product_name, unit_reference,
+            )
 
         today = date.today()
         valid_to = today + timedelta(days=7)

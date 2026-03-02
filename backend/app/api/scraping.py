@@ -239,6 +239,234 @@ async def trigger_esselunga_online_sync():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/backfill-images")
+async def trigger_image_backfill(limit: int = 30):
+    """Find images for products without image_url.
+
+    Uses Google Image Search to find product photos.
+    """
+    try:
+        from app.database import async_session
+        from app.services.image_finder import ProductImageFinder
+
+        async with async_session() as session:
+            finder = ProductImageFinder()
+            updated = await finder.backfill(session, limit=limit)
+            return {
+                "status": "completed",
+                "images_found": updated,
+                "message": f"Found images for {updated} products (searched {limit}).",
+            }
+    except Exception as exc:
+        logger.exception("Image backfill failed.")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/dedup-products")
+async def dedup_products(dry_run: bool = True):
+    """Deduplicate products across chains using fuzzy matching.
+
+    Finds cross-source duplicates (e.g. same product from Iperal and Esselunga)
+    and merges them: keeps the richer product, moves offers + watchlist entries.
+
+    Query params:
+        dry_run: If true (default), only report duplicates without merging.
+    """
+    from collections import defaultdict
+    from sqlalchemy import select, update, delete, func
+    from app.database import async_session
+    from app.models import Product
+    from app.models.offer import Offer
+    from app.models.user import UserWatchlist
+    from app.services.product_matcher import ProductMatcher
+
+    pm = ProductMatcher()
+
+    def _richness(p) -> int:
+        score = 0
+        if p.image_url:
+            score += 3
+        if p.category and p.category != "Supermercato":
+            score += 2
+        if p.subcategory:
+            score += 1
+        if p.unit:
+            score += 1
+        if p.barcode:
+            score += 1
+        return score
+
+    async with async_session() as session:
+        result = await session.execute(select(Product))
+        all_products = list(result.scalars().all())
+
+        by_brand: dict = defaultdict(list)
+        for p in all_products:
+            by_brand[p.brand].append(p)
+
+        merge_pairs: list[tuple] = []
+        seen_ids = set()
+
+        for brand, products in by_brand.items():
+            if len(products) < 2:
+                continue
+            products.sort(key=lambda p: _richness(p), reverse=True)
+
+            for i, p1 in enumerate(products):
+                if p1.id in seen_ids:
+                    continue
+                for j in range(i + 1, len(products)):
+                    p2 = products[j]
+                    if p2.id in seen_ids:
+                        continue
+                    if p1.source and p2.source and p1.source == p2.source:
+                        continue
+
+                    score = pm.fuzzy_match(
+                        p1.name, p2.name,
+                        brand1=p1.brand, brand2=p2.brand,
+                    )
+
+                    cb1 = pm.normalize_brand(p1.brand)
+                    cb2 = pm.normalize_brand(p2.brand)
+                    threshold = 80 if cb1 and cb2 and cb1 == cb2 else 85
+
+                    if score >= threshold:
+                        merge_pairs.append((p1, p2))
+                        seen_ids.add(p2.id)
+
+        if dry_run:
+            samples = [
+                {
+                    "keep": {"name": k.name[:60], "source": k.source, "brand": k.brand},
+                    "delete": {"name": d.name[:60], "source": d.source, "brand": d.brand},
+                }
+                for k, d in merge_pairs[:50]
+            ]
+            return {
+                "status": "dry_run",
+                "duplicates_found": len(merge_pairs),
+                "samples": samples,
+                "message": f"Found {len(merge_pairs)} duplicate pairs. Set dry_run=false to merge.",
+            }
+
+        # Execute merges
+        merged = 0
+        for keep, dup in merge_pairs:
+            try:
+                await session.execute(
+                    update(Offer)
+                    .where(Offer.product_id == dup.id)
+                    .values(product_id=keep.id)
+                )
+
+                existing_wl = await session.execute(
+                    select(UserWatchlist.user_id)
+                    .where(UserWatchlist.product_id == keep.id)
+                )
+                existing_user_ids = {row[0] for row in existing_wl.fetchall()}
+
+                if existing_user_ids:
+                    await session.execute(
+                        delete(UserWatchlist)
+                        .where(
+                            UserWatchlist.product_id == dup.id,
+                            UserWatchlist.user_id.in_(existing_user_ids),
+                        )
+                    )
+
+                await session.execute(
+                    update(UserWatchlist)
+                    .where(UserWatchlist.product_id == dup.id)
+                    .values(product_id=keep.id)
+                )
+
+                if not keep.image_url and dup.image_url:
+                    keep.image_url = dup.image_url
+                if (not keep.category or keep.category == "Supermercato") and dup.category:
+                    keep.category = dup.category
+                if not keep.subcategory and dup.subcategory:
+                    keep.subcategory = dup.subcategory
+                if not keep.unit and dup.unit:
+                    keep.unit = dup.unit
+
+                await session.execute(
+                    delete(Product).where(Product.id == dup.id)
+                )
+                merged += 1
+            except Exception:
+                logger.exception("Failed to merge %s -> %s", dup.id, keep.id)
+                await session.rollback()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Merge failed at pair {merged + 1}. Rolled back.",
+                )
+
+        await session.commit()
+
+        return {
+            "status": "completed",
+            "duplicates_found": len(merge_pairs),
+            "merged": merged,
+            "message": f"Merged {merged} duplicate products.",
+        }
+
+
+@router.post("/fix-ppu-units")
+async def fix_ppu_units():
+    """Batch-fix offers where unit_reference='pz' but PPU suggests kg or l.
+
+    Finds offers where price_per_unit > offer_price * 1.5 and unit_reference='pz',
+    then re-infers the correct unit using product name keywords.
+    """
+    from decimal import Decimal
+    from sqlalchemy import select
+    from app.database import async_session
+    from app.models import Product
+    from app.models.offer import Offer
+    from app.services.unit_price_calculator import UnitPriceCalculator
+
+    fixed = 0
+    total_suspect = 0
+
+    async with async_session() as session:
+        # Find suspect offers: pz but PPU >> offer_price
+        stmt = (
+            select(Offer, Product.name)
+            .join(Product, Offer.product_id == Product.id)
+            .where(
+                Offer.unit_reference == "pz",
+                Offer.price_per_unit.isnot(None),
+                Offer.offer_price.isnot(None),
+                Offer.price_per_unit > Offer.offer_price * Decimal("1.5"),
+            )
+        )
+        result = await session.execute(stmt)
+        rows = result.all()
+        total_suspect = len(rows)
+
+        for offer, product_name in rows:
+            new_unit = UnitPriceCalculator.infer_unit_reference(
+                offer.offer_price,
+                offer.price_per_unit,
+                product_name,
+                "pz",
+            )
+            if new_unit != "pz":
+                offer.unit_reference = new_unit
+                fixed += 1
+
+        if fixed:
+            await session.commit()
+
+    return {
+        "status": "completed",
+        "suspect_offers": total_suspect,
+        "fixed": fixed,
+        "message": f"Fixed {fixed}/{total_suspect} offers with incorrect 'pz' unit.",
+    }
+
+
 @router.get("/status")
 async def scraping_status():
     """Get the current status of the scheduler and its jobs."""

@@ -178,6 +178,77 @@ async def send_weekly_digest():
         logger.exception("Weekly digest failed.")
 
 
+async def backfill_unit_prices():
+    """Compute price_per_unit for offers that have quantity but no PPU."""
+    logger.info("Starting unit price backfill job.")
+    from sqlalchemy import select, and_
+    from app.database import async_session
+    from app.models import Offer, Product
+    from app.services.unit_price_calculator import UnitPriceCalculator
+
+    updated = 0
+    async with async_session() as session:
+        stmt = (
+            select(Offer)
+            .join(Product, Offer.product_id == Product.id)
+            .where(
+                Offer.price_per_unit.is_(None),
+                Offer.quantity.isnot(None),
+                Offer.quantity != "",
+            )
+            .limit(5000)
+        )
+        result = await session.execute(stmt)
+        offers = result.scalars().all()
+
+        for offer in offers:
+            # Eager-load product name for fallback parsing
+            prod_result = await session.execute(
+                select(Product).where(Product.id == offer.product_id)
+            )
+            product = prod_result.scalar_one_or_none()
+
+            ppu, unit_ref = UnitPriceCalculator.compute(
+                offer.offer_price,
+                offer.quantity,
+                product_name=product.name if product else None,
+                product_unit=product.unit if product else None,
+            )
+            if ppu is not None:
+                offer.price_per_unit = ppu
+                offer.unit_reference = unit_ref
+                offer.ppu_computed = True
+                updated += 1
+
+        await session.commit()
+    logger.info("Unit price backfill complete: %d offers updated.", updated)
+
+
+async def check_stockup_alerts():
+    """Check watchlist products for 6-month price lows and send alerts."""
+    logger.info("Starting stockup alert check.")
+    try:
+        from app.services.notification import NotificationService
+
+        notifier = NotificationService()
+        sent = await notifier.check_stockup_alerts()
+        logger.info("Stockup alert check complete: %d alerts sent.", sent)
+    except Exception:
+        logger.exception("Stockup alert check failed.")
+
+
+async def backfill_product_images():
+    """Find images for products without image_url."""
+    logger.info("Starting product image backfill job.")
+    from app.database import async_session
+    from app.services.image_finder import ProductImageFinder
+
+    async with async_session() as session:
+        finder = ProductImageFinder()
+        updated = await finder.backfill(session, limit=100)
+        logger.info("Product image backfill complete: %d images found.", updated)
+
+
 async def scrape_all_chains():
     """Scrape all chains sequentially."""
     for slug in ["esselunga", "lidl", "coop", "iperal"]:
@@ -243,6 +314,33 @@ def start_scheduler() -> AsyncIOScheduler:
         CronTrigger(day_of_week="sun", hour=3, minute=0),
         id="sync_catalog",
         name="Weekly catalog sync (all chains)",
+        replace_existing=True,
+    )
+
+    # Backfill unit prices: every Sunday at 4:00 AM (after catalog sync)
+    scheduler.add_job(
+        backfill_unit_prices,
+        CronTrigger(day_of_week="sun", hour=4, minute=0),
+        id="backfill_unit_prices",
+        name="Backfill unit prices for offers without PPU",
+        replace_existing=True,
+    )
+
+    # Stockup alerts: Monday and Thursday at 9:00 AM (after scraping)
+    scheduler.add_job(
+        check_stockup_alerts,
+        CronTrigger(day_of_week="mon,thu", hour=9, minute=0),
+        id="check_stockup_alerts",
+        name="Check watchlist for stockup opportunities",
+        replace_existing=True,
+    )
+
+    # Product image backfill: Sun/Tue/Thu at 5:00 AM
+    scheduler.add_job(
+        backfill_product_images,
+        CronTrigger(day_of_week="sun,tue,thu", hour=5, minute=0),
+        id="backfill_product_images",
+        name="Find images for products without image_url",
         replace_existing=True,
     )
 
