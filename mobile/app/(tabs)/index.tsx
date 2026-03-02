@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Chip, Text, useTheme } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -14,6 +15,7 @@ const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const [selectedChain, setSelectedChain] = useState<string | null>(null);
 
@@ -88,6 +90,7 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={styles.container}
+      contentContainerStyle={{ paddingTop: insets.top }}
       refreshControl={<RefreshControl refreshing={isLoading} onRefresh={onRefresh} />}
     >
       {/* Header */}
@@ -135,7 +138,6 @@ export default function HomeScreen() {
             </View>
           )}
           contentContainerStyle={styles.horizontalList}
-          scrollEnabled={false}
         />
       ) : (
         <Text variant="bodyMedium" style={styles.emptyText}>
@@ -162,7 +164,6 @@ export default function HomeScreen() {
             </View>
           )}
           contentContainerStyle={styles.horizontalList}
-          scrollEnabled={false}
         />
       ) : (
         <Text variant="bodyMedium" style={styles.emptyText}>
