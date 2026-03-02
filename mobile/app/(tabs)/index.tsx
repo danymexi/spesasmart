@@ -3,7 +3,8 @@ import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-na
 import { Chip, Text, useTheme } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { getActiveOffers, getBestOffers, getWatchlist } from "../../services/api";
+import { getActiveOffers, getBestOffers, getHistoricLows, getWatchlist } from "../../services/api";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import OfferCard from "../../components/OfferCard";
 import PersonalDeals from "../../components/PersonalDeals";
 import { useAppStore } from "../../stores/useAppStore";
@@ -34,6 +35,15 @@ export default function HomeScreen() {
     queryFn: () => getActiveOffers({ limit: 20 }),
   });
 
+  const {
+    data: historicLows,
+    isLoading: loadingHistoric,
+    refetch: refetchHistoric,
+  } = useQuery({
+    queryKey: ["historicLows"],
+    queryFn: () => getHistoricLows(10),
+  });
+
   // Check if user has watchlist items (lightweight check)
   const { data: watchlistItems } = useQuery({
     queryKey: ["watchlist"],
@@ -46,9 +56,10 @@ export default function HomeScreen() {
   const onRefresh = useCallback(() => {
     refetchBest();
     refetchActive();
-  }, [refetchBest, refetchActive]);
+    refetchHistoric();
+  }, [refetchBest, refetchActive, refetchHistoric]);
 
-  const isLoading = loadingBest || loadingActive;
+  const isLoading = loadingBest || loadingActive || loadingHistoric;
 
   const filteredBest = useMemo(() => {
     if (!bestOffers) return [];
@@ -65,6 +76,14 @@ export default function HomeScreen() {
       (o) => o.chain_name?.toLowerCase() === selectedChain.toLowerCase()
     );
   }, [activeOffers, selectedChain]);
+
+  const filteredHistoric = useMemo(() => {
+    if (!historicLows) return [];
+    if (!selectedChain) return historicLows;
+    return historicLows.filter(
+      (o) => o.chain_name?.toLowerCase() === selectedChain.toLowerCase()
+    );
+  }, [historicLows, selectedChain]);
 
   return (
     <ScrollView
@@ -124,6 +143,33 @@ export default function HomeScreen() {
         </Text>
       )}
 
+      {/* Historic lows section */}
+      <View style={styles.sectionHeader}>
+        <MaterialCommunityIcons name="trending-down" size={22} color={glassColors.greenDark} />
+        <Text variant="titleLarge" style={styles.sectionTitleInline}>
+          Minimi Storici
+        </Text>
+      </View>
+      {filteredHistoric.length > 0 ? (
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={filteredHistoric}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <View style={styles.horizontalCard}>
+              <OfferCard offer={item} compact />
+            </View>
+          )}
+          contentContainerStyle={styles.horizontalList}
+          scrollEnabled={false}
+        />
+      ) : (
+        <Text variant="bodyMedium" style={styles.emptyText}>
+          Nessun minimo storico disponibile
+        </Text>
+      )}
+
       {/* All active offers */}
       <Text variant="titleLarge" style={styles.sectionTitle}>
         Offerte Attive
@@ -158,6 +204,8 @@ const styles = StyleSheet.create({
     backgroundColor: glassColors.greenAccent,
   },
   sectionTitle: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, fontWeight: "600" },
+  sectionHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 6 },
+  sectionTitleInline: { fontWeight: "600" },
   horizontalList: { paddingHorizontal: 12 },
   horizontalCard: { width: 260, marginRight: 12 },
   emptyText: { paddingHorizontal: 16, color: "#888" },

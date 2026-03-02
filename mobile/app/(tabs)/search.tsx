@@ -24,12 +24,28 @@ import {
 
 const PAGE_SIZE = 50;
 
+const SORT_OPTIONS = [
+  { key: "name", label: "A-Z" },
+  { key: "price", label: "Prezzo" },
+  { key: "price_per_unit", label: "EUR/kg" },
+] as const;
+
+const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
+
+const INDICATOR_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
+  ottimo: { color: "#2E7D32", bg: "rgba(46,125,50,0.12)", label: "Ottimo" },
+  medio: { color: "#F57F17", bg: "rgba(245,127,23,0.12)", label: "Nella media" },
+  alto: { color: "#C62828", bg: "rgba(198,40,40,0.12)", label: "Caro" },
+};
+
 export default function CatalogScreen() {
   const theme = useTheme();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedSort, setSelectedSort] = useState<string>("name");
+  const [selectedChain, setSelectedChain] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ visible: boolean; message: string }>({
     visible: false,
     message: "",
@@ -49,11 +65,13 @@ export default function CatalogScreen() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ["catalog", query, selectedCategory],
+    queryKey: ["catalog", query, selectedCategory, selectedSort, selectedChain],
     queryFn: ({ pageParam = 0 }) =>
       getCatalogProducts({
         q: query || undefined,
         category: selectedCategory ?? undefined,
+        sort: selectedSort !== "name" ? selectedSort : undefined,
+        chain: selectedChain ? selectedChain.toLowerCase() : undefined,
         limit: PAGE_SIZE,
         offset: pageParam,
       }),
@@ -182,6 +200,13 @@ export default function CatalogScreen() {
                         {Number(item.best_price_per_unit).toFixed(2)} {item.unit_reference === "l" ? "EUR/L" : item.unit_reference === "pz" ? "EUR/pz" : "EUR/kg"}
                       </Text>
                     )}
+                    {item.price_indicator && INDICATOR_CONFIG[item.price_indicator] && (
+                      <View style={[styles.indicatorBadge, { backgroundColor: INDICATOR_CONFIG[item.price_indicator].bg }]}>
+                        <Text style={[styles.indicatorText, { color: INDICATOR_CONFIG[item.price_indicator].color }]}>
+                          {INDICATOR_CONFIG[item.price_indicator].label}
+                        </Text>
+                      </View>
+                    )}
                   </>
                 ) : (
                   <Text variant="bodySmall" style={styles.noOffer}>
@@ -215,6 +240,36 @@ export default function CatalogScreen() {
         value={query}
         style={styles.searchbar}
       />
+
+      {/* Sort chips */}
+      <View style={styles.chipRow}>
+        {SORT_OPTIONS.map((opt) => (
+          <Chip
+            key={opt.key}
+            selected={selectedSort === opt.key}
+            onPress={() => setSelectedSort(opt.key)}
+            style={[styles.filterChip, selectedSort === opt.key && styles.chipSelected]}
+            compact
+          >
+            {opt.label}
+          </Chip>
+        ))}
+      </View>
+
+      {/* Chain chips */}
+      <View style={styles.chipRow}>
+        {CHAINS.map((ch) => (
+          <Chip
+            key={ch}
+            selected={selectedChain === ch}
+            onPress={() => setSelectedChain(selectedChain === ch ? null : ch)}
+            style={[styles.filterChip, selectedChain === ch && styles.chipSelected]}
+            compact
+          >
+            {ch}
+          </Chip>
+        ))}
+      </View>
 
       {/* Category chips */}
       <FlatList
@@ -291,6 +346,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     ...glassChip,
   } as any,
+  chipRow: { flexDirection: "row", paddingHorizontal: 12, paddingVertical: 4, gap: 6 },
+  chipSelected: { backgroundColor: glassColors.greenAccent },
   categoryRow: { paddingHorizontal: 12, paddingVertical: 4, gap: 6 },
   resultCount: { paddingHorizontal: 16, paddingVertical: 4, color: "#666" },
   loader: { marginTop: 40 },
@@ -323,6 +380,14 @@ const styles = StyleSheet.create({
   offerPrice: { color: glassColors.greenDark, fontWeight: "bold" },
   chainLabel: { color: "#666" },
   pricePerUnit: { color: "#888", marginTop: 2, fontStyle: "italic" },
+  indicatorBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 4,
+  },
+  indicatorText: { fontSize: 11, fontWeight: "bold" },
   noOffer: { color: "#999", marginTop: 4 },
   watchlistBtn: { margin: 0 },
   emptyText: { textAlign: "center", marginTop: 40, color: "#888", paddingHorizontal: 20 },

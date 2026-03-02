@@ -169,6 +169,48 @@ async def get_active_offers(
     return _build_offer_responses(offers, previous)
 
 
+@router.get("/historic-lows", response_model=list[OfferResponse])
+async def get_historic_lows(
+    limit: int = Query(20, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Active offers at or near the all-time lowest price for their product."""
+    today = date.today()
+
+    # Subquery: historical minimum price per product (all offers ever)
+    min_price_sq = (
+        select(
+            Offer.product_id,
+            func.min(Offer.offer_price).label("min_price"),
+        )
+        .group_by(Offer.product_id)
+        .subquery()
+    )
+
+    # Active offers where current price <= historic min * 1.01 (1% tolerance)
+    query = (
+        select(Offer)
+        .options(joinedload(Offer.product), joinedload(Offer.chain))
+        .join(min_price_sq, Offer.product_id == min_price_sq.c.product_id)
+        .where(
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+            Offer.offer_price <= min_price_sq.c.min_price * 1.01,
+        )
+        .order_by(Offer.offer_price)
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    offers = result.unique().scalars().all()
+
+    product_ids = [o.product_id for o in offers]
+    before_dates = {o.product_id: o.valid_from for o in offers if o.valid_from}
+    previous = await _get_previous_prices(product_ids, before_dates, db)
+
+    return _build_offer_responses(offers, previous)
+
+
 @router.get("/best", response_model=list[OfferResponse])
 async def get_best_offers(
     category: str | None = Query(None),

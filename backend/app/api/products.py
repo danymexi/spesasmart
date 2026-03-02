@@ -40,6 +40,7 @@ class CatalogProductResponse(BaseModel):
     best_price_per_unit: Decimal | None = None
     unit_reference: str | None = None
     unit: str | None = None
+    price_indicator: str | None = None  # "ottimo" | "medio" | "alto"
 
 
 class CategoryResponse(BaseModel):
@@ -84,6 +85,8 @@ async def get_catalog_products(
     category: str | None = Query(None),
     brand: str | None = Query(None),
     q: str | None = Query(None),
+    sort: str | None = Query(None, enum=["name", "price", "price_per_unit"]),
+    chain: str | None = Query(None, description="Comma-separated chain slugs"),
     limit: int = Query(50, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -92,13 +95,22 @@ async def get_catalog_products(
     today = date.today()
 
     # Build subquery for best active offer per product
+    best_offer_where = [Offer.valid_from <= today, Offer.valid_to >= today]
+    if chain:
+        chain_slugs = [s.strip() for s in chain.split(",")]
+        best_offer_where.append(
+            Offer.chain_id.in_(
+                select(Chain.id).where(Chain.slug.in_(chain_slugs))
+            )
+        )
+
     best_offer_sq = (
         select(
             Offer.product_id,
             func.min(Offer.offer_price).label("best_price"),
             func.min(Offer.price_per_unit).label("best_ppu"),
         )
-        .where(Offer.valid_from <= today, Offer.valid_to >= today)
+        .where(*best_offer_where)
         .group_by(Offer.product_id)
         .subquery()
     )
@@ -119,6 +131,16 @@ async def get_catalog_products(
         .subquery()
     )
 
+    # Subquery for historical average price per product
+    avg_price_sq = (
+        select(
+            Offer.product_id,
+            func.avg(Offer.offer_price).label("avg_price"),
+        )
+        .group_by(Offer.product_id)
+        .subquery()
+    )
+
     # Main query
     query = (
         select(
@@ -126,9 +148,11 @@ async def get_catalog_products(
             best_offer_sq.c.best_price,
             best_offer_sq.c.best_ppu,
             unit_ref_sq.c.unit_reference,
+            avg_price_sq.c.avg_price,
         )
         .outerjoin(best_offer_sq, Product.id == best_offer_sq.c.product_id)
         .outerjoin(unit_ref_sq, Product.id == unit_ref_sq.c.product_id)
+        .outerjoin(avg_price_sq, Product.id == avg_price_sq.c.product_id)
     )
 
     if category:
@@ -138,7 +162,19 @@ async def get_catalog_products(
     if q:
         query = query.where(Product.name.ilike(f"%{q}%"))
 
-    query = query.order_by(Product.name).offset(offset).limit(limit)
+    # When filtering by chain, only show products with an active offer in that chain
+    if chain:
+        query = query.where(best_offer_sq.c.best_price.isnot(None))
+
+    # Sorting
+    if sort == "price":
+        query = query.order_by(best_offer_sq.c.best_price.asc().nulls_last())
+    elif sort == "price_per_unit":
+        query = query.order_by(best_offer_sq.c.best_ppu.asc().nulls_last())
+    else:
+        query = query.order_by(Product.name)
+
+    query = query.offset(offset).limit(limit)
 
     result = await db.execute(query)
     rows = result.all()
@@ -162,6 +198,18 @@ async def get_catalog_products(
             if pid not in chain_map:
                 chain_map[pid] = cname
 
+    # Compute price indicator
+    def _price_indicator(best_price: Decimal | None, avg_price: float | None) -> str | None:
+        if best_price is None or avg_price is None:
+            return None
+        avg = float(avg_price)
+        cur = float(best_price)
+        if cur < avg * 0.8:
+            return "ottimo"
+        if cur > avg * 1.1:
+            return "alto"
+        return "medio"
+
     return [
         CatalogProductResponse(
             id=row.Product.id,
@@ -175,6 +223,7 @@ async def get_catalog_products(
             best_price_per_unit=row.best_ppu,
             unit_reference=row.unit_reference,
             unit=row.Product.unit,
+            price_indicator=_price_indicator(row.best_price, row.avg_price),
         )
         for row in rows
     ]

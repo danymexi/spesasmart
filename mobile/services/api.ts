@@ -186,6 +186,7 @@ export interface CatalogProduct {
   best_price_per_unit: number | null;
   unit_reference: string | null;
   unit: string | null;
+  price_indicator: string | null; // "ottimo" | "medio" | "alto"
 }
 
 export interface PriceTrendPoint {
@@ -365,6 +366,11 @@ export async function getBestOffers(limit: number = 20, category?: string): Prom
   return res.data;
 }
 
+export async function getHistoricLows(limit: number = 20): Promise<Offer[]> {
+  const res = await apiClient.get<Offer[]>("/offers/historic-lows", { params: { limit } });
+  return res.data;
+}
+
 // ── Watchlist (JWT-protected, /me routes) ────────────────────────────────────
 
 export async function getWatchlist(): Promise<WatchlistItem[]> {
@@ -407,6 +413,8 @@ export async function getCatalogProducts(params?: {
   category?: string;
   brand?: string;
   q?: string;
+  sort?: string;
+  chain?: string;
   limit?: number;
   offset?: number;
 }): Promise<CatalogProduct[]> {
