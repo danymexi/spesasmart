@@ -92,14 +92,14 @@ export const glassTabBar: ViewStyle = {
   right: 20,
   height: 64,
   borderRadius: 28,
-  backgroundColor: glassColors.glass,
+  backgroundColor: "rgba(255,255,255,0.85)",
   borderWidth: 1,
-  borderColor: glassColors.glassBorder,
+  borderColor: "rgba(200,200,200,0.5)",
   elevation: 0,
   shadowOpacity: 0,
   ...webBlurStrong,
   ...(Platform.OS === "web"
-    ? ({ boxShadow: "0 4px 30px rgba(0,0,0,0.08)" } as any)
+    ? ({ boxShadow: "0 8px 32px rgba(0,0,0,0.12)" } as any)
     : {}),
 } as any;
 
