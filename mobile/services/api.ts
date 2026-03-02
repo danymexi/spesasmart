@@ -119,6 +119,7 @@ export interface BestPriceResponse {
   discount_pct: number | null;
   price_per_unit: number | null;
   unit_reference: string | null;
+  price_indicator: string | null;
 }
 
 export interface Offer {
@@ -174,6 +175,47 @@ export interface UserDeal {
   discount_pct: number | null;
   valid_to: string | null;
   image_url: string | null;
+}
+
+export interface SmartSearchOffer {
+  chain_name: string;
+  chain_slug: string;
+  offer_price: number;
+  original_price: number | null;
+  discount_pct: number | null;
+  price_per_unit: number | null;
+  unit_reference: string | null;
+  valid_to: string | null;
+  offer_id: string;
+}
+
+export interface SmartSearchResult {
+  product: Product;
+  offers: SmartSearchOffer[];
+  price_indicator: string | null;
+  best_price_per_unit: number | null;
+  unit_reference: string | null;
+  is_category_match: boolean;
+}
+
+export interface TripItem {
+  product_name: string;
+  offer_price: number;
+  chain_name: string;
+}
+
+export interface StoreTrip {
+  chain_name: string;
+  items: TripItem[];
+  total: number;
+}
+
+export interface TripOptimizationResult {
+  single_store_best: StoreTrip;
+  multi_store_plan: StoreTrip[];
+  single_store_total: number;
+  multi_store_total: number;
+  potential_savings: number;
 }
 
 export interface UserBrandItem {
@@ -621,6 +663,33 @@ export async function updateUserProfile(data: {
   push_token?: string;
 }): Promise<UserProfile> {
   const res = await apiClient.patch<UserProfile>("/users/me", data);
+  return res.data;
+}
+
+// ── Smart Search ─────────────────────────────────────────────────────────────
+
+export async function smartSearch(q: string, limit: number = 5): Promise<SmartSearchResult[]> {
+  const res = await apiClient.get<SmartSearchResult[]>("/products/smart-search", {
+    params: { q, limit },
+  });
+  return res.data;
+}
+
+// ── Preferred Chains ─────────────────────────────────────────────────────────
+
+export async function getPreferredChains(): Promise<string[]> {
+  const res = await apiClient.get<{ chains: string[] }>("/users/me/preferred-chains");
+  return res.data.chains;
+}
+
+export async function updatePreferredChains(chains: string[]): Promise<void> {
+  await apiClient.put("/users/me/preferred-chains", { chains });
+}
+
+// ── Trip Optimizer ───────────────────────────────────────────────────────────
+
+export async function optimizeTrip(): Promise<TripOptimizationResult> {
+  const res = await apiClient.get<TripOptimizationResult>("/users/me/shopping-list/optimize");
   return res.data;
 }
 

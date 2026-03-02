@@ -287,6 +287,38 @@ async def remove_from_watchlist(
     await db.delete(entry)
 
 
+# --- Preferred Chains ---
+
+class PreferredChainsRequest(BaseModel):
+    chains: list[str]
+
+
+@router.get("/me/preferred-chains")
+async def get_preferred_chains(
+    user: UserProfile = Depends(get_current_user),
+):
+    """Return the user's preferred chain slugs."""
+    if user.preferred_chains:
+        chains = [c.strip() for c in user.preferred_chains.split(",") if c.strip()]
+    else:
+        chains = []
+    return {"chains": chains}
+
+
+@router.put("/me/preferred-chains")
+async def update_preferred_chains(
+    data: PreferredChainsRequest,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the user's preferred chain slugs."""
+    valid_slugs = {"esselunga", "lidl", "coop", "iperal"}
+    filtered = [c for c in data.chains if c in valid_slugs]
+    user.preferred_chains = ",".join(filtered) if filtered else None
+    await db.flush()
+    return {"chains": filtered}
+
+
 # --- User Stores ---
 
 @router.post("/me/stores", status_code=201)
@@ -703,3 +735,59 @@ async def remove_shopping_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     await db.delete(item)
+
+
+# --- Trip Optimizer ---
+
+class TripItemResponse(BaseModel):
+    product_name: str
+    offer_price: Decimal
+    chain_name: str
+
+
+class StoreTripResponse(BaseModel):
+    chain_name: str
+    items: list[TripItemResponse]
+    total: Decimal
+
+
+class TripOptimizationResponse(BaseModel):
+    single_store_best: StoreTripResponse | None
+    multi_store_plan: list[StoreTripResponse]
+    single_store_total: Decimal
+    multi_store_total: Decimal
+    potential_savings: Decimal
+
+
+@router.get("/me/shopping-list/optimize", response_model=TripOptimizationResponse)
+async def optimize_shopping_trip(
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Analyse the shopping list and suggest optimal purchasing strategies."""
+    from app.services.trip_optimizer import TripOptimizer
+
+    optimizer = TripOptimizer()
+    result = await optimizer.optimize(user.id, db)
+
+    def _convert_trip(trip) -> StoreTripResponse:
+        return StoreTripResponse(
+            chain_name=trip.chain_name,
+            items=[
+                TripItemResponse(
+                    product_name=i.product_name,
+                    offer_price=i.offer_price,
+                    chain_name=i.chain_name,
+                )
+                for i in trip.items
+            ],
+            total=trip.total,
+        )
+
+    return TripOptimizationResponse(
+        single_store_best=_convert_trip(result.single_store_best) if result.single_store_best else None,
+        multi_store_plan=[_convert_trip(t) for t in result.multi_store_plan],
+        single_store_total=result.single_store_total,
+        multi_store_total=result.multi_store_total,
+        potential_savings=result.potential_savings,
+    )

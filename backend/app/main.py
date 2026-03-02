@@ -96,8 +96,32 @@ async def health():
 # ── Static files + SPA fallback ──────────────────────────────────────────────
 
 if DIST_DIR.is_dir():
-    # Serve static assets (JS bundles, images, etc.)
+    # Serve static assets (JS bundles, images, fonts, etc.)
     app.mount("/_expo", StaticFiles(directory=DIST_DIR / "_expo"), name="expo-assets")
+
+    # Serve fonts from a flat directory (Cloudflare rejects @ in URLs, so
+    # the deep node_modules path doesn't work through the tunnel)
+    if (DIST_DIR / "fonts").is_dir():
+        app.mount("/fonts", StaticFiles(directory=DIST_DIR / "fonts"), name="web-fonts")
+
+    # Rewrite deep asset paths containing @ to the flat /fonts/ directory
+    @app.get("/assets/{rest:path}")
+    async def assets_rewrite(rest: str):
+        """Serve assets; for font files, redirect to /fonts/ to avoid @ in URL."""
+        # Check if it's a font file request
+        if rest.endswith(".ttf"):
+            import os
+            font_name = os.path.basename(rest)
+            font_path = DIST_DIR / "fonts" / font_name
+            if font_path.is_file():
+                return FileResponse(font_path, media_type="font/ttf")
+
+        # Otherwise try serving from the full assets tree
+        asset_path = DIST_DIR / "assets" / rest
+        if asset_path.is_file():
+            return FileResponse(asset_path)
+
+        return HTMLResponse(status_code=404, content="Not Found")
 
     # Serve files in the root of dist (manifest.json, sw.js, pwa-icons, etc.)
     @app.get("/manifest.json")

@@ -108,7 +108,7 @@ export default function ProductDetailScreen() {
             <Text variant="headlineSmall" style={styles.productName}>
               {product.name}
             </Text>
-            <PriceIndicator productId={id!} />
+            <PriceIndicator indicator={bestPrice?.price_indicator} />
           </View>
           {product.brand && (
             <Text variant="titleMedium" style={styles.brandText}>

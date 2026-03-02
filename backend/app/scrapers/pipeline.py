@@ -443,6 +443,7 @@ class ScrapingPipeline:
                     pass
 
         price_per_unit = self._parse_italian_price(prod_data.get("price_per_unit"))
+        ppu_computed = False
 
         # Determine unit_reference from Gemini output or fallback regex
         unit_reference = prod_data.get("unit_reference")
@@ -450,6 +451,21 @@ class ScrapingPipeline:
             unit_reference = self._infer_unit_reference(
                 prod_data.get("quantity"), prod_data.get("raw_text")
             )
+
+        # Fallback: compute PPU if Gemini did not extract it
+        if price_per_unit is None:
+            from app.services.unit_price_calculator import UnitPriceCalculator
+
+            price_per_unit, computed_ref = UnitPriceCalculator.compute(
+                offer_price,
+                prod_data.get("quantity"),
+                product_name=name,
+                product_unit=prod_data.get("quantity"),
+            )
+            if price_per_unit is not None:
+                ppu_computed = True
+                if computed_ref:
+                    unit_reference = computed_ref
 
         offer = Offer(
             product_id=product.id,
@@ -463,6 +479,7 @@ class ScrapingPipeline:
             quantity=prod_data.get("quantity"),
             price_per_unit=price_per_unit,
             unit_reference=unit_reference,
+            ppu_computed=ppu_computed,
             valid_from=valid_from,
             valid_to=valid_to,
             raw_text=prod_data.get("raw_text"),

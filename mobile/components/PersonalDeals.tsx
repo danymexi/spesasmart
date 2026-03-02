@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Image, StyleSheet, TouchableOpacity, View } from "react-native";
 import { Button, Text } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
@@ -6,28 +7,81 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getUserDeals, type UserDeal } from "../services/api";
 import { glassCard, glassColors, glassPanel, productImage, imagePlaceholder } from "../styles/glassStyles";
 
+interface GroupedDeal {
+  product_id: string;
+  product_name: string;
+  brand: string | null;
+  image_url: string | null;
+  offers: {
+    chain_name: string;
+    offer_price: number;
+    original_price: number | null;
+    discount_pct: number | null;
+    valid_to: string | null;
+  }[];
+}
+
+function groupDealsByProduct(deals: UserDeal[]): GroupedDeal[] {
+  const map = new Map<string, GroupedDeal>();
+  for (const deal of deals) {
+    const existing = map.get(deal.product_id);
+    if (existing) {
+      existing.offers.push({
+        chain_name: deal.chain_name,
+        offer_price: deal.offer_price,
+        original_price: deal.original_price,
+        discount_pct: deal.discount_pct,
+        valid_to: deal.valid_to,
+      });
+      if (!existing.image_url && deal.image_url) {
+        existing.image_url = deal.image_url;
+      }
+    } else {
+      map.set(deal.product_id, {
+        product_id: deal.product_id,
+        product_name: deal.product_name,
+        brand: deal.brand,
+        image_url: deal.image_url,
+        offers: [{
+          chain_name: deal.chain_name,
+          offer_price: deal.offer_price,
+          original_price: deal.original_price,
+          discount_pct: deal.discount_pct,
+          valid_to: deal.valid_to,
+        }],
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
 export default function PersonalDeals() {
   const { data: deals, isLoading } = useQuery({
     queryKey: ["userDeals"],
     queryFn: getUserDeals,
   });
 
+  const grouped = useMemo(() => {
+    if (!deals) return [];
+    return groupDealsByProduct(deals);
+  }, [deals]);
+
   if (isLoading) {
     return null;
   }
 
-  const hasDeals = deals && deals.length > 0;
+  const hasDeals = grouped.length > 0;
 
   return (
     <View style={styles.section}>
       <Text variant="titleLarge" style={styles.sectionTitle}>
-        Le Tue Offerte {hasDeals ? `(${deals.length})` : ""}
+        Le Tue Offerte {hasDeals ? `(${grouped.length})` : ""}
       </Text>
 
       {hasDeals ? (
         <>
-          {deals.map((deal, index) => (
-            <DealCard key={`${deal.product_id}-${deal.chain_name}-${index}`} deal={deal} />
+          {grouped.map((group) => (
+            <DealCard key={group.product_id} group={group} />
           ))}
           <View style={styles.ctaContainer}>
             <Text variant="bodySmall" style={styles.ctaText}>
@@ -62,17 +116,19 @@ export default function PersonalDeals() {
   );
 }
 
-function DealCard({ deal }: { deal: UserDeal }) {
+function DealCard({ group }: { group: GroupedDeal }) {
+  const bestPrice = Math.min(...group.offers.map((o) => o.offer_price));
+
   return (
     <TouchableOpacity
       style={styles.card}
-      onPress={() => router.push(`/product/${deal.product_id}`)}
+      onPress={() => router.push(`/product/${group.product_id}`)}
       activeOpacity={0.7}
     >
       <View style={styles.cardInner}>
-        {deal.image_url ? (
+        {group.image_url ? (
           <Image
-            source={{ uri: deal.image_url }}
+            source={{ uri: group.image_url }}
             style={styles.dealImage}
             resizeMode="contain"
           />
@@ -84,35 +140,56 @@ function DealCard({ deal }: { deal: UserDeal }) {
 
         <View style={styles.dealInfo}>
           <Text variant="titleSmall" numberOfLines={1}>
-            {deal.product_name}
+            {group.product_name}
           </Text>
-          {deal.brand && (
+          {group.brand && (
             <Text variant="bodySmall" style={styles.brand}>
-              {deal.brand}
+              {group.brand}
             </Text>
           )}
-          <Text variant="bodySmall" style={styles.chain}>
-            {deal.chain_name}
-          </Text>
         </View>
+      </View>
 
-        <View style={styles.priceSection}>
-          <Text variant="titleMedium" style={styles.offerPrice}>
-            {"\u20AC"}{Number(deal.offer_price).toFixed(2)}
-          </Text>
-          {deal.original_price && (
-            <Text variant="bodySmall" style={styles.originalPrice}>
-              {"\u20AC"}{Number(deal.original_price).toFixed(2)}
-            </Text>
-          )}
-          {deal.discount_pct && (
-            <View style={styles.discountBadge}>
-              <Text style={styles.discountText}>
-                -{Number(deal.discount_pct).toFixed(0)}%
+      {/* Chain prices side by side */}
+      <View style={styles.chainPricesRow}>
+        {group.offers.map((offer) => {
+          const isBest = group.offers.length > 1 && offer.offer_price === bestPrice;
+          return (
+            <View
+              key={offer.chain_name}
+              style={[
+                styles.chainPriceCell,
+                isBest && styles.chainPriceCellBest,
+              ]}
+            >
+              <Text
+                variant="labelSmall"
+                style={[styles.chainLabel, isBest && styles.chainLabelBest]}
+                numberOfLines={1}
+              >
+                {offer.chain_name}
               </Text>
+              <Text
+                variant="titleMedium"
+                style={[styles.offerPrice, isBest && styles.offerPriceBest]}
+              >
+                {"\u20AC"}{Number(offer.offer_price).toFixed(2)}
+              </Text>
+              {offer.original_price && (
+                <Text variant="bodySmall" style={styles.originalPrice}>
+                  {"\u20AC"}{Number(offer.original_price).toFixed(2)}
+                </Text>
+              )}
+              {offer.discount_pct && (
+                <View style={[styles.discountBadge, isBest && styles.discountBadgeBest]}>
+                  <Text style={[styles.discountText, isBest && styles.discountTextBest]}>
+                    -{Number(offer.discount_pct).toFixed(0)}%
+                  </Text>
+                </View>
+              )}
             </View>
-          )}
-        </View>
+          );
+        })}
       </View>
     </TouchableOpacity>
   );
@@ -145,18 +222,46 @@ const styles = StyleSheet.create({
   },
   dealInfo: { flex: 1, marginRight: 8 },
   brand: { color: "#666", marginTop: 1 },
-  chain: { color: glassColors.greenSubtle, marginTop: 1 },
-  priceSection: { alignItems: "flex-end" },
+  chainPricesRow: {
+    flexDirection: "row",
+    marginTop: 8,
+    gap: 8,
+  },
+  chainPriceCell: {
+    flex: 1,
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.03)",
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+  },
+  chainPriceCellBest: {
+    backgroundColor: "rgba(27,94,32,0.08)",
+  },
+  chainLabel: {
+    color: "#888",
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  chainLabelBest: {
+    color: glassColors.greenDark,
+    fontWeight: "600",
+  },
   offerPrice: { color: glassColors.greenDark, fontWeight: "bold" },
-  originalPrice: { color: "#999", textDecorationLine: "line-through" },
+  offerPriceBest: { color: glassColors.greenDark },
+  originalPrice: { color: "#999", textDecorationLine: "line-through", fontSize: 11, marginTop: 1 },
   discountBadge: {
     backgroundColor: "rgba(255,111,0,0.12)",
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    marginTop: 2,
+    marginTop: 3,
+  },
+  discountBadgeBest: {
+    backgroundColor: "rgba(27,94,32,0.12)",
   },
   discountText: { color: "#E65100", fontSize: 11, fontWeight: "bold" },
+  discountTextBest: { color: glassColors.greenDark },
   ctaContainer: {
     flexDirection: "row",
     alignItems: "center",

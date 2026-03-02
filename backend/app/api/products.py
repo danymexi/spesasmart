@@ -40,7 +40,7 @@ class CatalogProductResponse(BaseModel):
     best_price_per_unit: Decimal | None = None
     unit_reference: str | None = None
     unit: str | None = None
-    price_indicator: str | None = None  # "ottimo" | "medio" | "alto"
+    price_indicator: str | None = None  # "top" | "neutro" | "flop"
 
 
 class CategoryResponse(BaseModel):
@@ -72,6 +72,7 @@ class BestPriceResponse(BaseModel):
     discount_pct: Decimal | None
     price_per_unit: Decimal | None = None
     unit_reference: str | None = None
+    price_indicator: str | None = None
 
 
 class ProductSearchResult(BaseModel):
@@ -199,17 +200,14 @@ async def get_catalog_products(
             if pid not in chain_map:
                 chain_map[pid] = cname
 
-    # Compute price indicator
-    def _price_indicator(best_price: Decimal | None, avg_price: float | None) -> str | None:
-        if best_price is None or avg_price is None:
-            return None
-        avg = float(avg_price)
-        cur = float(best_price)
-        if cur < avg * 0.8:
-            return "ottimo"
-        if cur > avg * 1.1:
-            return "alto"
-        return "medio"
+    # Compute price indicators using PriceAnalyzer batch method
+    from app.services.price_analyzer import PriceAnalyzer
+
+    product_ids_with_offers = [r.Product.id for r in rows if r.best_price is not None]
+    analyzer = PriceAnalyzer()
+    indicators = await analyzer.compute_indicators_batch(
+        product_ids_with_offers, session=db
+    ) if product_ids_with_offers else {}
 
     return [
         CatalogProductResponse(
@@ -224,7 +222,7 @@ async def get_catalog_products(
             best_price_per_unit=row.best_ppu,
             unit_reference=row.unit_reference,
             unit=row.Product.unit,
-            price_indicator=_price_indicator(row.best_price, row.avg_price),
+            price_indicator=indicators.get(row.Product.id),
         )
         for row in rows
     ]
@@ -268,6 +266,175 @@ async def get_categories(
     )
     rows = result.all()
     return [CategoryResponse(name=name, count=count) for name, count in rows]
+
+
+class SmartSearchOfferResponse(BaseModel):
+    chain_name: str
+    chain_slug: str
+    offer_price: Decimal
+    original_price: Decimal | None
+    discount_pct: Decimal | None
+    price_per_unit: Decimal | None
+    unit_reference: str | None
+    valid_to: date | None
+    offer_id: uuid.UUID
+
+
+class SmartSearchResult(BaseModel):
+    product: ProductResponse
+    offers: list[SmartSearchOfferResponse]
+    price_indicator: str | None = None
+    best_price_per_unit: Decimal | None = None
+    unit_reference: str | None = None
+    is_category_match: bool = False
+
+
+FRESH_CATEGORIES = {
+    "Formaggi", "Salumi", "Carne", "Pesce", "Frutta",
+    "Verdura", "Latticini", "Gastronomia",
+}
+
+
+def _build_smart_result(
+    product: Product,
+    raw_offers: list[Offer],
+    indicator: str | None,
+    is_category_match: bool = False,
+) -> SmartSearchResult:
+    """Build a SmartSearchResult from a product and its offers."""
+    seen_chains: set[uuid.UUID] = set()
+    best_per_chain: list[Offer] = []
+    for o in raw_offers:
+        if o.chain_id not in seen_chains:
+            seen_chains.add(o.chain_id)
+            best_per_chain.append(o)
+
+    ppus = [o.price_per_unit for o in best_per_chain if o.price_per_unit is not None]
+    best_ppu = min(ppus) if ppus else None
+    unit_refs = [o.unit_reference for o in best_per_chain if o.unit_reference]
+    unit_ref = unit_refs[0] if unit_refs else None
+
+    return SmartSearchResult(
+        product=ProductResponse.model_validate(product),
+        offers=[
+            SmartSearchOfferResponse(
+                chain_name=o.chain.name if o.chain else "Unknown",
+                chain_slug=o.chain.slug if o.chain else "",
+                offer_price=o.offer_price,
+                original_price=o.original_price,
+                discount_pct=o.discount_pct,
+                price_per_unit=o.price_per_unit,
+                unit_reference=o.unit_reference,
+                valid_to=o.valid_to,
+                offer_id=o.id,
+            )
+            for o in best_per_chain
+        ],
+        price_indicator=indicator,
+        best_price_per_unit=best_ppu,
+        unit_reference=unit_ref,
+        is_category_match=is_category_match,
+    )
+
+
+@router.get("/smart-search", response_model=list[SmartSearchResult])
+async def smart_search(
+    q: str = Query(..., min_length=2, description="Search query"),
+    limit: int = Query(5, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Combined search + multi-chain compare in a single efficient query.
+
+    For fresh-category products (Formaggi, Salumi, etc.), also includes
+    same-subcategory products sorted by PPU for cross-brand comparison.
+    """
+    today = date.today()
+    from collections import defaultdict
+    from app.services.price_analyzer import PriceAnalyzer
+
+    # Find matching products
+    prod_result = await db.execute(
+        select(Product)
+        .where(Product.name.ilike(f"%{q}%"))
+        .order_by(Product.name)
+        .limit(limit)
+    )
+    products = list(prod_result.scalars().all())
+
+    if not products:
+        return []
+
+    product_ids = [p.id for p in products]
+
+    # Check if any matched product is in a fresh category
+    fresh_subcategories: set[str] = set()
+    matched_product_ids: set[uuid.UUID] = set(product_ids)
+    for p in products:
+        if p.category and p.category in FRESH_CATEGORIES and p.subcategory:
+            fresh_subcategories.add(p.subcategory)
+
+    # Add category-match products for fresh subcategories
+    category_products: list[Product] = []
+    if fresh_subcategories:
+        cat_result = await db.execute(
+            select(Product)
+            .where(
+                Product.subcategory.in_(fresh_subcategories),
+                Product.id.notin_(product_ids),
+            )
+            .order_by(Product.name)
+            .limit(limit)
+        )
+        category_products = list(cat_result.scalars().all())
+        product_ids.extend([p.id for p in category_products])
+
+    # Fetch all active offers in one query
+    offers_result = await db.execute(
+        select(Offer)
+        .options(joinedload(Offer.chain))
+        .where(
+            Offer.product_id.in_(product_ids),
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+        )
+        .order_by(Offer.product_id, Offer.price_per_unit.asc().nulls_last(), Offer.offer_price.asc())
+    )
+    all_offers = offers_result.unique().scalars().all()
+
+    offers_by_product: dict[uuid.UUID, list[Offer]] = defaultdict(list)
+    for o in all_offers:
+        offers_by_product[o.product_id].append(o)
+
+    # Compute indicators
+    analyzer = PriceAnalyzer()
+    indicators = await analyzer.compute_indicators_batch(product_ids, session=db)
+
+    results = []
+
+    # Exact matches first
+    for product in products:
+        results.append(
+            _build_smart_result(
+                product,
+                offers_by_product.get(product.id, []),
+                indicators.get(product.id),
+            )
+        )
+
+    # Category matches (fresh products from same subcategory)
+    for product in category_products:
+        offers = offers_by_product.get(product.id, [])
+        if offers:  # Only include if there are active offers
+            results.append(
+                _build_smart_result(
+                    product,
+                    offers,
+                    indicators.get(product.id),
+                    is_category_match=True,
+                )
+            )
+
+    return results
 
 
 @router.get("/search", response_model=list[ProductSearchResult])
@@ -398,6 +565,16 @@ async def get_best_price(
     if not best:
         raise HTTPException(status_code=404, detail="No active offers found")
 
+    from app.services.price_analyzer import PriceAnalyzer
+
+    analyzer = PriceAnalyzer()
+    indicator = await analyzer.get_price_indicator(
+        product_id,
+        offer_price=best.offer_price,
+        offer_ppu=best.price_per_unit,
+        session=db,
+    )
+
     return BestPriceResponse(
         product=ProductResponse.model_validate(product),
         best_price=best.offer_price,
@@ -407,6 +584,7 @@ async def get_best_price(
         discount_pct=best.discount_pct,
         price_per_unit=best.price_per_unit,
         unit_reference=best.unit_reference,
+        price_indicator=indicator,
     )
 
 

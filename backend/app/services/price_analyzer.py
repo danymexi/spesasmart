@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 # Data transfer objects
 # ---------------------------------------------------------------------------
 
-PriceIndicator = Literal["ottimo", "medio", "alto"]
+PriceIndicator = Literal["top", "neutro", "flop"]
+
+# Backward-compat mapping (old -> new)
+_INDICATOR_COMPAT = {"ottimo": "top", "medio": "neutro", "alto": "flop"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,14 +207,16 @@ class PriceAnalyzer:
         self,
         product_id: uuid.UUID,
         *,
+        offer_price: Optional[Decimal] = None,
+        offer_ppu: Optional[Decimal] = None,
         session: AsyncSession | None = None,
     ) -> Optional[PriceIndicator]:
-        """Classify the current best price relative to the historical average.
+        """Classify a price as TOP / NEUTRO / FLOP.
 
-        Rules:
-        - **ottimo** (green): price < average * 0.8
-        - **medio**  (yellow): average * 0.8 <= price <= average * 1.1
-        - **alto**   (red):   price > average * 1.1
+        Uses both historical average AND cross-chain PPU comparison:
+        - **top**: price < avg * 0.8, OR PPU <= min cross-chain PPU
+        - **flop**: price > avg * 1.1, OR PPU > max cross-chain PPU
+        - **neutro**: everything else
 
         Returns ``None`` when there is no active offer or no history.
         """
@@ -221,41 +226,160 @@ class PriceAnalyzer:
             close_session = True
 
         try:
-            best_offer = await self.get_best_current_price(
-                product_id, session=session
-            )
-            if best_offer is None:
-                return None
+            # Get current best offer if price not provided
+            if offer_price is None:
+                best_offer = await self.get_best_current_price(
+                    product_id, session=session
+                )
+                if best_offer is None:
+                    return None
+                offer_price = best_offer.offer_price
+                offer_ppu = best_offer.price_per_unit
 
             avg_price = await self.get_average_price(
                 product_id, session=session
             )
-            if avg_price is None or avg_price == 0:
-                return None
 
-            current_price = best_offer.offer_price
+            # Cross-chain PPU comparison
+            min_ppu, max_ppu = await self._get_cross_chain_ppu_range(
+                product_id, session=session
+            )
 
-            threshold_green = avg_price * Decimal("0.8")
-            threshold_red = avg_price * Decimal("1.1")
+            # Determine indicator
+            is_top = False
+            is_flop = False
 
-            if current_price < threshold_green:
-                indicator: PriceIndicator = "ottimo"
-            elif current_price > threshold_red:
-                indicator = "alto"
+            if avg_price and avg_price > 0:
+                if offer_price < avg_price * Decimal("0.8"):
+                    is_top = True
+                elif offer_price > avg_price * Decimal("1.1"):
+                    is_flop = True
+
+            if offer_ppu and min_ppu and max_ppu:
+                if offer_ppu <= min_ppu:
+                    is_top = True
+                elif offer_ppu > max_ppu and not is_top:
+                    is_flop = True
+
+            if is_top:
+                indicator: PriceIndicator = "top"
+            elif is_flop:
+                indicator = "flop"
             else:
-                indicator = "medio"
+                indicator = "neutro"
 
             logger.debug(
-                "Product %s: price=%s avg=%s -> %s",
-                product_id,
-                current_price,
-                avg_price,
+                "Product %s: price=%s avg=%s ppu=%s min_ppu=%s max_ppu=%s -> %s",
+                product_id, offer_price, avg_price, offer_ppu, min_ppu, max_ppu,
                 indicator,
             )
             return indicator
         finally:
             if close_session:
                 await session.close()
+
+    async def _get_cross_chain_ppu_range(
+        self,
+        product_id: uuid.UUID,
+        *,
+        session: AsyncSession,
+    ) -> tuple[Optional[Decimal], Optional[Decimal]]:
+        """Return (min_ppu, max_ppu) across all active offers for a product."""
+        active_clauses = self._active_offer_filter()
+        stmt = select(
+            func.min(Offer.price_per_unit),
+            func.max(Offer.price_per_unit),
+        ).where(
+            Offer.product_id == product_id,
+            Offer.price_per_unit.isnot(None),
+            *active_clauses,
+        )
+        result = await session.execute(stmt)
+        row = result.one_or_none()
+        if row:
+            return row[0], row[1]
+        return None, None
+
+    async def compute_indicators_batch(
+        self,
+        product_ids: list[uuid.UUID],
+        *,
+        session: AsyncSession,
+    ) -> dict[uuid.UUID, PriceIndicator]:
+        """Compute indicators for multiple products in a single pass.
+
+        Returns a mapping of product_id -> indicator.
+        """
+        if not product_ids:
+            return {}
+
+        today = date.today()
+
+        # Batch fetch: avg prices
+        avg_stmt = (
+            select(Offer.product_id, func.avg(Offer.offer_price))
+            .where(Offer.product_id.in_(product_ids))
+            .group_by(Offer.product_id)
+        )
+        avg_result = await session.execute(avg_stmt)
+        avg_map = {pid: Decimal(str(round(avg, 2))) for pid, avg in avg_result.all() if avg}
+
+        # Batch fetch: best active price + PPU per product
+        best_stmt = (
+            select(
+                Offer.product_id,
+                func.min(Offer.offer_price),
+                func.min(Offer.price_per_unit),
+                func.max(Offer.price_per_unit),
+            )
+            .where(
+                Offer.product_id.in_(product_ids),
+                Offer.valid_from <= today,
+                Offer.valid_to >= today,
+            )
+            .group_by(Offer.product_id)
+        )
+        best_result = await session.execute(best_stmt)
+        best_map = {}
+        ppu_range_map = {}
+        for pid, best_price, min_ppu, max_ppu in best_result.all():
+            best_map[pid] = best_price
+            ppu_range_map[pid] = (min_ppu, max_ppu)
+
+        indicators: dict[uuid.UUID, PriceIndicator] = {}
+        for pid in product_ids:
+            best_price = best_map.get(pid)
+            if best_price is None:
+                continue
+
+            avg_price = avg_map.get(pid)
+            min_ppu, max_ppu = ppu_range_map.get(pid, (None, None))
+            # For batch, use min_ppu as the offer's PPU (best price = best PPU assumption)
+            offer_ppu = min_ppu
+
+            is_top = False
+            is_flop = False
+
+            if avg_price and avg_price > 0:
+                if best_price < avg_price * Decimal("0.8"):
+                    is_top = True
+                elif best_price > avg_price * Decimal("1.1"):
+                    is_flop = True
+
+            if offer_ppu and min_ppu and max_ppu and min_ppu != max_ppu:
+                if offer_ppu <= min_ppu:
+                    is_top = True
+                elif offer_ppu >= max_ppu and not is_top:
+                    is_flop = True
+
+            if is_top:
+                indicators[pid] = "top"
+            elif is_flop:
+                indicators[pid] = "flop"
+            else:
+                indicators[pid] = "neutro"
+
+        return indicators
 
     # ------------------------------------------------------------------
     # Best offers by category

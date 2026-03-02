@@ -3,6 +3,7 @@ import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import { Button, Checkbox, IconButton, Text, TextInput, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   getShoppingList,
   addToShoppingList,
@@ -12,11 +13,13 @@ import {
   ShoppingListItem,
 } from "../services/api";
 import { glassCard, glassColors } from "../styles/glassStyles";
+import TripOptimizer from "./TripOptimizer";
 
 export default function ShoppingList() {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const [customInput, setCustomInput] = useState("");
+  const [showOptimizer, setShowOptimizer] = useState(false);
 
   const { data: items, isLoading, refetch } = useQuery({
     queryKey: ["shoppingList"],
@@ -184,9 +187,19 @@ export default function ShoppingList() {
         contentContainerStyle={styles.listContent}
       />
 
-      {/* Clear checked button */}
-      {checkedCount > 0 && (
-        <View style={styles.clearRow}>
+      {/* Action buttons */}
+      <View style={styles.clearRow}>
+        {(items?.length ?? 0) > 0 && (
+          <Button
+            mode="contained"
+            icon="map-marker-path"
+            onPress={() => setShowOptimizer(true)}
+            style={styles.optimizeButton}
+          >
+            Ottimizza Spesa
+          </Button>
+        )}
+        {checkedCount > 0 && (
           <Button
             mode="outlined"
             icon="delete-sweep"
@@ -195,8 +208,13 @@ export default function ShoppingList() {
           >
             Svuota completati ({checkedCount})
           </Button>
-        </View>
-      )}
+        )}
+      </View>
+
+      <TripOptimizer
+        visible={showOptimizer}
+        onDismiss={() => setShowOptimizer(false)}
+      />
     </View>
   );
 }
@@ -256,5 +274,9 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: "center",
     paddingVertical: 8,
+    gap: 8,
+  },
+  optimizeButton: {
+    backgroundColor: glassColors.greenDark,
   },
 });

@@ -33,7 +33,11 @@ const SORT_OPTIONS = [
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
 
 const INDICATOR_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
-  ottimo: { color: "#2E7D32", bg: "rgba(46,125,50,0.12)", label: "Ottimo" },
+  top: { color: "#2E7D32", bg: "rgba(46,125,50,0.12)", label: "Top" },
+  neutro: { color: "#F57F17", bg: "rgba(245,127,23,0.12)", label: "Nella media" },
+  flop: { color: "#C62828", bg: "rgba(198,40,40,0.12)", label: "Caro" },
+  // Backward compat
+  ottimo: { color: "#2E7D32", bg: "rgba(46,125,50,0.12)", label: "Top" },
   medio: { color: "#F57F17", bg: "rgba(245,127,23,0.12)", label: "Nella media" },
   alto: { color: "#C62828", bg: "rgba(198,40,40,0.12)", label: "Caro" },
 };

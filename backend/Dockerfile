@@ -1,24 +1,7 @@
-# ── Stage 1: Build Expo web app ───────────────────────────────────────────────
-FROM node:20-slim AS web-builder
-
-WORKDIR /web
-
-# Install dependencies first (cache-friendly)
-COPY mobile/package.json mobile/package-lock.json* ./
-RUN npm ci
-
-# Copy the rest of mobile source
-COPY mobile/ ./
-
-# Build Expo for web (output to /web/dist)
-RUN npx expo export --platform web
-
-# Inject PWA tags into generated index.html (Expo doesn't include manifest link)
-RUN sed -i 's|</head>|<link rel="manifest" href="/manifest.json" />\n<link rel="apple-touch-icon" sizes="192x192" href="/pwa-icons/icon-192.png" />\n<meta name="apple-mobile-web-app-capable" content="yes" />\n<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />\n<meta name="apple-mobile-web-app-title" content="SpesaSmart" />\n</head>|' /web/dist/index.html \
-    && sed -i 's|width=device-width, initial-scale=1, shrink-to-fit=no|width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover|' /web/dist/index.html \
-    && sed -i 's|</style>|html, body { height: 100dvh !important; } #root { height: 100dvh !important; }\n</style>|' /web/dist/index.html
-
-# ── Stage 2: Python backend + static dist ─────────────────────────────────────
+# ── Build: Python backend + pre-built static dist ─────────────────────────────
+# NOTE: Expo web build is done on the dev machine (npx expo export --platform web)
+# and the output (mobile/dist/) is rsynced alongside backend/. This avoids running
+# Node.js inside Docker, which OOMs on the 1GB Proxmox LXC.
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -44,8 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy backend source
 COPY backend/ .
 
-# Copy Expo web build from stage 1
-COPY --from=web-builder /web/dist /app/dist
+# Copy pre-built Expo web assets (built on dev machine, rsynced to server)
+COPY mobile/dist/ /app/dist
 
 EXPOSE 8000
 

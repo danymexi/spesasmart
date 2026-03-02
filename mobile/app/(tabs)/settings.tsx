@@ -11,7 +11,7 @@ function showAlert(title: string, message: string) {
   }
 }
 import { useAppStore } from "../../stores/useAppStore";
-import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe } from "../../services/api";
+import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors } from "../../styles/glassStyles";
 
@@ -351,18 +351,14 @@ export default function SettingsScreen() {
         </List.Section>
       </View>
 
-      {/* Supermarkets */}
+      {/* Preferred Chains */}
       <View style={styles.section}>
         <List.Section>
-          <List.Subheader>Supermercati Monitorati</List.Subheader>
-          {["Esselunga", "Lidl", "Coop", "Iperal"].map((chain) => (
-            <List.Item
-              key={chain}
-              title={chain}
-              left={(props) => <List.Icon {...props} icon="store" />}
-              right={(props) => <List.Icon {...props} icon="check-circle" color={theme.colors.primary} />}
-            />
-          ))}
+          <List.Subheader>Catene Preferite</List.Subheader>
+          <Text variant="bodySmall" style={styles.chainHint}>
+            Seleziona le catene da mostrare in home. Se nessuna selezionata, le mostra tutte.
+          </Text>
+          <PreferredChainsSelector isLoggedIn={isLoggedIn} />
         </List.Section>
       </View>
 
@@ -414,6 +410,61 @@ export default function SettingsScreen() {
   );
 }
 
+const CHAIN_OPTIONS = [
+  { slug: "esselunga", label: "Esselunga" },
+  { slug: "lidl", label: "Lidl" },
+  { slug: "coop", label: "Coop" },
+  { slug: "iperal", label: "Iperal" },
+];
+
+function PreferredChainsSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
+  const queryClient = useQueryClient();
+
+  const { data: preferredChains } = useQuery({
+    queryKey: ["preferredChains"],
+    queryFn: getPreferredChains,
+    enabled: isLoggedIn,
+  });
+
+  const mutation = useMutation({
+    mutationFn: (chains: string[]) => updatePreferredChains(chains),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["preferredChains"] });
+    },
+  });
+
+  const selectedSet = new Set(preferredChains || []);
+
+  const toggle = (slug: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(slug)) {
+      next.delete(slug);
+    } else {
+      next.add(slug);
+    }
+    mutation.mutate(Array.from(next));
+  };
+
+  return (
+    <View>
+      {CHAIN_OPTIONS.map((chain) => (
+        <List.Item
+          key={chain.slug}
+          title={chain.label}
+          left={(props) => <List.Icon {...props} icon="store" />}
+          right={() => (
+            <Switch
+              value={selectedSet.has(chain.slug)}
+              onValueChange={() => toggle(chain.slug)}
+              disabled={!isLoggedIn}
+            />
+          )}
+        />
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "transparent" },
   section: {
@@ -437,5 +488,6 @@ const styles = StyleSheet.create({
   suggestionsRow: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, gap: 6, marginBottom: 8, marginTop: 4 },
   suggestionChip: { marginBottom: 2 },
   brandEmptyText: { color: "#888", paddingHorizontal: 16, paddingBottom: 12 },
+  chainHint: { color: "#888", paddingHorizontal: 16, paddingBottom: 4 },
   bottomPadding: { height: 96 },
 });

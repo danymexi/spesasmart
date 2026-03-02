@@ -28,6 +28,7 @@ class UserProfile(Base):
     notification_mode: Mapped[str] = mapped_column(
         String(20), default="instant", server_default="instant"
     )
+    preferred_chains: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

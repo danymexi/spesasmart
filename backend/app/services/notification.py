@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Optional
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from telegram import Bot
@@ -704,3 +704,108 @@ class NotificationService:
 
             logger.info("Weekly digest: notified %d users.", notified)
             return notified
+
+    # ------------------------------------------------------------------
+    # Stockup alerts (6-month price lows)
+    # ------------------------------------------------------------------
+
+    async def check_stockup_alerts(self) -> int:
+        """Check if any watchlisted product has reached its 6-month price low.
+
+        Sends a "Scorta!" notification when current price is within 2% of the
+        minimum price seen in the last 6 months.
+
+        Returns the number of alerts sent.
+        """
+        from datetime import date as date_type, timedelta
+
+        async with async_session() as session:
+            today = date_type.today()
+            six_months_ago = today - timedelta(days=180)
+
+            # Get all watchlist entries with their products
+            wl_stmt = (
+                select(UserWatchlist)
+                .options(
+                    joinedload(UserWatchlist.user),
+                    joinedload(UserWatchlist.product),
+                )
+            )
+            wl_result = await session.execute(wl_stmt)
+            watchlist_entries = wl_result.unique().scalars().all()
+
+            if not watchlist_entries:
+                return 0
+
+            sent_count = 0
+
+            for entry in watchlist_entries:
+                user = entry.user
+                product = entry.product
+                if not product or not user:
+                    continue
+
+                # Find current best active offer
+                best_stmt = (
+                    select(Offer)
+                    .options(joinedload(Offer.chain))
+                    .where(
+                        Offer.product_id == product.id,
+                        Offer.valid_from <= today,
+                        Offer.valid_to >= today,
+                    )
+                    .order_by(Offer.offer_price)
+                    .limit(1)
+                )
+                best_result = await session.execute(best_stmt)
+                best_offer = best_result.unique().scalar_one_or_none()
+                if not best_offer:
+                    continue
+
+                # Find minimum price in last 6 months
+                min_stmt = select(func.min(Offer.offer_price)).where(
+                    Offer.product_id == product.id,
+                    Offer.created_at >= six_months_ago,
+                )
+                min_result = await session.execute(min_stmt)
+                min_price = min_result.scalar_one_or_none()
+                if min_price is None:
+                    continue
+
+                # Check if current price is within 2% of 6-month minimum
+                from decimal import Decimal
+
+                tolerance = Decimal("1.02")
+                if best_offer.offer_price <= min_price * tolerance:
+                    chain_name = best_offer.chain.name if best_offer.chain else "Unknown"
+                    title = "Prezzo Scorta!"
+                    body = (
+                        f"{product.name} a \u20AC{best_offer.offer_price:.2f} "
+                        f"da {chain_name} \u2014 Miglior prezzo degli ultimi 6 mesi! "
+                        f"Fai scorta!"
+                    )
+
+                    try:
+                        if user.push_token:
+                            await self.send_push_notification(
+                                user.push_token, title, body
+                            )
+                            sent_count += 1
+                        elif user.telegram_chat_id:
+                            await self.send_telegram_notification(
+                                user.telegram_chat_id,
+                                f"<b>{title}</b>\n{body}",
+                            )
+                            sent_count += 1
+
+                        await self.send_web_push_notification(
+                            user.id, title, body, session=session
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to send stockup alert for product %s to user %s",
+                            product.id, user.id,
+                        )
+
+            logger.info("Stockup alerts: %d notifications sent.", sent_count)
+            return sent_count

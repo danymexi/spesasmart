@@ -1,15 +1,16 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Chip, Text, useTheme } from "react-native-paper";
+import { ActivityIndicator, Chip, Searchbar, Text, useTheme } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { getActiveOffers, getAlternatives, getBestOffers, getBrandDeals, getHistoricLows, getUserBrands, getWatchlist } from "../../services/api";
+import { getActiveOffers, getAlternatives, getBestOffers, getBrandDeals, getHistoricLows, getUserBrands, getWatchlist, smartSearch } from "../../services/api";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import OfferCard from "../../components/OfferCard";
 import PersonalDeals from "../../components/PersonalDeals";
+import SmartCompareCard from "../../components/SmartCompareCard";
 import { useAppStore } from "../../stores/useAppStore";
-import { glassColors, glassChip, glassPanel } from "../../styles/glassStyles";
+import { glassColors, glassChip, glassPanel, glassSearchbar } from "../../styles/glassStyles";
 
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
 
@@ -18,6 +19,23 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const [selectedChain, setSelectedChain] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Smart search query
+  const { data: searchResults, isLoading: loadingSearch } = useQuery({
+    queryKey: ["smartSearch", debouncedQuery],
+    queryFn: () => smartSearch(debouncedQuery, 5),
+    enabled: debouncedQuery.length >= 2,
+  });
+
+  const isSearching = debouncedQuery.length >= 2;
 
   const {
     data: bestOffers,
@@ -141,6 +159,35 @@ export default function HomeScreen() {
         </Text>
       </View>
 
+      {/* Smart Search Bar */}
+      <View style={styles.searchContainer}>
+        <Searchbar
+          placeholder="Cerca e confronta prezzi..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          style={styles.searchbar}
+          inputStyle={styles.searchInput}
+          elevation={0}
+        />
+      </View>
+
+      {/* Smart Search Results (replaces normal content when searching) */}
+      {isSearching ? (
+        <View style={styles.searchResults}>
+          {loadingSearch ? (
+            <ActivityIndicator style={{ marginTop: 20 }} />
+          ) : searchResults && searchResults.length > 0 ? (
+            searchResults.map((result) => (
+              <SmartCompareCard key={result.product.id} result={result} />
+            ))
+          ) : (
+            <Text variant="bodyMedium" style={styles.emptyText}>
+              Nessun prodotto trovato per "{debouncedQuery}"
+            </Text>
+          )}
+        </View>
+      ) : (
+      <>
       {/* Personalized deals section (only for logged-in users with watchlist) */}
       {hasWatchlist && <PersonalDeals />}
 
@@ -301,6 +348,8 @@ export default function HomeScreen() {
       ))}
 
       <View style={styles.bottomPadding} />
+      </>
+      )}
     </ScrollView>
   );
 }
@@ -317,6 +366,10 @@ const styles = StyleSheet.create({
   } as any,
   headerTitle: { color: glassColors.greenDark, fontWeight: "bold" },
   headerSubtitle: { color: glassColors.greenSubtle, marginTop: 2 },
+  searchContainer: { paddingHorizontal: 12, marginTop: 12 },
+  searchbar: { ...glassSearchbar } as any,
+  searchInput: { fontSize: 14 },
+  searchResults: { marginTop: 8 },
   chips: { paddingHorizontal: 12, paddingVertical: 12, flexGrow: 0 },
   chip: {
     marginRight: 8,

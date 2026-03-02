@@ -409,6 +409,18 @@ class TiendeoScraper(BaseScraper):
                         prod_data.get("discount_pct")
                     )
 
+                    # Compute unit price if not provided
+                    from app.services.unit_price_calculator import UnitPriceCalculator
+
+                    quantity_str = prod_data.get("quantity")
+                    ppu, unit_ref = UnitPriceCalculator.compute(
+                        offer_price,
+                        quantity_str,
+                        product_name=name,
+                        product_unit=product.unit,
+                    )
+                    ppu_computed = ppu is not None
+
                     offer = Offer(
                         product_id=product.id,
                         flyer_id=flyer_id,
@@ -418,8 +430,10 @@ class TiendeoScraper(BaseScraper):
                         offer_price=offer_price,
                         discount_pct=discount_pct,
                         discount_type=prod_data.get("discount_type"),
-                        quantity=prod_data.get("quantity"),
-                        price_per_unit=None,
+                        quantity=quantity_str,
+                        price_per_unit=ppu,
+                        unit_reference=unit_ref,
+                        ppu_computed=ppu_computed,
                         valid_from=valid_from,
                         valid_to=valid_to,
                         raw_text=prod_data.get("raw_text", "")[:500],

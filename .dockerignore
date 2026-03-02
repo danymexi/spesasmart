@@ -8,10 +8,9 @@
 *.swp
 *.swo
 
-# Node
+# Node (keep mobile/dist — it contains the pre-built Expo web assets)
 mobile/node_modules
 mobile/.expo
-mobile/dist
 
 # Python
 backend/__pycache__
