@@ -18,7 +18,7 @@ from telegram.error import TelegramError
 
 from app.config import get_settings
 from app.database import async_session
-from app.models import Chain, Offer, Product, UserProfile, UserWatchlist
+from app.models import Chain, Offer, Product, UserBrand, UserProfile, UserWatchlist
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +193,76 @@ class NotificationService:
                 await session.close()
 
     # ------------------------------------------------------------------
+    # Brand matching
+    # ------------------------------------------------------------------
+
+    async def check_brand_alerts(
+        self,
+        offers: list[Offer],
+        *,
+        session: AsyncSession | None = None,
+    ) -> list[tuple[UserProfile, UserBrand, Offer]]:
+        """Match a batch of offers against users' favourite brands.
+
+        Returns ``(user, user_brand, offer)`` triples for every match.
+        """
+        close_session = False
+        if session is None:
+            session = async_session()
+            close_session = True
+
+        try:
+            if not offers:
+                return []
+
+            # Ensure products are loaded
+            product_ids = {o.product_id for o in offers}
+            prod_stmt = select(Product).where(Product.id.in_(product_ids))
+            prod_result = await session.execute(prod_stmt)
+            products_map: dict = {
+                p.id: p for p in prod_result.scalars().all()
+            }
+
+            # Get all user brands with notify=True
+            stmt = (
+                select(UserBrand)
+                .options(joinedload(UserBrand.user))
+                .where(UserBrand.notify.is_(True))
+            )
+            result = await session.execute(stmt)
+            user_brands: list[UserBrand] = list(result.scalars().unique().all())
+
+            if not user_brands:
+                return []
+
+            alerts: list[tuple[UserProfile, UserBrand, Offer]] = []
+
+            for offer in offers:
+                product = products_map.get(offer.product_id)
+                if not product or not product.brand:
+                    continue
+
+                product_brand_lower = product.brand.lower()
+                product_category_lower = (product.category or "").lower()
+
+                for ub in user_brands:
+                    if ub.brand_name.lower() not in product_brand_lower:
+                        continue
+                    if ub.category and ub.category.lower() != product_category_lower:
+                        continue
+                    alerts.append((ub.user, ub, offer))
+
+            logger.info(
+                "Brand check: %d offers -> %d alerts",
+                len(offers),
+                len(alerts),
+            )
+            return alerts
+        finally:
+            if close_session:
+                await session.close()
+
+    # ------------------------------------------------------------------
     # Message formatting
     # ------------------------------------------------------------------
 
@@ -287,10 +357,23 @@ class NotificationService:
                 return 0
 
             # Check watchlist matches
-            alerts = await self.check_watchlist_alerts(offers, session=session)
-            if not alerts:
+            watchlist_alerts = await self.check_watchlist_alerts(offers, session=session)
+
+            # Check brand matches
+            brand_alerts = await self.check_brand_alerts(offers, session=session)
+
+            # Merge and deduplicate by (user_id, offer_id)
+            seen: set[tuple] = set()
+            all_alerts: list[tuple] = []
+            for user, _entry, offer in watchlist_alerts + brand_alerts:
+                key = (user.id, offer.id)
+                if key not in seen:
+                    seen.add(key)
+                    all_alerts.append((user, _entry, offer))
+
+            if not all_alerts:
                 logger.info(
-                    "No watchlist matches for chain '%s' (%d offers).",
+                    "No matches for chain '%s' (%d offers).",
                     chain_slug,
                     len(offers),
                 )
@@ -298,7 +381,7 @@ class NotificationService:
 
             # Dispatch notifications
             sent_count = 0
-            for user, _entry, offer in alerts:
+            for user, _entry, offer in all_alerts:
                 product: Product = offer.product
                 chain_obj: Chain = offer.chain
                 message = self.format_offer_message(offer, product, chain_obj)
@@ -364,13 +447,26 @@ class NotificationService:
                 logger.info("Flyer %s has no offers – skipping.", flyer_id)
                 return 0
 
-            # 2. Find matching watchlist entries
-            alerts = await self.check_watchlist_alerts(
+            # 2. Find matching watchlist + brand entries
+            watchlist_alerts = await self.check_watchlist_alerts(
                 offers, session=session
             )
-            if not alerts:
+            brand_alerts = await self.check_brand_alerts(
+                offers, session=session
+            )
+
+            # Merge and deduplicate by (user_id, offer_id)
+            seen: set[tuple] = set()
+            all_alerts: list[tuple] = []
+            for user, _entry, offer in watchlist_alerts + brand_alerts:
+                key = (user.id, offer.id)
+                if key not in seen:
+                    seen.add(key)
+                    all_alerts.append((user, _entry, offer))
+
+            if not all_alerts:
                 logger.info(
-                    "No watchlist matches for flyer %s (%d offers).",
+                    "No matches for flyer %s (%d offers).",
                     flyer_id,
                     len(offers),
                 )
@@ -379,7 +475,7 @@ class NotificationService:
             # 3. Dispatch notifications
             sent_count = 0
 
-            for user, _watchlist_entry, offer in alerts:
+            for user, _watchlist_entry, offer in all_alerts:
                 product: Product = offer.product
                 chain: Chain = offer.chain
                 message = self.format_offer_message(offer, product, chain)

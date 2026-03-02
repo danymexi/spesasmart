@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Chip, Text, useTheme } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { getActiveOffers, getBestOffers, getHistoricLows, getWatchlist } from "../../services/api";
+import { getActiveOffers, getAlternatives, getBestOffers, getBrandDeals, getHistoricLows, getUserBrands, getWatchlist } from "../../services/api";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import OfferCard from "../../components/OfferCard";
 import PersonalDeals from "../../components/PersonalDeals";
@@ -55,11 +55,49 @@ export default function HomeScreen() {
 
   const hasWatchlist = isLoggedIn && watchlistItems && watchlistItems.length > 0;
 
+  // User brands
+  const { data: userBrands } = useQuery({
+    queryKey: ["userBrands"],
+    queryFn: getUserBrands,
+    enabled: isLoggedIn,
+  });
+  const hasBrands = isLoggedIn && userBrands && userBrands.length > 0;
+
+  // Brand deals
+  const {
+    data: brandDeals,
+    refetch: refetchBrandDeals,
+  } = useQuery({
+    queryKey: ["brandDeals"],
+    queryFn: () => getBrandDeals(),
+    enabled: hasBrands,
+  });
+
+  // Suggested alternatives
+  const {
+    data: alternatives,
+    refetch: refetchAlternatives,
+  } = useQuery({
+    queryKey: ["alternatives"],
+    queryFn: () => getAlternatives(),
+    enabled: hasWatchlist,
+  });
+
+  const filteredBrandDeals = useMemo(() => {
+    if (!brandDeals) return [];
+    if (!selectedChain) return brandDeals;
+    return brandDeals.filter(
+      (o) => o.chain_name?.toLowerCase() === selectedChain.toLowerCase()
+    );
+  }, [brandDeals, selectedChain]);
+
   const onRefresh = useCallback(() => {
     refetchBest();
     refetchActive();
     refetchHistoric();
-  }, [refetchBest, refetchActive, refetchHistoric]);
+    if (hasBrands) refetchBrandDeals();
+    if (hasWatchlist) refetchAlternatives();
+  }, [refetchBest, refetchActive, refetchHistoric, refetchBrandDeals, refetchAlternatives, hasBrands, hasWatchlist]);
 
   const isLoading = loadingBest || loadingActive || loadingHistoric;
 
@@ -105,6 +143,89 @@ export default function HomeScreen() {
 
       {/* Personalized deals section (only for logged-in users with watchlist) */}
       {hasWatchlist && <PersonalDeals />}
+
+      {/* Brand Deals section */}
+      {hasBrands && filteredBrandDeals.length > 0 && (
+        <>
+          <View style={styles.sectionHeader}>
+            <MaterialCommunityIcons name="heart" size={22} color={glassColors.greenDark} />
+            <Text variant="titleLarge" style={styles.sectionTitleInline}>
+              Le Tue Marche in Offerta
+            </Text>
+          </View>
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={filteredBrandDeals}
+            keyExtractor={(item, i) => `${item.product_id}-${item.chain_name}-${i}`}
+            renderItem={({ item }) => (
+              <View style={styles.horizontalCard}>
+                <OfferCard
+                  offer={{
+                    id: item.product_id,
+                    product_id: item.product_id,
+                    product_name: item.product_name,
+                    brand: item.brand,
+                    chain_name: item.chain_name,
+                    original_price: item.original_price,
+                    offer_price: item.offer_price,
+                    discount_pct: item.discount_pct,
+                    valid_to: item.valid_to,
+                    image_url: item.image_url,
+                  }}
+                  compact
+                />
+              </View>
+            )}
+            contentContainerStyle={styles.horizontalList}
+          />
+        </>
+      )}
+
+      {/* Suggested Alternatives section */}
+      {hasWatchlist && alternatives && alternatives.length > 0 && (
+        <>
+          <View style={styles.sectionHeader}>
+            <MaterialCommunityIcons name="lightbulb-on-outline" size={22} color="#E65100" />
+            <Text variant="titleLarge" style={styles.sectionTitleInline}>
+              Alternative Suggerite
+            </Text>
+          </View>
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={alternatives}
+            keyExtractor={(item, i) => `${item.product_id}-${item.chain_name}-${i}`}
+            renderItem={({ item }) => (
+              <View style={styles.horizontalCard}>
+                <OfferCard
+                  offer={{
+                    id: item.product_id,
+                    product_id: item.product_id,
+                    product_name: item.product_name,
+                    brand: item.brand,
+                    chain_name: item.chain_name,
+                    original_price: item.original_price,
+                    offer_price: item.offer_price,
+                    discount_pct: item.discount_pct,
+                    valid_to: item.valid_to,
+                    image_url: item.image_url,
+                  }}
+                  compact
+                />
+                {item.price_per_unit && (
+                  <View style={styles.ppuBadge}>
+                    <Text style={styles.ppuText}>
+                      {"\u20AC"}{Number(item.price_per_unit).toFixed(2)}/{item.unit_reference || "kg"}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+            contentContainerStyle={styles.horizontalList}
+          />
+        </>
+      )}
 
       {/* Chain filters */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
@@ -210,5 +331,15 @@ const styles = StyleSheet.create({
   horizontalList: { paddingHorizontal: 12 },
   horizontalCard: { width: 260, marginRight: 12 },
   emptyText: { paddingHorizontal: 16, color: "#888" },
+  ppuBadge: {
+    backgroundColor: "rgba(230,81,0,0.10)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 4,
+    alignSelf: "flex-start",
+    marginLeft: 4,
+  },
+  ppuText: { color: "#E65100", fontSize: 11, fontWeight: "600" },
   bottomPadding: { height: 96 },
 });

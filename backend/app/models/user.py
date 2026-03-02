@@ -31,6 +31,7 @@ class UserProfile(Base):
 
     watchlist = relationship("UserWatchlist", back_populates="user", cascade="all, delete-orphan")
     stores = relationship("UserStore", back_populates="user", cascade="all, delete-orphan")
+    brands = relationship("UserBrand", back_populates="user", cascade="all, delete-orphan")
 
 
 class UserWatchlist(Base):
@@ -56,6 +57,28 @@ class UserWatchlist(Base):
 
     user = relationship("UserProfile", back_populates="watchlist")
     product = relationship("Product", back_populates="watchlist_entries")
+
+
+class UserBrand(Base):
+    __tablename__ = "user_brands"
+    __table_args__ = (
+        UniqueConstraint("user_id", "brand_name", name="uq_user_brand"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="CASCADE")
+    )
+    brand_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(100))
+    notify: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user = relationship("UserProfile", back_populates="brands")
 
 
 class UserStore(Base):

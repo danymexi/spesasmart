@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ScrollView, StyleSheet, View, Alert, Platform } from "react-native";
-import { Button, List, Switch, Text, TextInput, useTheme } from "react-native-paper";
+import { Button, Chip, List, Snackbar, Switch, Text, TextInput, useTheme } from "react-native-paper";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 function showAlert(title: string, message: string) {
   if (Platform.OS === "web") {
@@ -10,7 +11,7 @@ function showAlert(title: string, message: string) {
   }
 }
 import { useAppStore } from "../../stores/useAppStore";
-import { registerUser, loginUser } from "../../services/api";
+import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors } from "../../styles/glassStyles";
 
@@ -22,6 +23,59 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [brandInput, setBrandInput] = useState("");
+  const [snackMessage, setSnackMessage] = useState("");
+  const [snackVisible, setSnackVisible] = useState(false);
+
+  const queryClient = useQueryClient();
+
+  // Brand queries
+  const { data: userBrands } = useQuery({
+    queryKey: ["userBrands"],
+    queryFn: getUserBrands,
+    enabled: isLoggedIn,
+  });
+
+  const { data: brandSuggestions } = useQuery({
+    queryKey: ["brandSuggestions", brandInput],
+    queryFn: () => getBrands(brandInput, 10),
+    enabled: isLoggedIn && brandInput.length >= 2,
+  });
+
+  const addBrandMutation = useMutation({
+    mutationFn: (brandName: string) => addUserBrand(brandName),
+    onSuccess: (_data, brandName) => {
+      queryClient.invalidateQueries({ queryKey: ["userBrands"] });
+      queryClient.invalidateQueries({ queryKey: ["brandDeals"] });
+      setBrandInput("");
+      setSnackMessage(`"${brandName}" aggiunta alle marche preferite`);
+      setSnackVisible(true);
+    },
+    onError: (err: any) => {
+      if (err.response?.status === 409) {
+        setSnackMessage("Marca gia' salvata");
+      } else {
+        setSnackMessage("Errore nell'aggiunta della marca");
+      }
+      setSnackVisible(true);
+    },
+  });
+
+  const removeBrandMutation = useMutation({
+    mutationFn: (brandId: string) => removeUserBrand(brandId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["userBrands"] });
+      queryClient.invalidateQueries({ queryKey: ["brandDeals"] });
+      setSnackMessage("Marca rimossa");
+      setSnackVisible(true);
+    },
+  });
+
+  const handleAddBrand = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    addBrandMutation.mutate(trimmed);
+  };
 
   const handleRegister = async () => {
     setError(null);
@@ -176,6 +230,77 @@ export default function SettingsScreen() {
         </List.Section>
       </View>
 
+      {/* Marche Preferite */}
+      {isLoggedIn && (
+        <View style={styles.section}>
+          <List.Section>
+            <List.Subheader>Marche Preferite</List.Subheader>
+            <View style={styles.brandInputRow}>
+              <TextInput
+                label="Aggiungi marca"
+                value={brandInput}
+                onChangeText={setBrandInput}
+                mode="outlined"
+                style={styles.brandInput}
+                dense
+              />
+              <Button
+                mode="contained"
+                onPress={() => handleAddBrand(brandInput)}
+                disabled={!brandInput.trim() || addBrandMutation.isPending}
+                compact
+                style={styles.brandAddButton}
+              >
+                Aggiungi
+              </Button>
+            </View>
+
+            {/* Autocomplete suggestions */}
+            {brandInput.length >= 2 && brandSuggestions && brandSuggestions.length > 0 && (
+              <View style={styles.suggestionsRow}>
+                {brandSuggestions.map((b) => (
+                  <Chip
+                    key={b.name}
+                    onPress={() => handleAddBrand(b.name)}
+                    style={styles.suggestionChip}
+                    compact
+                  >
+                    {b.name} ({b.count})
+                  </Chip>
+                ))}
+              </View>
+            )}
+
+            {/* Saved brands list */}
+            {userBrands && userBrands.length > 0 ? (
+              userBrands.map((ub) => (
+                <List.Item
+                  key={ub.id}
+                  title={ub.brand_name}
+                  description={ub.category || undefined}
+                  left={(props) => <List.Icon {...props} icon="tag-heart" />}
+                  right={() => (
+                    <Button
+                      mode="text"
+                      compact
+                      onPress={() => removeBrandMutation.mutate(ub.id)}
+                      textColor="#D32F2F"
+                      icon="close"
+                    >
+                      {""}
+                    </Button>
+                  )}
+                />
+              ))
+            ) : (
+              <Text variant="bodySmall" style={styles.brandEmptyText}>
+                Nessuna marca salvata. Aggiungi le tue marche preferite per ricevere notifiche.
+              </Text>
+            )}
+          </List.Section>
+        </View>
+      )}
+
       {/* Zone */}
       <View style={styles.section}>
         <List.Section>
@@ -239,6 +364,14 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.bottomPadding} />
+
+      <Snackbar
+        visible={snackVisible}
+        onDismiss={() => setSnackVisible(false)}
+        duration={2500}
+      >
+        {snackMessage}
+      </Snackbar>
     </ScrollView>
   );
 }
@@ -260,5 +393,11 @@ const styles = StyleSheet.create({
   loggedInSection: { paddingBottom: 8 },
   logoutButton: { marginHorizontal: 16, marginBottom: 8 },
   reloadButton: { marginHorizontal: 16, marginBottom: 12 },
+  brandInputRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, gap: 8, marginBottom: 4 },
+  brandInput: { flex: 1 },
+  brandAddButton: { marginTop: 6 },
+  suggestionsRow: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, gap: 6, marginBottom: 8, marginTop: 4 },
+  suggestionChip: { marginBottom: 2 },
+  brandEmptyText: { color: "#888", paddingHorizontal: 16, paddingBottom: 12 },
   bottomPadding: { height: 96 },
 });

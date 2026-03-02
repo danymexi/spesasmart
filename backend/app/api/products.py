@@ -229,6 +229,31 @@ async def get_catalog_products(
     ]
 
 
+class BrandInfoResponse(BaseModel):
+    name: str
+    count: int
+
+
+@router.get("/brands", response_model=list[BrandInfoResponse])
+async def get_brands(
+    q: str | None = Query(None, min_length=2),
+    limit: int = Query(50, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return distinct product brands with counts, optionally filtered by query."""
+    query = (
+        select(Product.brand, func.count(Product.id).label("count"))
+        .where(Product.brand.isnot(None), Product.brand != "")
+    )
+    if q:
+        query = query.where(Product.brand.ilike(f"%{q}%"))
+    query = query.group_by(Product.brand).order_by(func.count(Product.id).desc()).limit(limit)
+
+    result = await db.execute(query)
+    rows = result.all()
+    return [BrandInfoResponse(name=name, count=count) for name, count in rows]
+
+
 @router.get("/categories", response_model=list[CategoryResponse])
 async def get_categories(
     db: AsyncSession = Depends(get_db),

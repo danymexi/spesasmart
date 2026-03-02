@@ -174,6 +174,49 @@ export interface UserDeal {
   image_url: string | null;
 }
 
+export interface UserBrandItem {
+  id: string;
+  brand_name: string;
+  category: string | null;
+  notify: boolean;
+  created_at: string;
+}
+
+export interface Alternative {
+  product_id: string;
+  product_name: string;
+  brand: string | null;
+  category: string | null;
+  chain_name: string;
+  offer_price: number;
+  original_price: number | null;
+  discount_pct: number | null;
+  price_per_unit: number | null;
+  unit_reference: string | null;
+  valid_to: string | null;
+  image_url: string | null;
+}
+
+export interface BrandDeal {
+  product_id: string;
+  product_name: string;
+  brand: string | null;
+  category: string | null;
+  chain_name: string;
+  offer_price: number;
+  original_price: number | null;
+  discount_pct: number | null;
+  price_per_unit: number | null;
+  unit_reference: string | null;
+  valid_to: string | null;
+  image_url: string | null;
+}
+
+export interface BrandInfo {
+  name: string;
+  count: number;
+}
+
 export interface CatalogProduct {
   id: string;
   name: string;
@@ -429,6 +472,55 @@ export async function getCategories(): Promise<CategoryInfo[]> {
 
 export async function getWatchlistIds(): Promise<{ product_ids: string[] }> {
   const res = await apiClient.get<{ product_ids: string[] }>("/users/me/watchlist/ids");
+  return res.data;
+}
+
+// ── User Brands ──────────────────────────────────────────────────────────────
+
+export async function getUserBrands(): Promise<UserBrandItem[]> {
+  const res = await apiClient.get<UserBrandItem[]>("/users/me/brands");
+  return res.data;
+}
+
+export async function addUserBrand(
+  brandName: string,
+  category?: string,
+  notify: boolean = true
+): Promise<UserBrandItem> {
+  const res = await apiClient.post<UserBrandItem>("/users/me/brands", {
+    brand_name: brandName,
+    category: category || null,
+    notify,
+  });
+  return res.data;
+}
+
+export async function removeUserBrand(brandId: string): Promise<void> {
+  await apiClient.delete(`/users/me/brands/${brandId}`);
+}
+
+// ── Brand Deals & Alternatives ───────────────────────────────────────────────
+
+export async function getBrandDeals(limit: number = 30): Promise<BrandDeal[]> {
+  const res = await apiClient.get<BrandDeal[]>("/users/me/brand-deals", {
+    params: { limit },
+  });
+  return res.data;
+}
+
+export async function getAlternatives(limit: number = 20): Promise<Alternative[]> {
+  const res = await apiClient.get<Alternative[]>("/users/me/alternatives", {
+    params: { limit },
+  });
+  return res.data;
+}
+
+// ── Brands Autocomplete ─────────────────────────────────────────────────────
+
+export async function getBrands(q?: string, limit: number = 50): Promise<BrandInfo[]> {
+  const res = await apiClient.get<BrandInfo[]>("/products/brands", {
+    params: { q, limit },
+  });
   return res.data;
 }
 
