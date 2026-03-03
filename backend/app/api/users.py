@@ -825,6 +825,7 @@ class TripItemResponse(BaseModel):
     product_name: str
     offer_price: Decimal
     chain_name: str
+    search_term: str | None = None
 
 
 class StoreTripResponse(BaseModel):
@@ -864,6 +865,7 @@ async def optimize_shopping_trip(
                     product_name=i.product_name,
                     offer_price=i.offer_price,
                     chain_name=i.chain_name,
+                    search_term=i.search_term,
                 )
                 for i in trip.items
             ],

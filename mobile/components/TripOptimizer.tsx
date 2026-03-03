@@ -92,9 +92,16 @@ function StoreRow({ store, itemsTotal, isCheapest }: { store: StoreTrip; itemsTo
         <View style={styles.storeRowItems}>
           {store.items.map((item, i) => (
             <View key={i} style={styles.itemRow}>
-              <Text variant="bodySmall" style={styles.itemName} numberOfLines={1}>
-                {item.product_name}
-              </Text>
+              <View style={styles.itemNameColumn}>
+                {item.search_term && (
+                  <Text variant="labelSmall" style={styles.searchTermLabel} numberOfLines={1}>
+                    {item.search_term}
+                  </Text>
+                )}
+                <Text variant="bodySmall" style={styles.itemName} numberOfLines={1}>
+                  {item.product_name}
+                </Text>
+              </View>
               <Text variant="bodySmall" style={styles.itemPrice}>
                 {"\u20AC"}{Number(item.offer_price).toFixed(2)}
               </Text>
@@ -184,9 +191,16 @@ function MultiStoreView({ data }: { data: TripOptimizationResult }) {
           </View>
           {trip.items.map((item, i) => (
             <View key={i} style={styles.itemRow}>
-              <Text variant="bodySmall" style={styles.itemName} numberOfLines={1}>
-                {item.product_name}
-              </Text>
+              <View style={styles.itemNameColumn}>
+                {item.search_term && (
+                  <Text variant="labelSmall" style={styles.searchTermLabel} numberOfLines={1}>
+                    {item.search_term}
+                  </Text>
+                )}
+                <Text variant="bodySmall" style={styles.itemName} numberOfLines={1}>
+                  {item.product_name}
+                </Text>
+              </View>
               <Text variant="bodySmall" style={styles.itemPrice}>
                 {"\u20AC"}{Number(item.offer_price).toFixed(2)}
               </Text>
@@ -285,8 +299,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(0,0,0,0.05)",
   },
-  itemName: { flex: 1, marginRight: 8 },
-  itemPrice: { fontWeight: "600" },
+  itemNameColumn: { flex: 1, marginRight: 8 },
+  itemName: {},
+  searchTermLabel: { color: "#999", fontSize: 10, marginBottom: 1 },
+  itemPrice: { fontWeight: "600", alignSelf: "center" },
 
   // Savings
   savingsHint: {

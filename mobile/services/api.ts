@@ -202,6 +202,7 @@ export interface TripItem {
   product_name: string;
   offer_price: number;
   chain_name: string;
+  search_term: string | null;
 }
 
 export interface StoreTrip {
