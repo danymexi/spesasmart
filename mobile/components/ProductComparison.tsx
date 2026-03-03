@@ -1,7 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import { Text, useTheme, ActivityIndicator } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
-import { getActiveOffers } from "../services/api";
+import { getProductCompare } from "../services/api";
 import { glassPanel, glassColors } from "../styles/glassStyles";
 
 interface Props {
@@ -18,14 +18,12 @@ const CHAIN_COLORS: Record<string, string> = {
 export default function ProductComparison({ productId }: Props) {
   const theme = useTheme();
 
-  const { data: offers, isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["comparison", productId],
-    queryFn: () => getActiveOffers({ limit: 10 }),
-    select: (data) =>
-      data
-        .filter((o: any) => o.product_id === productId)
-        .sort((a: any, b: any) => Number(a.offer_price) - Number(b.offer_price)),
+    queryFn: () => getProductCompare(productId),
+    enabled: !!productId,
   });
+  const offers = data?.offers ?? [];
 
   if (isLoading) {
     return <ActivityIndicator style={styles.loader} />;
@@ -98,11 +96,8 @@ export default function ProductComparison({ productId }: Props) {
 
 const styles = StyleSheet.create({
   container: {
-    marginHorizontal: 12,
-    padding: 12,
-    marginBottom: 8,
-    ...glassPanel,
-  } as any,
+    paddingVertical: 4,
+  },
   loader: { marginVertical: 20 },
   emptyText: { color: "#666" },
   row: { flexDirection: "row", alignItems: "center", marginBottom: 10 },

@@ -243,32 +243,39 @@ def _normalize_product_name(name: str) -> str:
     return n
 
 
-def _names_match(norm_a: str, norm_b: str, threshold: float = 0.75) -> bool:
+def _names_match(norm_a: str, norm_b: str, threshold: float = 0.78) -> bool:
     """Check if two normalized names refer to the same product.
 
     Uses three strategies:
-    1. Substring containment (shorter name inside longer, min 4 chars)
+    1. Substring containment (shorter name inside longer, min 6 chars
+       AND shorter must be at least 50% of longer's length)
     2. Shared-prefix match (first 2+ words in common)
     3. SequenceMatcher ratio above threshold
     """
     shorter, longer = sorted([norm_a, norm_b], key=len)
 
-    # Strategy 1: substring containment (e.g. "rotoloni" in "rotoloni regina")
-    if len(shorter) >= 4 and shorter in longer:
-        return True
+    # Strategy 1: substring containment with length guard
+    # "rotoloni" in "rotoloni regina" → OK (8/17 = 47%, but same core)
+    # "vaniglia" in "biscotti vaniglia cioccolato" → rejected (too short
+    # relative to longer name and in the middle, not a prefix)
+    if len(shorter) >= 6 and shorter in longer:
+        # Only accept if shorter starts at position 0 (prefix) OR is
+        # at least 40% of the longer name's length
+        pos = longer.find(shorter)
+        if pos == 0 or len(shorter) / len(longer) >= 0.4:
+            return True
 
     # Strategy 2: shared significant words (first 2+ words match)
     words_a = norm_a.split()
     words_b = norm_b.split()
-    if len(words_a) >= 1 and len(words_b) >= 1:
+    if len(words_a) >= 2 and len(words_b) >= 2:
         common_prefix = 0
         for wa, wb in zip(words_a, words_b):
             if wa == wb:
                 common_prefix += 1
             else:
                 break
-        # At least 2 leading words match, or 1 word if it's long (>=6 chars)
-        if common_prefix >= 2 or (common_prefix == 1 and len(words_a[0]) >= 6):
+        if common_prefix >= 2:
             return True
 
     # Strategy 3: fuzzy ratio
@@ -279,10 +286,10 @@ def _names_match(norm_a: str, norm_b: str, threshold: float = 0.75) -> bool:
 def _group_similar_products(products: list[Product]) -> list[list[Product]]:
     """Group products with similar names.
 
-    Brand check is soft: if names are very similar (high match), different
-    brands are allowed (e.g. same yogurt listed as "Yomo" on Lidl and
-    "Delta" on Esselunga).  Only when names are borderline similar do we
-    require matching brands to avoid false positives.
+    Brand check is soft BUT only for descriptive names (>=3 words).
+    Short/generic names like "Vaniglia" ALWAYS require matching brand
+    because they could refer to completely different products (biscuits,
+    yogurt, protein drink, etc.).
     """
     groups: list[list[Product]] = []
     used: set[int] = set()
@@ -305,11 +312,16 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
                 continue
 
             if brands_differ:
-                # Allow grouping despite brand mismatch only if names are
-                # very similar (strong match: high ratio or long substring)
+                # Only allow cross-brand grouping when the name is
+                # descriptive enough (>=3 words) to identify a specific
+                # product.  "Vaniglia" (1 word) is too generic.
                 shorter, longer = sorted(
                     [normalized[i], normalized[j]], key=len
                 )
+                word_count = len(shorter.split())
+                if word_count < 3:
+                    continue
+
                 ratio = SequenceMatcher(
                     None, normalized[i], normalized[j]
                 ).ratio()
@@ -324,6 +336,55 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
             used.add(j)
         groups.append(group)
     return groups
+
+
+def _is_similar_product(
+    prod_norm: str, prod_brand: str,
+    candidate_norm: str, candidate_brand: str,
+) -> bool:
+    """Check if a candidate product is similar enough to group with prod."""
+    if not _names_match(prod_norm, candidate_norm, threshold=0.80):
+        return False
+    shorter, longer = sorted([prod_norm, candidate_norm], key=len)
+    if len(longer) > 0 and len(shorter) / len(longer) < 0.5:
+        return False
+    if prod_brand and candidate_brand and prod_brand != candidate_brand:
+        if len(shorter.split()) < 3:
+            return False
+        ratio = SequenceMatcher(None, prod_norm, candidate_norm).ratio()
+        if not (ratio >= 0.85 or (len(shorter) >= 6 and shorter in longer)):
+            return False
+    return True
+
+
+async def _find_similar_ids(product: Product, db: AsyncSession) -> list:
+    """Find product IDs similar to the given product (for cross-chain compare)."""
+    product_ids = [product.id]
+    words = product.name.split()
+    keyword = None
+    for w in words:
+        if len(w) >= 4 and w.lower() not in (
+            "alla", "allo", "alle", "della", "dello", "delle", "con", "per",
+        ):
+            keyword = w
+            break
+    if not keyword:
+        return product_ids
+
+    prod_norm = _normalize_product_name(product.name)
+    prod_brand = (product.brand or "").lower().strip()
+    cands = await db.execute(
+        select(Product).where(
+            Product.name.ilike(f"%{keyword}%"),
+            Product.id != product.id,
+        )
+    )
+    for cp in cands.scalars().all():
+        cp_norm = _normalize_product_name(cp.name)
+        cp_brand = (cp.brand or "").lower().strip()
+        if _is_similar_product(prod_norm, prod_brand, cp_norm, cp_brand):
+            product_ids.append(cp.id)
+    return product_ids
 
 
 @router.get("/catalog-grouped")
@@ -782,11 +843,13 @@ async def get_best_price(
         raise HTTPException(status_code=404, detail="Product not found")
 
     today = date.today()
+    product_ids = await _find_similar_ids(product, db)
+
     offer_result = await db.execute(
         select(Offer)
         .options(joinedload(Offer.chain))
         .where(
-            Offer.product_id == product_id,
+            Offer.product_id.in_(product_ids),
             Offer.valid_from <= today,
             Offer.valid_to >= today,
         )
@@ -841,20 +904,25 @@ class CompareResponse(BaseModel):
 async def compare_prices(
     product_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ):
-    """Return the best active offer per chain for a product."""
+    """Return the best active offer per chain for a product.
+
+    Also includes offers from similar products (fuzzy name match) across
+    different chains so the user sees a full multi-chain comparison.
+    """
     result = await db.execute(select(Product).where(Product.id == product_id))
     product = result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
     today = date.today()
+    product_ids = await _find_similar_ids(product, db)
 
-    # Get all active offers for this product, one per chain (cheapest)
+    # Get all active offers for this product + similar products
     offers_result = await db.execute(
         select(Offer)
         .options(joinedload(Offer.chain))
         .where(
-            Offer.product_id == product_id,
+            Offer.product_id.in_(product_ids),
             Offer.valid_from <= today,
             Offer.valid_to >= today,
         )

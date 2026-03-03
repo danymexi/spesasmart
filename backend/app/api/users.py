@@ -397,12 +397,17 @@ async def get_user_deals(
                     if cp.id in similar_to_watchlist:
                         continue
                     cp_norm = _normalize_product_name(cp.name)
-                    if not _names_match(wp_norm, cp_norm):
+                    if not _names_match(wp_norm, cp_norm, threshold=0.80):
                         continue
-                    # Check brand: allow mismatch only on strong name match
+                    shorter, longer = sorted([wp_norm, cp_norm], key=len)
+                    # Require name to be at least 50% of longer name
+                    if len(longer) > 0 and len(shorter) / len(longer) < 0.5:
+                        continue
                     cp_brand = (cp.brand or "").lower().strip()
                     if wp_brand and cp_brand and wp_brand != cp_brand:
-                        shorter, longer = sorted([wp_norm, cp_norm], key=len)
+                        # Short/generic names require same brand
+                        if len(shorter.split()) < 3:
+                            continue
                         ratio = SequenceMatcher(None, wp_norm, cp_norm).ratio()
                         if not (ratio >= 0.85 or (len(shorter) >= 6 and shorter in longer)):
                             continue
@@ -422,18 +427,27 @@ async def get_user_deals(
     )
     offers = offers_result.unique().scalars().all()
 
-    # Map similar product offers to their watchlist product_id
-    results = []
+    # Map similar product offers to their watchlist product_id.
+    # Keep only the BEST offer per (mapped_product, chain) to avoid
+    # flooding the card with dozens of prices.
+    best_per_chain: dict[tuple, Offer] = {}  # (mapped_pid, chain_name) -> best offer
     for o in offers:
         mapped_pid = similar_to_watchlist.get(o.product_id, o.product_id)
-        # Use the watchlist product's name/brand for display consistency
+        chain_name = o.chain.name if o.chain else "Unknown"
+        key = (mapped_pid, chain_name)
+        existing = best_per_chain.get(key)
+        if existing is None or o.offer_price < existing.offer_price:
+            best_per_chain[key] = o
+
+    results = []
+    for (mapped_pid, chain_name), o in best_per_chain.items():
         wp = next((p for p in watchlist_products if p.id == mapped_pid), None)
         results.append(
             UserDealResponse(
                 product_id=str(mapped_pid),
                 product_name=wp.name if wp else (o.product.name if o.product else "Unknown"),
                 brand=wp.brand if wp else (o.product.brand if o.product else None),
-                chain_name=o.chain.name if o.chain else "Unknown",
+                chain_name=chain_name,
                 offer_price=o.offer_price,
                 original_price=o.original_price,
                 discount_pct=o.discount_pct,
@@ -442,6 +456,8 @@ async def get_user_deals(
             )
         )
 
+    # Sort by product then price so frontend groups correctly
+    results.sort(key=lambda r: (r.product_id, r.offer_price))
     return results
 
 
