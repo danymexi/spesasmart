@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, View, Alert, Platform } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, View, Alert, Platform } from "react-native";
 import { Button, Chip, List, Snackbar, Switch, Text, TextInput, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -11,7 +11,8 @@ function showAlert(title: string, message: string) {
   }
 }
 import { useAppStore } from "../../stores/useAppStore";
-import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains } from "../../services/api";
+import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains, getNearbyStores, updateUserLocation } from "../../services/api";
+import type { NearbyChainInfo } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors, glassCard } from "../../styles/glassStyles";
 
@@ -349,28 +350,11 @@ export default function SettingsScreen() {
         </View>
       )}
 
-      {/* Zone */}
+      {/* Supermercati (Geolocation + Chains) */}
       <View style={styles.section}>
         <List.Section>
-          <List.Subheader style={styles.listSubheader}>Zona</List.Subheader>
-          <List.Item
-            title="Monza e Brianza"
-            description="Zona monitorata per le offerte"
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
-            left={(props) => <List.Icon {...props} icon="map-marker" />}
-          />
-        </List.Section>
-      </View>
-
-      {/* Preferred Chains */}
-      <View style={styles.section}>
-        <List.Section>
-          <List.Subheader style={styles.listSubheader}>Catene Preferite</List.Subheader>
-          <Text variant="bodySmall" style={styles.chainHint}>
-            Seleziona le catene da mostrare in home. Se nessuna selezionata, le mostra tutte.
-          </Text>
-          <PreferredChainsSelector isLoggedIn={isLoggedIn} />
+          <List.Subheader style={styles.listSubheader}>I Tuoi Supermercati</List.Subheader>
+          <NearbyStoresSelector isLoggedIn={isLoggedIn} />
         </List.Section>
       </View>
 
@@ -433,36 +417,115 @@ const CHAIN_OPTIONS = [
   { slug: "iperal", label: "Iperal" },
 ];
 
-function PreferredChainsSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
+function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
   const queryClient = useQueryClient();
+  const {
+    userLat, userLon, nearbyChains,
+    setUserLocation, setNearbyChains,
+  } = useAppStore();
 
+  const [locating, setLocating] = useState(false);
+  const [nearbyData, setNearbyData] = useState<NearbyChainInfo[] | null>(null);
+
+  // Preferred chains query (server-side)
   const { data: preferredChains } = useQuery({
     queryKey: ["preferredChains"],
     queryFn: getPreferredChains,
     enabled: isLoggedIn,
   });
 
-  const mutation = useMutation({
+  const chainMutation = useMutation({
     mutationFn: (chains: string[]) => updatePreferredChains(chains),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["preferredChains"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingListCompare"] });
     },
   });
 
   const selectedSet = new Set(preferredChains || []);
 
-  const toggle = (slug: string) => {
+  const toggleChain = (slug: string) => {
     const next = new Set(selectedSet);
     if (next.has(slug)) {
       next.delete(slug);
     } else {
       next.add(slug);
     }
-    mutation.mutate(Array.from(next));
+    const arr = Array.from(next);
+    chainMutation.mutate(arr);
+    setNearbyChains(arr);
+  };
+
+  const handleGeolocate = async () => {
+    setLocating(true);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: false,
+          timeout: 10000,
+        });
+      });
+
+      const { latitude, longitude } = position.coords;
+      setUserLocation(latitude, longitude);
+
+      // Fetch nearby stores
+      const result = await getNearbyStores(latitude, longitude, 20);
+      setNearbyData(result.chains);
+
+      // Auto-select all nearby chains
+      const slugs = result.chain_slugs;
+      setNearbyChains(slugs);
+      if (isLoggedIn) {
+        chainMutation.mutate(slugs);
+        updateUserLocation(latitude, longitude).catch(() => {});
+      }
+    } catch (err: any) {
+      showAlert("Posizione", "Impossibile ottenere la posizione. Controlla i permessi.");
+    }
+    setLocating(false);
   };
 
   return (
     <View>
+      {/* Geolocation button */}
+      <View style={styles.geoRow}>
+        <Button
+          mode="contained"
+          icon="crosshairs-gps"
+          onPress={handleGeolocate}
+          loading={locating}
+          disabled={locating}
+          style={styles.geoButton}
+          labelStyle={{ fontWeight: "600" }}
+        >
+          Usa la mia posizione
+        </Button>
+        {userLat && userLon && (
+          <Text style={styles.geoCoords}>
+            {Number(userLat).toFixed(4)}, {Number(userLon).toFixed(4)}
+          </Text>
+        )}
+      </View>
+
+      {/* Nearby chains results */}
+      {nearbyData && nearbyData.length > 0 && (
+        <View style={styles.nearbyInfo}>
+          <Text style={styles.nearbyLabel}>
+            {nearbyData.length} catene trovate entro 20km
+          </Text>
+          {nearbyData.map((nc) => (
+            <Text key={nc.chain_slug} style={styles.nearbyDetail}>
+              {nc.chain_name}: {nc.store_count} negozi (min. {nc.min_distance_km}km)
+            </Text>
+          ))}
+        </View>
+      )}
+
+      {/* Chain toggles */}
+      <Text variant="bodySmall" style={styles.chainHint}>
+        Seleziona le catene. Se nessuna selezionata, le mostra tutte.
+      </Text>
       {CHAIN_OPTIONS.map((chain) => (
         <List.Item
           key={chain.slug}
@@ -472,7 +535,7 @@ function PreferredChainsSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
           right={() => (
             <Switch
               value={selectedSet.has(chain.slug)}
-              onValueChange={() => toggle(chain.slug)}
+              onValueChange={() => toggleChain(chain.slug)}
               disabled={!isLoggedIn}
             />
           )}
@@ -509,5 +572,11 @@ const styles = StyleSheet.create({
   suggestionChip: { marginBottom: 2 },
   brandEmptyText: { color: "#666", paddingHorizontal: 16, paddingBottom: 12 },
   chainHint: { color: "#666", paddingHorizontal: 16, paddingBottom: 4 },
+  geoRow: { paddingHorizontal: 16, paddingBottom: 8, gap: 6 },
+  geoButton: { borderRadius: 12, backgroundColor: glassColors.greenMedium },
+  geoCoords: { fontSize: 11, color: glassColors.textMuted, marginTop: 4 },
+  nearbyInfo: { paddingHorizontal: 16, paddingBottom: 8 },
+  nearbyLabel: { fontSize: 13, fontWeight: "600", color: glassColors.greenDark, marginBottom: 4 },
+  nearbyDetail: { fontSize: 12, color: glassColors.textSecondary, marginBottom: 2 },
   bottomPadding: { height: 96 },
 });

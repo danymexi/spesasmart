@@ -340,6 +340,92 @@ export interface CompareResponse {
   offers: CompareOffer[];
 }
 
+// ── Shopping List Compare Types ──────────────────────────────────────────────
+
+export interface ChainPriceInfo {
+  chain_name: string;
+  chain_slug: string;
+  offer_price: number;
+  original_price: number | null;
+  discount_pct: number | null;
+  product_name: string;
+  is_best: boolean;
+}
+
+export interface CompareItemInfo {
+  item_id: string;
+  display_name: string;
+  image_url: string | null;
+  quantity: number;
+  search_term: string | null;
+  chain_prices: ChainPriceInfo[];
+}
+
+export interface ChainTotalInfo {
+  chain_name: string;
+  chain_slug: string;
+  total: number;
+  items_covered: number;
+}
+
+export interface ShoppingListCompareResponse {
+  items: CompareItemInfo[];
+  chain_totals: ChainTotalInfo[];
+  items_total: number;
+  multi_store_total: number;
+  potential_savings: number;
+}
+
+// ── Nearby Stores Types ─────────────────────────────────────────────────────
+
+export interface NearbyChainInfo {
+  chain_name: string;
+  chain_slug: string;
+  store_count: number;
+  min_distance_km: number;
+}
+
+export interface NearbyStoresResponse {
+  chains: NearbyChainInfo[];
+  chain_slugs: string[];
+  total_stores: number;
+}
+
+// ── Suggestions Types ───────────────────────────────────────────────────────
+
+export interface SuggestionItem {
+  product_id: string;
+  product_name: string;
+  brand: string | null;
+  category: string | null;
+  chain_name: string;
+  offer_price: number;
+  original_price: number | null;
+  discount_pct: number | null;
+  price_per_unit: number | null;
+  unit_reference: string | null;
+  image_url: string | null;
+  suggestion_type: "alternative" | "complementary";
+}
+
+export interface ShoppingListSuggestionsResponse {
+  alternatives: SuggestionItem[];
+  complementary: SuggestionItem[];
+}
+
+// ── Catalog Preload Types ───────────────────────────────────────────────────
+
+export interface CatalogPreloadItem {
+  id: string;
+  name: string;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  best_price: number | null;
+  best_chain: string | null;
+  best_chain_slug: string | null;
+}
+
 // ── API Client ───────────────────────────────────────────────────────────────
 
 const apiClient = axios.create({
@@ -708,6 +794,63 @@ export async function updatePreferredChains(chains: string[]): Promise<void> {
 
 export async function optimizeTrip(): Promise<TripOptimizationResult> {
   const res = await apiClient.get<TripOptimizationResult>("/users/me/shopping-list/optimize");
+  return res.data;
+}
+
+// ── Shopping List Compare ───────────────────────────────────────────────────
+
+export async function getShoppingListCompare(
+  chainSlugs?: string
+): Promise<ShoppingListCompareResponse> {
+  const res = await apiClient.get<ShoppingListCompareResponse>(
+    "/users/me/shopping-list/compare",
+    { params: chainSlugs ? { chain_slugs: chainSlugs } : undefined }
+  );
+  return res.data;
+}
+
+// ── Shopping List Suggestions ───────────────────────────────────────────────
+
+export async function getShoppingListSuggestions(
+  limit: number = 10
+): Promise<ShoppingListSuggestionsResponse> {
+  const res = await apiClient.get<ShoppingListSuggestionsResponse>(
+    "/users/me/shopping-list/suggestions",
+    { params: { limit } }
+  );
+  return res.data;
+}
+
+// ── Nearby Stores ───────────────────────────────────────────────────────────
+
+export async function getNearbyStores(
+  lat: number,
+  lon: number,
+  radiusKm: number = 20
+): Promise<NearbyStoresResponse> {
+  const res = await apiClient.get<NearbyStoresResponse>("/stores/nearby", {
+    params: { lat, lon, radius_km: radiusKm },
+  });
+  return res.data;
+}
+
+// ── Catalog Preload ─────────────────────────────────────────────────────────
+
+export async function getCatalogPreload(): Promise<CatalogPreloadItem[]> {
+  const res = await apiClient.get<CatalogPreloadItem[]>("/products/catalog/preload");
+  return res.data;
+}
+
+// ── User Location ───────────────────────────────────────────────────────────
+
+export async function updateUserLocation(
+  lat: number,
+  lon: number
+): Promise<{ lat: number; lon: number }> {
+  const res = await apiClient.put<{ lat: number; lon: number }>(
+    "/users/me/location",
+    { lat, lon }
+  );
   return res.data;
 }
 

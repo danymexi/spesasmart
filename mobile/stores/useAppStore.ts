@@ -3,8 +3,10 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   getWatchlist,
+  getCatalogPreload,
   type WatchlistItem,
   type Chain,
+  type CatalogPreloadItem,
 } from "../services/api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -37,6 +39,16 @@ interface AppState {
   watchlistItems: WatchlistItem[];
   watchlistLoading: boolean;
 
+  // Catalog cache
+  catalogProducts: CatalogPreloadItem[];
+  catalogLoading: boolean;
+  catalogLastFetched: number | null;
+
+  // Geolocation
+  userLat: number | null;
+  userLon: number | null;
+  nearbyChains: string[];
+
   // Preferences
   preferredStores: PreferredStore[];
   preferredCategories: string[];
@@ -65,6 +77,13 @@ interface AppState {
 
   setAvailableChains: (chains: Chain[]) => void;
 
+  // Catalog cache actions
+  prefetchCatalog: () => Promise<void>;
+
+  // Geolocation actions
+  setUserLocation: (lat: number, lon: number) => void;
+  setNearbyChains: (chains: string[]) => void;
+
   reset: () => void;
 }
 
@@ -86,6 +105,14 @@ const initialState = {
 
   watchlistItems: [] as WatchlistItem[],
   watchlistLoading: false,
+
+  catalogProducts: [] as CatalogPreloadItem[],
+  catalogLoading: false,
+  catalogLastFetched: null as number | null,
+
+  userLat: null as number | null,
+  userLon: null as number | null,
+  nearbyChains: [] as string[],
 
   preferredStores: [] as PreferredStore[],
   preferredCategories: [] as string[],
@@ -200,6 +227,36 @@ export const useAppStore = create<AppState>()(
       setAvailableChains: (chains: Chain[]) =>
         set({ availableChains: chains }),
 
+      // ── Catalog cache ─────────────────────────────────────────────────
+
+      prefetchCatalog: async () => {
+        const { catalogLastFetched, catalogLoading } = get();
+        const THIRTY_MIN = 30 * 60 * 1000;
+        if (catalogLoading) return;
+        if (catalogLastFetched && Date.now() - catalogLastFetched < THIRTY_MIN) return;
+
+        set({ catalogLoading: true });
+        try {
+          const products = await getCatalogPreload();
+          set({
+            catalogProducts: products,
+            catalogLoading: false,
+            catalogLastFetched: Date.now(),
+          });
+        } catch (error) {
+          console.error("Catalog prefetch error:", error);
+          set({ catalogLoading: false });
+        }
+      },
+
+      // ── Geolocation ───────────────────────────────────────────────────
+
+      setUserLocation: (lat: number, lon: number) =>
+        set({ userLat: lat, userLon: lon }),
+
+      setNearbyChains: (chains: string[]) =>
+        set({ nearbyChains: chains }),
+
       // ── Reset ───────────────────────────────────────────────────────────
 
       reset: () => set(initialState),
@@ -219,6 +276,9 @@ export const useAppStore = create<AppState>()(
         preferredStores: state.preferredStores,
         preferredCategories: state.preferredCategories,
         watchlistItems: state.watchlistItems,
+        userLat: state.userLat,
+        userLon: state.userLon,
+        nearbyChains: state.nearbyChains,
       }),
     }
   )

@@ -1,6 +1,8 @@
 """API routes for stores."""
 
+import math
 import uuid
+from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -12,6 +14,18 @@ from app.database import get_db
 from app.models import Store
 
 router = APIRouter(prefix="/stores", tags=["stores"])
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate distance in km between two lat/lon points using Haversine."""
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    )
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 class StoreResponse(BaseModel):
@@ -27,6 +41,60 @@ class StoreResponse(BaseModel):
     chain_name: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class NearbyChainInfo(BaseModel):
+    chain_name: str
+    chain_slug: str
+    store_count: int
+    min_distance_km: float
+
+
+class NearbyStoresResponse(BaseModel):
+    chains: list[NearbyChainInfo]
+    chain_slugs: list[str]
+    total_stores: int
+
+
+@router.get("/nearby", response_model=NearbyStoresResponse)
+async def get_nearby_stores(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    radius_km: float = Query(default=20, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find stores within radius, grouped by chain."""
+    result = await db.execute(
+        select(Store).options(joinedload(Store.chain)).where(
+            Store.lat.isnot(None), Store.lon.isnot(None)
+        )
+    )
+    stores = result.unique().scalars().all()
+
+    chain_stores: dict[str, list[tuple[float, "Store"]]] = defaultdict(list)
+    for s in stores:
+        dist = _haversine_km(lat, lon, float(s.lat), float(s.lon))
+        if dist <= radius_km and s.chain:
+            chain_stores[s.chain.slug].append((dist, s))
+
+    chains = []
+    for slug, store_list in sorted(chain_stores.items()):
+        store_list.sort(key=lambda x: x[0])
+        chain_name = store_list[0][1].chain.name
+        chains.append(NearbyChainInfo(
+            chain_name=chain_name,
+            chain_slug=slug,
+            store_count=len(store_list),
+            min_distance_km=round(store_list[0][0], 1),
+        ))
+
+    chains.sort(key=lambda c: c.min_distance_km)
+
+    return NearbyStoresResponse(
+        chains=chains,
+        chain_slugs=[c.chain_slug for c in chains],
+        total_stores=sum(c.store_count for c in chains),
+    )
 
 
 @router.get("", response_model=list[StoreResponse])

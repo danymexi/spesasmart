@@ -15,9 +15,10 @@ interface Props {
   result: SmartSearchResult;
   isInWatchlist?: boolean;
   onWatchlistToggle?: (productId: string) => void;
+  onAddToShoppingList?: (productId: string) => void;
 }
 
-export default function SmartCompareCard({ result, isInWatchlist, onWatchlistToggle }: Props) {
+export default function SmartCompareCard({ result, isInWatchlist, onWatchlistToggle, onAddToShoppingList }: Props) {
   const { product, offers, price_indicator, best_price_per_unit, unit_reference } = result;
 
   const bestPrice = offers.length > 0
@@ -61,6 +62,15 @@ export default function SmartCompareCard({ result, isInWatchlist, onWatchlistTog
               {indConfig.label}
             </Text>
           </View>
+        )}
+        {onAddToShoppingList && (
+          <IconButton
+            icon="cart-plus"
+            iconColor={glassColors.greenMedium}
+            size={22}
+            onPress={() => onAddToShoppingList(product.id)}
+            style={styles.watchlistBtn}
+          />
         )}
         {onWatchlistToggle && (
           <IconButton

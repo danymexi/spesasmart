@@ -85,6 +85,82 @@ class ProductSearchResult(BaseModel):
     offers_count: int = 0
 
 
+class CatalogPreloadItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    brand: str | None
+    category: str | None
+    image_url: str | None
+    best_price: Decimal | None
+    best_chain: str | None
+    best_chain_slug: str | None
+
+
+@router.get("/catalog/preload", response_model=list[CatalogPreloadItem])
+async def get_catalog_preload(
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all products with an active offer for frontend pre-caching.
+
+    Single non-paginated payload (typically 500-2000 items) intended to be
+    fetched once in background at app startup.
+    """
+    today = date.today()
+
+    best_offer_sq = (
+        select(
+            Offer.product_id,
+            func.min(Offer.offer_price).label("best_price"),
+        )
+        .where(Offer.valid_from <= today, Offer.valid_to >= today)
+        .group_by(Offer.product_id)
+        .subquery()
+    )
+
+    query = (
+        select(Product, best_offer_sq.c.best_price)
+        .join(best_offer_sq, Product.id == best_offer_sq.c.product_id)
+        .order_by(Product.name)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    if not rows:
+        return []
+
+    product_ids = [r.Product.id for r in rows]
+    chain_query = (
+        select(Offer.product_id, Chain.name, Chain.slug)
+        .join(Chain, Offer.chain_id == Chain.id)
+        .where(
+            Offer.product_id.in_(product_ids),
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+        )
+        .order_by(Offer.offer_price)
+    )
+    chain_result = await db.execute(chain_query)
+    chain_map: dict[uuid.UUID, tuple[str, str]] = {}
+    for pid, cname, cslug in chain_result.all():
+        if pid not in chain_map:
+            chain_map[pid] = (cname, cslug)
+
+    return [
+        CatalogPreloadItem(
+            id=row.Product.id,
+            name=row.Product.name,
+            brand=row.Product.brand,
+            category=row.Product.category,
+            image_url=row.Product.image_url,
+            best_price=row.best_price,
+            best_chain=chain_map.get(row.Product.id, (None, None))[0],
+            best_chain_slug=chain_map.get(row.Product.id, (None, None))[1],
+        )
+        for row in rows
+    ]
+
+
 @router.get("/catalog", response_model=list[CatalogProductResponse])
 async def get_catalog_products(
     category: str | None = Query(None),

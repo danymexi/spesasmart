@@ -1,12 +1,13 @@
 """API routes for user profiles, watchlist, and stores (JWT-protected)."""
 
 import uuid
+from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -883,3 +884,394 @@ async def optimize_shopping_trip(
         items_total=result.items_total,
         items_not_covered=result.items_not_covered,
     )
+
+
+# --- Shopping List Compare ---
+
+class ChainPriceInfo(BaseModel):
+    chain_name: str
+    chain_slug: str
+    offer_price: Decimal
+    original_price: Decimal | None
+    discount_pct: Decimal | None
+    product_name: str
+    is_best: bool = False
+
+
+class CompareItem(BaseModel):
+    item_id: uuid.UUID
+    display_name: str
+    image_url: str | None
+    quantity: int
+    search_term: str | None
+    chain_prices: list[ChainPriceInfo]
+
+
+class ChainTotalInfo(BaseModel):
+    chain_name: str
+    chain_slug: str
+    total: Decimal
+    items_covered: int
+
+
+class ShoppingListCompareResponse(BaseModel):
+    items: list[CompareItem]
+    chain_totals: list[ChainTotalInfo]
+    items_total: int
+    multi_store_total: Decimal
+    potential_savings: Decimal
+
+
+@router.get("/me/shopping-list/compare", response_model=ShoppingListCompareResponse)
+async def compare_shopping_list(
+    chain_slugs: str | None = None,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare shopping list prices across chains.
+
+    Returns per-item price breakdown and chain totals.
+    Optional chain_slugs param (comma-separated) filters to specific chains.
+    """
+    from app.services.trip_optimizer import TripOptimizer, _normalize_product_name, _names_match
+
+    today = date.today()
+
+    # Parse chain filter
+    filter_chain_slugs: set[str] | None = None
+    if chain_slugs:
+        filter_chain_slugs = {s.strip() for s in chain_slugs.split(",")}
+
+    # Fetch unchecked shopping list items
+    sl_result = await db.execute(
+        select(ShoppingListItem)
+        .options(joinedload(ShoppingListItem.product))
+        .where(
+            ShoppingListItem.user_id == user.id,
+            ShoppingListItem.checked.is_(False),
+        )
+    )
+    items = sl_result.unique().scalars().all()
+
+    if not items:
+        return ShoppingListCompareResponse(
+            items=[], chain_totals=[], items_total=0,
+            multi_store_total=Decimal("0"), potential_savings=Decimal("0"),
+        )
+
+    product_items = [i for i in items if i.product_id is not None]
+    custom_items = [i for i in items if i.product_id is None and i.custom_name]
+
+    # Build chain slug -> (id, name) map
+    chains_result = await db.execute(select(Chain))
+    all_chains = {c.slug: (c.id, c.name) for c in chains_result.scalars().all()}
+
+    # Build offer filter
+    offer_where = [Offer.valid_from <= today, Offer.valid_to >= today]
+    if filter_chain_slugs:
+        valid_chain_ids = [all_chains[s][0] for s in filter_chain_slugs if s in all_chains]
+        if valid_chain_ids:
+            offer_where.append(Offer.chain_id.in_(valid_chain_ids))
+
+    # --- Product-linked items ---
+    # item_id -> chain_slug -> {price, chain_name, chain_slug, original_price, discount_pct, product_name}
+    item_prices: dict[uuid.UUID, dict[str, dict]] = defaultdict(dict)
+
+    if product_items:
+        product_ids = [i.product_id for i in product_items]
+        offers_result = await db.execute(
+            select(Offer)
+            .options(joinedload(Offer.chain), joinedload(Offer.product))
+            .where(Offer.product_id.in_(product_ids), *offer_where)
+            .order_by(Offer.offer_price)
+        )
+        offers = offers_result.unique().scalars().all()
+
+        # Map product_id -> item_id
+        pid_to_item: dict[uuid.UUID, uuid.UUID] = {i.product_id: i.id for i in product_items}
+
+        for o in offers:
+            item_id = pid_to_item.get(o.product_id)
+            if not item_id or not o.chain:
+                continue
+            slug = o.chain.slug
+            if slug not in item_prices[item_id]:
+                item_prices[item_id][slug] = {
+                    "offer_price": o.offer_price,
+                    "chain_name": o.chain.name,
+                    "chain_slug": slug,
+                    "original_price": o.original_price,
+                    "discount_pct": o.discount_pct,
+                    "product_name": o.product.name if o.product else "Unknown",
+                }
+
+    # --- Custom-name items ---
+    if custom_items:
+        optimizer = TripOptimizer()
+        custom_price_matrix, custom_labels = await optimizer._resolve_custom_items(
+            custom_items, db, today,
+        )
+        for item in custom_items:
+            for chain_name, (price, cname, prod_name) in custom_price_matrix.get(item.id, {}).items():
+                # Find slug for this chain
+                slug = None
+                for s, (cid, cn) in all_chains.items():
+                    if cn == chain_name:
+                        slug = s
+                        break
+                if slug and (not filter_chain_slugs or slug in filter_chain_slugs):
+                    if slug not in item_prices[item.id]:
+                        item_prices[item.id][slug] = {
+                            "offer_price": price,
+                            "chain_name": chain_name,
+                            "chain_slug": slug,
+                            "original_price": None,
+                            "discount_pct": None,
+                            "product_name": prod_name,
+                        }
+
+    # --- Build response ---
+    compare_items: list[CompareItem] = []
+    chain_totals_map: dict[str, dict] = {}  # slug -> {total, items_covered, chain_name}
+    multi_store_total = Decimal("0")
+
+    for item in items:
+        if item.checked:
+            continue
+
+        display_name = item.custom_name or (item.product.name if item.product else "Unknown")
+        image_url = item.product.image_url if item.product else None
+        search_term = item.custom_name if item.product_id is None else None
+
+        prices = item_prices.get(item.id, {})
+
+        # Find best price for this item
+        best_price = min((p["offer_price"] for p in prices.values()), default=None)
+
+        chain_price_list: list[ChainPriceInfo] = []
+        for slug, pdata in sorted(prices.items(), key=lambda x: x[1]["offer_price"]):
+            is_best = pdata["offer_price"] == best_price
+            chain_price_list.append(ChainPriceInfo(
+                chain_name=pdata["chain_name"],
+                chain_slug=pdata["chain_slug"],
+                offer_price=pdata["offer_price"],
+                original_price=pdata["original_price"],
+                discount_pct=pdata["discount_pct"],
+                product_name=pdata["product_name"],
+                is_best=is_best,
+            ))
+
+            # Accumulate chain totals
+            item_cost = pdata["offer_price"] * item.quantity
+            if slug not in chain_totals_map:
+                chain_totals_map[slug] = {
+                    "total": Decimal("0"),
+                    "items_covered": 0,
+                    "chain_name": pdata["chain_name"],
+                }
+            chain_totals_map[slug]["total"] += item_cost
+            chain_totals_map[slug]["items_covered"] += 1
+
+        # Multi-store: add best price for this item
+        if best_price is not None:
+            multi_store_total += best_price * item.quantity
+
+        compare_items.append(CompareItem(
+            item_id=item.id,
+            display_name=display_name,
+            image_url=image_url,
+            quantity=item.quantity,
+            search_term=search_term,
+            chain_prices=chain_price_list,
+        ))
+
+    # Build chain totals
+    chain_totals = sorted(
+        [
+            ChainTotalInfo(
+                chain_name=data["chain_name"],
+                chain_slug=slug,
+                total=data["total"],
+                items_covered=data["items_covered"],
+            )
+            for slug, data in chain_totals_map.items()
+        ],
+        key=lambda c: c.total,
+    )
+
+    best_single = chain_totals[0].total if chain_totals else Decimal("0")
+    savings = best_single - multi_store_total if best_single > multi_store_total else Decimal("0")
+
+    return ShoppingListCompareResponse(
+        items=compare_items,
+        chain_totals=chain_totals,
+        items_total=len(compare_items),
+        multi_store_total=multi_store_total,
+        potential_savings=savings,
+    )
+
+
+# --- Shopping List Suggestions ---
+
+class SuggestionItem(BaseModel):
+    product_id: str
+    product_name: str
+    brand: str | None
+    category: str | None
+    chain_name: str
+    offer_price: Decimal
+    original_price: Decimal | None
+    discount_pct: Decimal | None
+    price_per_unit: Decimal | None
+    unit_reference: str | None
+    image_url: str | None
+    suggestion_type: str  # "alternative" or "complementary"
+
+
+class ShoppingListSuggestionsResponse(BaseModel):
+    alternatives: list[SuggestionItem]
+    complementary: list[SuggestionItem]
+
+
+@router.get("/me/shopping-list/suggestions", response_model=ShoppingListSuggestionsResponse)
+async def get_shopping_list_suggestions(
+    limit: int = 10,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suggest products based on the shopping list.
+
+    - alternatives: cheaper products in same categories as list items
+    - complementary: popular offers in same categories, not already in list
+    """
+    today = date.today()
+
+    # Fetch shopping list product IDs and categories
+    sl_result = await db.execute(
+        select(ShoppingListItem)
+        .options(joinedload(ShoppingListItem.product))
+        .where(
+            ShoppingListItem.user_id == user.id,
+            ShoppingListItem.checked.is_(False),
+        )
+    )
+    sl_items = sl_result.unique().scalars().all()
+
+    if not sl_items:
+        return ShoppingListSuggestionsResponse(alternatives=[], complementary=[])
+
+    sl_product_ids = [i.product_id for i in sl_items if i.product_id]
+    categories = set()
+    for i in sl_items:
+        if i.product and i.product.category:
+            categories.add(i.product.category)
+
+    if not categories:
+        return ShoppingListSuggestionsResponse(alternatives=[], complementary=[])
+
+    # Alternatives: cheaper products in same categories, not in list
+    alt_stmt = (
+        select(Offer)
+        .options(joinedload(Offer.product), joinedload(Offer.chain))
+        .join(Product, Offer.product_id == Product.id)
+        .where(
+            Product.category.in_(list(categories)),
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+        )
+        .order_by(Offer.price_per_unit.asc().nulls_last(), Offer.offer_price.asc())
+        .limit(limit * 2)
+    )
+    if sl_product_ids:
+        alt_stmt = alt_stmt.where(Offer.product_id.notin_(sl_product_ids))
+
+    alt_result = await db.execute(alt_stmt)
+    alt_offers = alt_result.unique().scalars().all()
+
+    # Deduplicate by product_id
+    seen_alt: set[uuid.UUID] = set()
+    alternatives: list[SuggestionItem] = []
+    for o in alt_offers:
+        if o.product_id in seen_alt or len(alternatives) >= limit:
+            break
+        seen_alt.add(o.product_id)
+        alternatives.append(SuggestionItem(
+            product_id=str(o.product_id),
+            product_name=o.product.name if o.product else "Unknown",
+            brand=o.product.brand if o.product else None,
+            category=o.product.category if o.product else None,
+            chain_name=o.chain.name if o.chain else "Unknown",
+            offer_price=o.offer_price,
+            original_price=o.original_price,
+            discount_pct=o.discount_pct,
+            price_per_unit=o.price_per_unit,
+            unit_reference=o.unit_reference,
+            image_url=o.product.image_url if o.product else None,
+            suggestion_type="alternative",
+        ))
+
+    # Complementary: popular offers (high discount) in same categories, not already suggested
+    comp_exclude = sl_product_ids + [uuid.UUID(a.product_id) for a in alternatives]
+    comp_stmt = (
+        select(Offer)
+        .options(joinedload(Offer.product), joinedload(Offer.chain))
+        .join(Product, Offer.product_id == Product.id)
+        .where(
+            Product.category.in_(list(categories)),
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+        )
+        .order_by(Offer.discount_pct.desc().nulls_last())
+        .limit(limit * 2)
+    )
+    if comp_exclude:
+        comp_stmt = comp_stmt.where(Offer.product_id.notin_(comp_exclude))
+
+    comp_result = await db.execute(comp_stmt)
+    comp_offers = comp_result.unique().scalars().all()
+
+    seen_comp: set[uuid.UUID] = set()
+    complementary: list[SuggestionItem] = []
+    for o in comp_offers:
+        if o.product_id in seen_comp or len(complementary) >= limit:
+            break
+        seen_comp.add(o.product_id)
+        complementary.append(SuggestionItem(
+            product_id=str(o.product_id),
+            product_name=o.product.name if o.product else "Unknown",
+            brand=o.product.brand if o.product else None,
+            category=o.product.category if o.product else None,
+            chain_name=o.chain.name if o.chain else "Unknown",
+            offer_price=o.offer_price,
+            original_price=o.original_price,
+            discount_pct=o.discount_pct,
+            price_per_unit=o.price_per_unit,
+            unit_reference=o.unit_reference,
+            image_url=o.product.image_url if o.product else None,
+            suggestion_type="complementary",
+        ))
+
+    return ShoppingListSuggestionsResponse(
+        alternatives=alternatives,
+        complementary=complementary,
+    )
+
+
+# --- User Location ---
+
+class LocationUpdateRequest(BaseModel):
+    lat: float
+    lon: float
+
+
+@router.put("/me/location")
+async def update_user_location(
+    data: LocationUpdateRequest,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save the user's geolocation."""
+    user.lat = Decimal(str(data.lat))
+    user.lon = Decimal(str(data.lon))
+    await db.flush()
+    return {"lat": float(user.lat), "lon": float(user.lon)}

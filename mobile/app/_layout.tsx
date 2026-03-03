@@ -9,6 +9,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as SplashScreen from "expo-splash-screen";
 import { registerServiceWorker } from "../services/registerSW";
 import { glassColors, glassHeader, gradientBackground } from "../styles/glassStyles";
+import { useAppStore } from "../stores/useAppStore";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -49,6 +50,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     registerServiceWorker();
+  }, []);
+
+  // Prefetch catalog on app startup
+  useEffect(() => {
+    useAppStore.getState().prefetchCatalog();
   }, []);
 
   useEffect(() => {

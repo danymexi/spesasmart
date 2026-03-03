@@ -257,7 +257,7 @@ async def backfill_product_images():
 
     async with async_session() as session:
         finder = ProductImageFinder()
-        updated = await finder.backfill(session, limit=200)
+        updated = await finder.backfill(session, limit=500)
         logger.info("Product image backfill complete: %d images found.", updated)
 
 

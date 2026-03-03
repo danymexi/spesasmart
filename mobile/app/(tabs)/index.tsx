@@ -1,26 +1,42 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ActivityIndicator, Chip, Searchbar, Text, useTheme } from "react-native-paper";
-import { useQuery } from "@tanstack/react-query";
+import { ActivityIndicator, Button, Chip, Searchbar, Snackbar, Text } from "react-native-paper";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { getActiveOffers, getAlternatives, getBestOffers, getBrandDeals, getHistoricLows, getUserBrands, getWatchlist, smartSearch } from "../../services/api";
+import {
+  addToShoppingList,
+  getActiveOffers,
+  getBestOffers,
+  getHistoricLows,
+  getShoppingListCompare,
+  getShoppingListCount,
+  getShoppingListSuggestions,
+  smartSearch,
+} from "../../services/api";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import OfferCard from "../../components/OfferCard";
-import PersonalDeals from "../../components/PersonalDeals";
 import SmartCompareCard from "../../components/SmartCompareCard";
+import ChainTotalsSummary from "../../components/ChainTotalsSummary";
+import ShoppingListCompareGrid from "../../components/ShoppingListCompareGrid";
+import SuggestionsSection from "../../components/SuggestionsSection";
+import TripOptimizer from "../../components/TripOptimizer";
 import { useAppStore } from "../../stores/useAppStore";
 import { glassColors, glassChip, glassPanel, glassSearchbar } from "../../styles/glassStyles";
 
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
 
 export default function HomeScreen() {
-  const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
+  const catalogProducts = useAppStore((s) => s.catalogProducts);
+  const nearbyChains = useAppStore((s) => s.nearbyChains);
   const [selectedChain, setSelectedChain] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [showOptimizer, setShowOptimizer] = useState(false);
+  const [snackMsg, setSnackMsg] = useState("");
 
   // Debounce search input
   useEffect(() => {
@@ -28,15 +44,70 @@ export default function HomeScreen() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Smart search query
+  const isSearching = debouncedQuery.length >= 2;
+
+  // Local search: filter pre-loaded catalog when typing
+  const localResults = useMemo(() => {
+    if (!isSearching || catalogProducts.length === 0) return [];
+    const q = debouncedQuery.toLowerCase();
+    return catalogProducts
+      .filter((p) => p.name.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [debouncedQuery, catalogProducts, isSearching]);
+
+  // Smart search (API) — fires alongside local results
   const { data: searchResults, isLoading: loadingSearch } = useQuery({
     queryKey: ["smartSearch", debouncedQuery],
     queryFn: () => smartSearch(debouncedQuery, 5),
-    enabled: debouncedQuery.length >= 2,
+    enabled: isSearching,
   });
 
-  const isSearching = debouncedQuery.length >= 2;
+  // Shopping list count
+  const { data: shoppingListCount } = useQuery({
+    queryKey: ["shoppingListCount"],
+    queryFn: getShoppingListCount,
+    enabled: isLoggedIn,
+  });
+  const hasShoppingList = isLoggedIn && (shoppingListCount ?? 0) > 0;
 
+  // Shopping list compare
+  const {
+    data: compareData,
+    isLoading: loadingCompare,
+    refetch: refetchCompare,
+  } = useQuery({
+    queryKey: ["shoppingListCompare", nearbyChains.join(",")],
+    queryFn: () =>
+      getShoppingListCompare(
+        nearbyChains.length > 0 ? nearbyChains.join(",") : undefined
+      ),
+    enabled: hasShoppingList,
+  });
+
+  // Shopping list suggestions
+  const {
+    data: suggestionsData,
+    refetch: refetchSuggestions,
+  } = useQuery({
+    queryKey: ["shoppingListSuggestions"],
+    queryFn: () => getShoppingListSuggestions(),
+    enabled: hasShoppingList,
+  });
+
+  // Add to shopping list mutation (for quick-add and suggestions)
+  const addMutation = useMutation({
+    mutationFn: (params: { product_id?: string; custom_name?: string }) =>
+      addToShoppingList(params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingListCompare"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingListSuggestions"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
+      setSnackMsg("Aggiunto alla lista");
+    },
+  });
+
+  // Offers (for non-logged-in or empty list state)
   const {
     data: bestOffers,
     isLoading: loadingBest,
@@ -64,61 +135,7 @@ export default function HomeScreen() {
     queryFn: () => getHistoricLows(10),
   });
 
-  // Check if user has watchlist items (lightweight check)
-  const { data: watchlistItems } = useQuery({
-    queryKey: ["watchlist"],
-    queryFn: getWatchlist,
-    enabled: isLoggedIn,
-  });
-
-  const hasWatchlist = isLoggedIn && watchlistItems && watchlistItems.length > 0;
-
-  // User brands
-  const { data: userBrands } = useQuery({
-    queryKey: ["userBrands"],
-    queryFn: getUserBrands,
-    enabled: isLoggedIn,
-  });
-  const hasBrands = isLoggedIn && userBrands && userBrands.length > 0;
-
-  // Brand deals
-  const {
-    data: brandDeals,
-    refetch: refetchBrandDeals,
-  } = useQuery({
-    queryKey: ["brandDeals"],
-    queryFn: () => getBrandDeals(),
-    enabled: hasBrands,
-  });
-
-  // Suggested alternatives
-  const {
-    data: alternatives,
-    refetch: refetchAlternatives,
-  } = useQuery({
-    queryKey: ["alternatives"],
-    queryFn: () => getAlternatives(),
-    enabled: hasWatchlist,
-  });
-
-  const filteredBrandDeals = useMemo(() => {
-    if (!brandDeals) return [];
-    if (!selectedChain) return brandDeals;
-    return brandDeals.filter(
-      (o) => o.chain_name?.toLowerCase() === selectedChain.toLowerCase()
-    );
-  }, [brandDeals, selectedChain]);
-
-  const onRefresh = useCallback(() => {
-    refetchBest();
-    refetchActive();
-    refetchHistoric();
-    if (hasBrands) refetchBrandDeals();
-    if (hasWatchlist) refetchAlternatives();
-  }, [refetchBest, refetchActive, refetchHistoric, refetchBrandDeals, refetchAlternatives, hasBrands, hasWatchlist]);
-
-  const isLoading = loadingBest || loadingActive || loadingHistoric;
-
+  // Chain-filtered offers
   const filteredBest = useMemo(() => {
     if (!bestOffers) return [];
     if (!selectedChain) return bestOffers;
@@ -143,214 +160,274 @@ export default function HomeScreen() {
     );
   }, [historicLows, selectedChain]);
 
+  const isLoading = loadingBest || loadingActive || loadingHistoric;
+
+  const onRefresh = useCallback(() => {
+    refetchBest();
+    refetchActive();
+    refetchHistoric();
+    if (hasShoppingList) {
+      refetchCompare();
+      refetchSuggestions();
+    }
+  }, [refetchBest, refetchActive, refetchHistoric, refetchCompare, refetchSuggestions, hasShoppingList]);
+
+  // Quick-add: submit search query as custom_name to shopping list
+  const handleQuickAdd = () => {
+    if (!isLoggedIn || !searchQuery.trim()) return;
+    addMutation.mutate({ custom_name: searchQuery.trim() });
+    setSearchQuery("");
+  };
+
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top }}
-      refreshControl={<RefreshControl refreshing={isLoading} onRefresh={onRefresh} />}
-    >
-      {/* Header */}
-      <View style={styles.header}>
-        <Text variant="headlineMedium" style={styles.headerTitle}>
-          SpesaSmart
-        </Text>
-        <Text variant="bodyMedium" style={styles.headerSubtitle}>
-          Monza e Brianza
-        </Text>
-      </View>
-
-      {/* Smart Search Bar */}
-      <View style={styles.searchContainer}>
-        <Searchbar
-          placeholder="Cerca e confronta prezzi..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          style={styles.searchbar}
-          inputStyle={styles.searchInput}
-          elevation={0}
-        />
-      </View>
-
-      {/* Smart Search Results (replaces normal content when searching) */}
-      {isSearching ? (
-        <View style={styles.searchResults}>
-          {loadingSearch ? (
-            <ActivityIndicator style={{ marginTop: 20 }} />
-          ) : searchResults && searchResults.length > 0 ? (
-            searchResults.map((result) => (
-              <SmartCompareCard key={result.product.id} result={result} />
-            ))
-          ) : (
-            <Text variant="bodyMedium" style={styles.emptyText}>
-              Nessun prodotto trovato per "{debouncedQuery}"
-            </Text>
-          )}
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ paddingTop: insets.top }}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={onRefresh} />}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <Text variant="headlineMedium" style={styles.headerTitle}>
+            SpesaSmart
+          </Text>
+          <Text variant="bodyMedium" style={styles.headerSubtitle}>
+            La tua spesa intelligente
+          </Text>
         </View>
-      ) : (
-      <>
-      {/* Personalized deals section (only for logged-in users with watchlist) */}
-      {hasWatchlist && <PersonalDeals />}
 
-      {/* Brand Deals section */}
-      {hasBrands && filteredBrandDeals.length > 0 && (
-        <>
-          <View style={styles.sectionHeader}>
-            <MaterialCommunityIcons name="heart" size={22} color={glassColors.greenDark} />
-            <Text variant="titleLarge" style={styles.sectionTitleInline}>
-              Le Tue Marche in Offerta
-            </Text>
-          </View>
-          <FlatList
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            data={filteredBrandDeals}
-            keyExtractor={(item, i) => `${item.product_id}-${item.chain_name}-${i}`}
-            renderItem={({ item }) => (
-              <View style={styles.horizontalCard}>
-                <OfferCard
-                  offer={{
-                    id: item.product_id,
-                    product_id: item.product_id,
-                    product_name: item.product_name,
-                    brand: item.brand,
-                    chain_name: item.chain_name,
-                    original_price: item.original_price,
-                    offer_price: item.offer_price,
-                    discount_pct: item.discount_pct,
-                    valid_to: item.valid_to,
-                    image_url: item.image_url,
-                  }}
-                  compact
+        {/* Quick-add search bar */}
+        <View style={styles.searchContainer}>
+          <Searchbar
+            placeholder={
+              isLoggedIn
+                ? "Cerca e aggiungi alla lista..."
+                : "Cerca e confronta prezzi..."
+            }
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onSubmitEditing={handleQuickAdd}
+            style={styles.searchbar}
+            inputStyle={styles.searchInput}
+            elevation={0}
+            right={() =>
+              isLoggedIn && searchQuery.trim().length > 0 ? (
+                <MaterialCommunityIcons
+                  name="cart-plus"
+                  size={22}
+                  color={glassColors.greenMedium}
+                  style={{ marginRight: 12 }}
+                  onPress={handleQuickAdd}
                 />
+              ) : null
+            }
+          />
+        </View>
+
+        {/* Search results */}
+        {isSearching ? (
+          <View style={styles.searchResults}>
+            {loadingSearch && localResults.length === 0 ? (
+              <ActivityIndicator style={{ marginTop: 20 }} />
+            ) : searchResults && searchResults.length > 0 ? (
+              searchResults.map((result) => (
+                <SmartCompareCard key={result.product.id} result={result} />
+              ))
+            ) : (
+              <Text variant="bodyMedium" style={styles.emptyText}>
+                Nessun prodotto trovato per "{debouncedQuery}"
+              </Text>
+            )}
+          </View>
+        ) : (
+          <>
+            {/* ─── STATE 1: Logged in with shopping list items ─── */}
+            {hasShoppingList && (
+              <>
+                {/* Chain totals comparison */}
+                {loadingCompare ? (
+                  <ActivityIndicator style={{ marginTop: 16 }} />
+                ) : compareData && compareData.chain_totals.length > 0 ? (
+                  <>
+                    <ChainTotalsSummary
+                      chainTotals={compareData.chain_totals}
+                      itemsTotal={compareData.items_total}
+                      multiStoreTotal={compareData.multi_store_total}
+                      potentialSavings={compareData.potential_savings}
+                      onOpenOptimizer={() => setShowOptimizer(true)}
+                    />
+                    <ShoppingListCompareGrid items={compareData.items} />
+                  </>
+                ) : null}
+
+                {/* Suggestions */}
+                {suggestionsData && (
+                  <SuggestionsSection
+                    alternatives={suggestionsData.alternatives}
+                    complementary={suggestionsData.complementary}
+                    onAddToList={(productId) =>
+                      addMutation.mutate({ product_id: productId })
+                    }
+                  />
+                )}
+              </>
+            )}
+
+            {/* ─── STATE 2: Logged in but empty list ─── */}
+            {isLoggedIn && !hasShoppingList && (
+              <View style={styles.emptyState}>
+                <MaterialCommunityIcons
+                  name="cart-outline"
+                  size={48}
+                  color={glassColors.greenSubtle}
+                />
+                <Text style={styles.emptyStateTitle}>
+                  La tua lista della spesa e' vuota
+                </Text>
+                <Text style={styles.emptyStateSubtitle}>
+                  Aggiungi prodotti per confrontare i prezzi tra catene
+                </Text>
+                <Button
+                  mode="contained"
+                  onPress={() => router.push("/(tabs)/search")}
+                  style={styles.emptyStateBtn}
+                  labelStyle={{ fontWeight: "600" }}
+                >
+                  Sfoglia il Catalogo
+                </Button>
               </View>
             )}
-            contentContainerStyle={styles.horizontalList}
-          />
-        </>
-      )}
 
-      {/* Suggested Alternatives section */}
-      {hasWatchlist && alternatives && alternatives.length > 0 && (
-        <>
-          <View style={styles.sectionHeader}>
-            <MaterialCommunityIcons name="lightbulb-on-outline" size={22} color="#E65100" />
-            <Text variant="titleLarge" style={styles.sectionTitleInline}>
-              Alternative Suggerite
-            </Text>
-          </View>
-          <FlatList
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            data={alternatives}
-            keyExtractor={(item, i) => `${item.product_id}-${item.chain_name}-${i}`}
-            renderItem={({ item }) => (
-              <View style={styles.horizontalCard}>
-                <OfferCard
-                  offer={{
-                    id: item.product_id,
-                    product_id: item.product_id,
-                    product_name: item.product_name,
-                    brand: item.brand,
-                    chain_name: item.chain_name,
-                    original_price: item.original_price,
-                    offer_price: item.offer_price,
-                    discount_pct: item.discount_pct,
-                    valid_to: item.valid_to,
-                    image_url: item.image_url,
-                  }}
-                  compact
+            {/* ─── STATE 3: Not logged in ─── */}
+            {!isLoggedIn && (
+              <View style={styles.emptyState}>
+                <MaterialCommunityIcons
+                  name="account-outline"
+                  size={48}
+                  color={glassColors.greenSubtle}
                 />
-                {item.price_per_unit && (
-                  <View style={styles.ppuBadge}>
-                    <Text style={styles.ppuText}>
-                      {"\u20AC"}{Number(item.price_per_unit).toFixed(2)}/{item.unit_reference || "kg"}
-                    </Text>
+                <Text style={styles.emptyStateTitle}>
+                  Accedi per la spesa personalizzata
+                </Text>
+                <Text style={styles.emptyStateSubtitle}>
+                  Confronta prezzi, ottimizza la spesa e risparmia
+                </Text>
+                <Button
+                  mode="contained"
+                  onPress={() => router.push("/(tabs)/settings")}
+                  style={styles.emptyStateBtn}
+                  labelStyle={{ fontWeight: "600" }}
+                >
+                  Accedi
+                </Button>
+              </View>
+            )}
+
+            {/* ─── Offers section (always visible below) ─── */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chips}
+            >
+              {CHAINS.map((chain) => (
+                <Chip
+                  key={chain}
+                  style={[
+                    styles.chip,
+                    selectedChain === chain && styles.chipSelected,
+                  ]}
+                  selected={selectedChain === chain}
+                  onPress={() =>
+                    setSelectedChain(selectedChain === chain ? null : chain)
+                  }
+                >
+                  {chain}
+                </Chip>
+              ))}
+            </ScrollView>
+
+            {/* Best offers */}
+            <Text variant="titleLarge" style={styles.sectionTitle}>
+              Migliori Offerte
+            </Text>
+            {filteredBest.length > 0 ? (
+              <FlatList
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                data={filteredBest}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <View style={styles.horizontalCard}>
+                    <OfferCard offer={item} compact />
                   </View>
                 )}
-              </View>
+                contentContainerStyle={styles.horizontalList}
+              />
+            ) : (
+              <Text variant="bodyMedium" style={styles.emptyText}>
+                Nessuna offerta disponibile
+              </Text>
             )}
-            contentContainerStyle={styles.horizontalList}
-          />
-        </>
-      )}
 
-      {/* Chain filters */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-        {CHAINS.map((chain) => (
-          <Chip
-            key={chain}
-            style={[styles.chip, selectedChain === chain && styles.chipSelected]}
-            selected={selectedChain === chain}
-            onPress={() =>
-              setSelectedChain(selectedChain === chain ? null : chain)
-            }
-          >
-            {chain}
-          </Chip>
-        ))}
+            {/* Historic lows */}
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons
+                name="trending-down"
+                size={22}
+                color={glassColors.greenDark}
+              />
+              <Text variant="titleLarge" style={styles.sectionTitleInline}>
+                Minimi Storici
+              </Text>
+            </View>
+            {filteredHistoric.length > 0 ? (
+              <FlatList
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                data={filteredHistoric}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <View style={styles.horizontalCard}>
+                    <OfferCard offer={item} compact />
+                  </View>
+                )}
+                contentContainerStyle={styles.horizontalList}
+              />
+            ) : (
+              <Text variant="bodyMedium" style={styles.emptyText}>
+                Nessun minimo storico disponibile
+              </Text>
+            )}
+
+            {/* All active offers */}
+            <Text variant="titleLarge" style={styles.sectionTitle}>
+              Offerte Attive
+            </Text>
+            {filteredActive.map((offer) => (
+              <OfferCard key={offer.id} offer={offer} />
+            ))}
+
+            <View style={styles.bottomPadding} />
+          </>
+        )}
       </ScrollView>
 
-      {/* Best offers section */}
-      <Text variant="titleLarge" style={styles.sectionTitle}>
-        Migliori Offerte
-      </Text>
-      {filteredBest.length > 0 ? (
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={filteredBest}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <View style={styles.horizontalCard}>
-              <OfferCard offer={item} compact />
-            </View>
-          )}
-          contentContainerStyle={styles.horizontalList}
-        />
-      ) : (
-        <Text variant="bodyMedium" style={styles.emptyText}>
-          Nessuna offerta disponibile
-        </Text>
-      )}
+      {/* Trip Optimizer Modal */}
+      <TripOptimizer
+        visible={showOptimizer}
+        onDismiss={() => setShowOptimizer(false)}
+      />
 
-      {/* Historic lows section */}
-      <View style={styles.sectionHeader}>
-        <MaterialCommunityIcons name="trending-down" size={22} color={glassColors.greenDark} />
-        <Text variant="titleLarge" style={styles.sectionTitleInline}>
-          Minimi Storici
-        </Text>
-      </View>
-      {filteredHistoric.length > 0 ? (
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={filteredHistoric}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <View style={styles.horizontalCard}>
-              <OfferCard offer={item} compact />
-            </View>
-          )}
-          contentContainerStyle={styles.horizontalList}
-        />
-      ) : (
-        <Text variant="bodyMedium" style={styles.emptyText}>
-          Nessun minimo storico disponibile
-        </Text>
-      )}
-
-      {/* All active offers */}
-      <Text variant="titleLarge" style={styles.sectionTitle}>
-        Offerte Attive
-      </Text>
-      {filteredActive.map((offer) => (
-        <OfferCard key={offer.id} offer={offer} />
-      ))}
-
-      <View style={styles.bottomPadding} />
-      </>
-      )}
-    </ScrollView>
+      {/* Snackbar */}
+      <Snackbar
+        visible={!!snackMsg}
+        onDismiss={() => setSnackMsg("")}
+        duration={2000}
+        style={styles.snackbar}
+      >
+        {snackMsg}
+      </Snackbar>
+    </>
   );
 }
 
@@ -378,21 +455,49 @@ const styles = StyleSheet.create({
   chipSelected: {
     backgroundColor: glassColors.greenAccent,
   },
-  sectionTitle: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, fontWeight: "700", color: glassColors.greenDark },
-  sectionHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 6 },
+  sectionTitle: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    fontWeight: "700",
+    color: glassColors.greenDark,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    gap: 6,
+  },
   sectionTitleInline: { fontWeight: "700", color: glassColors.greenDark },
   horizontalList: { paddingHorizontal: 12 },
   horizontalCard: { width: 260, marginRight: 12 },
   emptyText: { paddingHorizontal: 16, color: "#555" },
-  ppuBadge: {
-    backgroundColor: "rgba(230,81,0,0.10)",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    marginTop: 4,
-    alignSelf: "flex-start",
-    marginLeft: 4,
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    gap: 8,
   },
-  ppuText: { color: "#E65100", fontSize: 11, fontWeight: "600" },
+  emptyStateTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: glassColors.greenDark,
+    textAlign: "center",
+  },
+  emptyStateSubtitle: {
+    fontSize: 14,
+    color: glassColors.textMuted,
+    textAlign: "center",
+  },
+  emptyStateBtn: {
+    marginTop: 12,
+    borderRadius: 16,
+    backgroundColor: glassColors.greenMedium,
+  },
+  snackbar: {
+    marginBottom: 80,
+  },
   bottomPadding: { height: 96 },
 });
