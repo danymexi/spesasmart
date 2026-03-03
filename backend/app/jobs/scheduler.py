@@ -164,6 +164,18 @@ async def sync_catalog():
 
     logger.info("Weekly catalog sync complete: %d total products processed.", total)
 
+    # Post-sync image backfill for newly added products
+    try:
+        from app.database import async_session as get_session
+        from app.services.image_finder import ProductImageFinder
+
+        async with get_session() as session:
+            finder = ProductImageFinder()
+            img_count = await finder.backfill(session, limit=50)
+            logger.info("Post-sync image backfill: %d images found.", img_count)
+    except Exception:
+        logger.exception("Post-sync image backfill failed.")
+
 
 async def send_weekly_digest():
     """Send the weekly notification digest to users in digest mode."""
@@ -245,7 +257,7 @@ async def backfill_product_images():
 
     async with async_session() as session:
         finder = ProductImageFinder()
-        updated = await finder.backfill(session, limit=100)
+        updated = await finder.backfill(session, limit=200)
         logger.info("Product image backfill complete: %d images found.", updated)
 
 
@@ -335,10 +347,10 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Product image backfill: Sun/Tue/Thu at 5:00 AM
+    # Product image backfill: daily at 4:30 AM
     scheduler.add_job(
         backfill_product_images,
-        CronTrigger(day_of_week="sun,tue,thu", hour=5, minute=0),
+        CronTrigger(hour=4, minute=30),
         id="backfill_product_images",
         name="Find images for products without image_url",
         replace_existing=True,
