@@ -32,6 +32,7 @@ class StoreTrip:
     chain_name: str
     items: list[TripItem] = field(default_factory=list)
     total: Decimal = Decimal("0")
+    items_covered: int = 0
 
 
 @dataclass
@@ -41,6 +42,9 @@ class TripOptimizationResult:
     single_store_total: Decimal
     multi_store_total: Decimal
     potential_savings: Decimal
+    all_single_stores: list[StoreTrip] = field(default_factory=list)
+    items_total: int = 0
+    items_not_covered: int = 0
 
 
 class TripOptimizer:
@@ -75,6 +79,9 @@ class TripOptimizer:
                 single_store_total=Decimal("0"),
                 multi_store_total=Decimal("0"),
                 potential_savings=Decimal("0"),
+                all_single_stores=[],
+                items_total=0,
+                items_not_covered=0,
             )
 
         product_ids = [i.product_id for i in product_items]
@@ -129,6 +136,7 @@ class TripOptimizer:
                         chain_name=chain_name,
                     ))
                     trip.total += item_total
+            trip.items_covered = len(trip.items)
             if trip.items:
                 single_store_results.append(trip)
 
@@ -167,10 +175,17 @@ class TripOptimizer:
         single_total = single_store_best.total if single_store_best else Decimal("0")
         savings = single_total - multi_total if single_total > multi_total else Decimal("0")
 
+        items_total = len(product_items)
+        items_with_offers = sum(1 for pid in product_ids if price_matrix.get(pid))
+        items_not_covered = items_total - items_with_offers
+
         return TripOptimizationResult(
             single_store_best=single_store_best,
             multi_store_plan=multi_store_plan,
             single_store_total=single_total,
             multi_store_total=multi_total,
             potential_savings=savings,
+            all_single_stores=single_store_results,
+            items_total=items_total,
+            items_not_covered=items_not_covered,
         )

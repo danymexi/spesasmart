@@ -831,6 +831,7 @@ class StoreTripResponse(BaseModel):
     chain_name: str
     items: list[TripItemResponse]
     total: Decimal
+    items_covered: int = 0
 
 
 class TripOptimizationResponse(BaseModel):
@@ -839,6 +840,9 @@ class TripOptimizationResponse(BaseModel):
     single_store_total: Decimal
     multi_store_total: Decimal
     potential_savings: Decimal
+    all_single_stores: list[StoreTripResponse] = []
+    items_total: int = 0
+    items_not_covered: int = 0
 
 
 @router.get("/me/shopping-list/optimize", response_model=TripOptimizationResponse)
@@ -864,6 +868,7 @@ async def optimize_shopping_trip(
                 for i in trip.items
             ],
             total=trip.total,
+            items_covered=trip.items_covered,
         )
 
     return TripOptimizationResponse(
@@ -872,4 +877,7 @@ async def optimize_shopping_trip(
         single_store_total=result.single_store_total,
         multi_store_total=result.multi_store_total,
         potential_savings=result.potential_savings,
+        all_single_stores=[_convert_trip(t) for t in result.all_single_stores],
+        items_total=result.items_total,
+        items_not_covered=result.items_not_covered,
     )

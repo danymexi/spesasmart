@@ -208,14 +208,18 @@ export interface StoreTrip {
   chain_name: string;
   items: TripItem[];
   total: number;
+  items_covered: number;
 }
 
 export interface TripOptimizationResult {
-  single_store_best: StoreTrip;
+  single_store_best: StoreTrip | null;
   multi_store_plan: StoreTrip[];
   single_store_total: number;
   multi_store_total: number;
   potential_savings: number;
+  all_single_stores: StoreTrip[];
+  items_total: number;
+  items_not_covered: number;
 }
 
 export interface UserBrandItem {

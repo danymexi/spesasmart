@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Button, Checkbox, IconButton, Text, TextInput, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -10,6 +10,7 @@ import {
   toggleShoppingItem,
   removeShoppingItem,
   clearCheckedItems,
+  optimizeTrip,
   ShoppingListItem,
 } from "../services/api";
 import { glassCard, glassColors } from "../styles/glassStyles";
@@ -24,6 +25,16 @@ export default function ShoppingList() {
   const { data: items, isLoading, refetch } = useQuery({
     queryKey: ["shoppingList"],
     queryFn: getShoppingList,
+  });
+
+  const uncheckedProductItems = (items || []).filter(
+    (i) => !i.checked && i.product_id
+  );
+
+  const { data: optimizationData } = useQuery({
+    queryKey: ["tripOptimize"],
+    queryFn: optimizeTrip,
+    enabled: uncheckedProductItems.length > 0,
   });
 
   const addMutation = useMutation({
@@ -107,6 +118,26 @@ export default function ShoppingList() {
           style={styles.addButton}
         />
       </View>
+
+      {optimizationData && optimizationData.all_single_stores.length > 0 && (
+        <Pressable onPress={() => setShowOptimizer(true)} style={styles.costBanner}>
+          <MaterialCommunityIcons name="store" size={16} color={glassColors.greenDark} />
+          <Text variant="bodySmall" style={styles.costBannerText}>
+            {optimizationData.all_single_stores[0].chain_name}{" "}
+            {"\u20AC"}{Number(optimizationData.all_single_stores[0].total).toFixed(2)}
+          </Text>
+          {optimizationData.multi_store_plan.length > 1 && (
+            <>
+              <Text variant="bodySmall" style={styles.costBannerSep}>{"\u00B7"}</Text>
+              <MaterialCommunityIcons name="store-plus" size={16} color={glassColors.greenDark} />
+              <Text variant="bodySmall" style={styles.costBannerText}>
+                {"\u20AC"}{Number(optimizationData.multi_store_total).toFixed(2)}
+              </Text>
+            </>
+          )}
+          <MaterialCommunityIcons name="chevron-right" size={16} color="#888" />
+        </Pressable>
+      )}
 
       <FlatList
         data={flatData}
@@ -278,5 +309,23 @@ const styles = StyleSheet.create({
   },
   optimizeButton: {
     backgroundColor: glassColors.greenDark,
+  },
+  costBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginHorizontal: 12,
+    marginBottom: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(27,94,32,0.06)",
+    borderRadius: 10,
+  },
+  costBannerText: {
+    color: glassColors.greenDark,
+    fontWeight: "600",
+  },
+  costBannerSep: {
+    color: "#aaa",
   },
 });
