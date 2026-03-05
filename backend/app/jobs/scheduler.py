@@ -3,11 +3,18 @@
 import asyncio
 import logging
 import uuid
+from datetime import date, datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
+
+# All cron jobs run in Italian time (CET/CEST).
+TZ = "Europe/Rome"
+
+# If the last scrape for a chain is older than this, scrape on startup.
+FRESHNESS_THRESHOLD = timedelta(hours=48)
 
 # Target store names by chain slug.
 # These are the specific stores the user wants to track.
@@ -267,14 +274,80 @@ async def scrape_all_chains():
         await scrape_chain(slug)
 
 
+async def check_freshness_and_scrape():
+    """Check each chain's last scrape time and trigger scraping if stale.
+
+    Called once at startup so that after a deploy/restart the system
+    automatically catches up on missed scraping windows.
+    """
+    from sqlalchemy import func, select
+    from app.database import async_session
+    from app.models import Chain, Offer
+
+    logger.info("Running startup freshness check...")
+    now = datetime.now(timezone.utc)
+    stale_chains: list[str] = []
+
+    async with async_session() as session:
+        # Get latest created_at per chain
+        stmt = (
+            select(Chain.slug, func.max(Offer.created_at))
+            .outerjoin(Offer, Offer.chain_id == Chain.id)
+            .group_by(Chain.slug)
+        )
+        rows = (await session.execute(stmt)).all()
+
+        for slug, last_created in rows:
+            if slug not in TARGET_STORES:
+                continue
+            if last_created is None:
+                logger.warning("Chain '%s' has zero offers — will scrape.", slug)
+                stale_chains.append(slug)
+            elif (now - last_created) > FRESHNESS_THRESHOLD:
+                age_h = (now - last_created).total_seconds() / 3600
+                logger.warning(
+                    "Chain '%s' last scraped %.1fh ago — will scrape.", slug, age_h
+                )
+                stale_chains.append(slug)
+            else:
+                logger.info("Chain '%s' is fresh (last scrape: %s).", slug, last_created)
+
+    if not stale_chains:
+        logger.info("All chains are fresh — no startup scrape needed.")
+        return
+
+    logger.info("Launching startup scrape for stale chains: %s", stale_chains)
+    for slug in stale_chains:
+        asyncio.create_task(scrape_chain(slug))
+
+
+async def cleanup_expired_offers():
+    """Delete offers that expired more than 30 days ago.
+
+    Keeps 30 days of history for price comparisons and "previous price" display.
+    """
+    from sqlalchemy import delete
+    from app.database import async_session
+    from app.models import Offer
+
+    cutoff = date.today() - timedelta(days=30)
+    logger.info("Cleaning up offers expired before %s...", cutoff)
+
+    async with async_session() as session:
+        stmt = delete(Offer).where(Offer.valid_to < cutoff)
+        result = await session.execute(stmt)
+        await session.commit()
+        logger.info("Deleted %d expired offers (valid_to < %s).", result.rowcount, cutoff)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Configure and start the APScheduler."""
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone=TZ)
 
     # Lidl: every Monday at 6:00 (weekly flyer Mon-Sun)
     scheduler.add_job(
         scrape_chain,
-        CronTrigger(day_of_week="mon", hour=6, minute=0),
+        CronTrigger(day_of_week="mon", hour=6, minute=0, timezone=TZ),
         args=["lidl"],
         id="scrape_lidl",
         name="Scrape Lidl weekly offers",
@@ -284,7 +357,7 @@ def start_scheduler() -> AsyncIOScheduler:
     # Esselunga: Monday and Thursday at 6:30
     scheduler.add_job(
         scrape_chain,
-        CronTrigger(day_of_week="mon,thu", hour=6, minute=30),
+        CronTrigger(day_of_week="mon,thu", hour=6, minute=30, timezone=TZ),
         args=["esselunga"],
         id="scrape_esselunga",
         name="Scrape Esselunga flyers",
@@ -294,7 +367,7 @@ def start_scheduler() -> AsyncIOScheduler:
     # Coop: every Monday at 7:00
     scheduler.add_job(
         scrape_chain,
-        CronTrigger(day_of_week="mon", hour=7, minute=0),
+        CronTrigger(day_of_week="mon", hour=7, minute=0, timezone=TZ),
         args=["coop"],
         id="scrape_coop",
         name="Scrape Coop flyers",
@@ -304,7 +377,7 @@ def start_scheduler() -> AsyncIOScheduler:
     # Iperal: Monday and Thursday at 7:30
     scheduler.add_job(
         scrape_chain,
-        CronTrigger(day_of_week="mon,thu", hour=7, minute=30),
+        CronTrigger(day_of_week="mon,thu", hour=7, minute=30, timezone=TZ),
         args=["iperal"],
         id="scrape_iperal",
         name="Scrape Iperal flyers",
@@ -314,7 +387,7 @@ def start_scheduler() -> AsyncIOScheduler:
     # Weekly notification digest: Monday 8:00 AM
     scheduler.add_job(
         send_weekly_digest,
-        CronTrigger(day_of_week="mon", hour=8, minute=0),
+        CronTrigger(day_of_week="mon", hour=8, minute=0, timezone=TZ),
         id="weekly_digest",
         name="Weekly notification digest",
         replace_existing=True,
@@ -323,7 +396,7 @@ def start_scheduler() -> AsyncIOScheduler:
     # Catalog sync: every Sunday at 3:00 AM
     scheduler.add_job(
         sync_catalog,
-        CronTrigger(day_of_week="sun", hour=3, minute=0),
+        CronTrigger(day_of_week="sun", hour=3, minute=0, timezone=TZ),
         id="sync_catalog",
         name="Weekly catalog sync (all chains)",
         replace_existing=True,
@@ -332,7 +405,7 @@ def start_scheduler() -> AsyncIOScheduler:
     # Backfill unit prices: every Sunday at 4:00 AM (after catalog sync)
     scheduler.add_job(
         backfill_unit_prices,
-        CronTrigger(day_of_week="sun", hour=4, minute=0),
+        CronTrigger(day_of_week="sun", hour=4, minute=0, timezone=TZ),
         id="backfill_unit_prices",
         name="Backfill unit prices for offers without PPU",
         replace_existing=True,
@@ -341,7 +414,7 @@ def start_scheduler() -> AsyncIOScheduler:
     # Stockup alerts: Monday and Thursday at 9:00 AM (after scraping)
     scheduler.add_job(
         check_stockup_alerts,
-        CronTrigger(day_of_week="mon,thu", hour=9, minute=0),
+        CronTrigger(day_of_week="mon,thu", hour=9, minute=0, timezone=TZ),
         id="check_stockup_alerts",
         name="Check watchlist for stockup opportunities",
         replace_existing=True,
@@ -350,9 +423,18 @@ def start_scheduler() -> AsyncIOScheduler:
     # Product image backfill: daily at 4:30 AM
     scheduler.add_job(
         backfill_product_images,
-        CronTrigger(hour=4, minute=30),
+        CronTrigger(hour=4, minute=30, timezone=TZ),
         id="backfill_product_images",
         name="Find images for products without image_url",
+        replace_existing=True,
+    )
+
+    # Cleanup expired offers: every Sunday at 2:00 AM
+    scheduler.add_job(
+        cleanup_expired_offers,
+        CronTrigger(day_of_week="sun", hour=2, minute=0, timezone=TZ),
+        id="cleanup_expired_offers",
+        name="Delete offers expired >30 days ago",
         replace_existing=True,
     )
 

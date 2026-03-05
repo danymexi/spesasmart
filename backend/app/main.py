@@ -30,9 +30,11 @@ DIST_DIR = Path(__file__).resolve().parent.parent / "dist"
 async def lifespan(app: FastAPI):
     settings = get_settings()
     if settings.scheduler_enabled:
-        from app.jobs.scheduler import start_scheduler
+        import asyncio
+        from app.jobs.scheduler import check_freshness_and_scrape, start_scheduler
 
         scheduler = start_scheduler()
+        asyncio.create_task(check_freshness_and_scrape())
         yield
         scheduler.shutdown()
     else:
