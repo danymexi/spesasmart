@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, View, Alert, Platform } from "react-native";
 import { Button, Chip, List, Snackbar, Switch, Text, TextInput, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
 
 function showAlert(title: string, message: string) {
   if (Platform.OS === "web") {
@@ -11,13 +12,14 @@ function showAlert(title: string, message: string) {
   }
 }
 import { useAppStore } from "../../stores/useAppStore";
-import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains, getNearbyStores, updateUserLocation } from "../../services/api";
-import type { NearbyChainInfo } from "../../services/api";
+import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains, getNearbyStores, updateUserLocation, getSupermarketAccounts, addSupermarketAccount, removeSupermarketAccount, triggerPurchaseSync } from "../../services/api";
+import type { NearbyChainInfo, SupermarketAccount } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors, glassCard } from "../../styles/glassStyles";
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const router = useRouter();
   const { isLoggedIn, userEmail, setAuth, logout } = useAppStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -350,6 +352,27 @@ export default function SettingsScreen() {
         </View>
       )}
 
+      {/* Account Supermercato (Purchase History) */}
+      {isLoggedIn && (
+        <View style={styles.section}>
+          <List.Section>
+            <List.Subheader style={styles.listSubheader}>Account Supermercato</List.Subheader>
+            <Text variant="bodySmall" style={styles.brandEmptyText}>
+              Collega il tuo account per scaricare lo storico ordini e ricevere suggerimenti personalizzati.
+            </Text>
+            <SupermarketAccountsSection />
+            <Button
+              mode="outlined"
+              icon="history"
+              onPress={() => router.push("/purchases")}
+              style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 12 }}
+            >
+              Storico Acquisti
+            </Button>
+          </List.Section>
+        </View>
+      )}
+
       {/* Supermercati (Geolocation + Chains) */}
       <View style={styles.section}>
         <List.Section>
@@ -409,6 +432,169 @@ export default function SettingsScreen() {
     </ScrollView>
   );
 }
+
+const SUPERMARKET_CHAINS = [
+  { slug: "esselunga", label: "Esselunga" },
+  { slug: "iperal", label: "Iperal" },
+];
+
+function SupermarketAccountsSection() {
+  const queryClient = useQueryClient();
+  const [selectedChain, setSelectedChain] = useState<string | null>(null);
+  const [smEmail, setSmEmail] = useState("");
+  const [smPassword, setSmPassword] = useState("");
+
+  const { data: accounts } = useQuery({
+    queryKey: ["supermarketAccounts"],
+    queryFn: getSupermarketAccounts,
+  });
+
+  const addMutation = useMutation({
+    mutationFn: () => addSupermarketAccount(selectedChain!, smEmail, smPassword),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["supermarketAccounts"] });
+      setSelectedChain(null);
+      setSmEmail("");
+      setSmPassword("");
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (slug: string) => removeSupermarketAccount(slug),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["supermarketAccounts"] });
+    },
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: (slug: string) => triggerPurchaseSync(slug),
+  });
+
+  const connectedSlugs = new Set((accounts || []).map((a) => a.chain_slug));
+
+  return (
+    <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+      {/* Connected accounts */}
+      {accounts && accounts.length > 0 && accounts.map((acc) => (
+        <View key={acc.chain_slug} style={smStyles.accountRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={smStyles.accountChain}>
+              {acc.chain_slug.charAt(0).toUpperCase() + acc.chain_slug.slice(1)}
+            </Text>
+            <Text style={smStyles.accountEmail}>{acc.masked_email}</Text>
+            {acc.last_error && (
+              <Text style={smStyles.accountError}>{acc.last_error}</Text>
+            )}
+            {acc.last_synced_at && (
+              <Text style={smStyles.accountSync}>
+                Ultimo sync: {new Date(acc.last_synced_at).toLocaleDateString("it-IT")}
+              </Text>
+            )}
+          </View>
+          <View style={{ flexDirection: "row", gap: 4 }}>
+            <Button
+              mode="text"
+              compact
+              icon="sync"
+              onPress={() => syncMutation.mutate(acc.chain_slug)}
+              loading={syncMutation.isPending}
+            >
+              {""}
+            </Button>
+            <Button
+              mode="text"
+              compact
+              icon="close"
+              textColor="#D32F2F"
+              onPress={() => removeMutation.mutate(acc.chain_slug)}
+            >
+              {""}
+            </Button>
+          </View>
+        </View>
+      ))}
+
+      {/* Add new account */}
+      {!selectedChain ? (
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          {SUPERMARKET_CHAINS.filter((c) => !connectedSlugs.has(c.slug)).map((c) => (
+            <Chip
+              key={c.slug}
+              onPress={() => setSelectedChain(c.slug)}
+              icon="plus"
+              compact
+            >
+              {c.label}
+            </Chip>
+          ))}
+        </View>
+      ) : (
+        <View style={{ marginTop: 8 }}>
+          <Text variant="bodyMedium" style={{ fontWeight: "600", marginBottom: 8, color: "#1a1a1a" }}>
+            Collega {selectedChain.charAt(0).toUpperCase() + selectedChain.slice(1)}
+          </Text>
+          <TextInput
+            label="Email"
+            value={smEmail}
+            onChangeText={setSmEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            mode="outlined"
+            dense
+            style={{ marginBottom: 8 }}
+          />
+          <TextInput
+            label="Password"
+            value={smPassword}
+            onChangeText={setSmPassword}
+            secureTextEntry
+            mode="outlined"
+            dense
+            style={{ marginBottom: 8 }}
+          />
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Button
+              mode="contained"
+              onPress={() => addMutation.mutate()}
+              loading={addMutation.isPending}
+              disabled={!smEmail || !smPassword || addMutation.isPending}
+              compact
+              style={{ flex: 1 }}
+            >
+              Collega
+            </Button>
+            <Button
+              mode="outlined"
+              onPress={() => { setSelectedChain(null); setSmEmail(""); setSmPassword(""); }}
+              compact
+            >
+              Annulla
+            </Button>
+          </View>
+          {addMutation.isError && (
+            <Text style={smStyles.accountError}>
+              Errore nel collegamento. Verifica le credenziali.
+            </Text>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const smStyles = StyleSheet.create({
+  accountRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.06)",
+  },
+  accountChain: { fontWeight: "600", color: "#1a1a1a", fontSize: 14 },
+  accountEmail: { color: "#666", fontSize: 12, marginTop: 2 },
+  accountError: { color: "#C62828", fontSize: 11, marginTop: 2 },
+  accountSync: { color: "#666", fontSize: 11, marginTop: 2 },
+});
 
 const CHAIN_OPTIONS = [
   { slug: "esselunga", label: "Esselunga" },

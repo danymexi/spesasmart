@@ -89,6 +89,10 @@ export default function RootLayout() {
               name="flyer/[id]"
               options={{ title: "Volantino" }}
             />
+            <Stack.Screen
+              name="purchases"
+              options={{ title: "Storico Acquisti" }}
+            />
           </Stack>
         </QueryClientProvider>
       </PaperProvider>

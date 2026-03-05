@@ -40,6 +40,8 @@ class UserProfile(Base):
     brands = relationship("UserBrand", back_populates="user", cascade="all, delete-orphan")
     web_push_subscriptions = relationship("WebPushSubscription", back_populates="user", cascade="all, delete-orphan")
     shopping_list = relationship("ShoppingListItem", back_populates="user", cascade="all, delete-orphan")
+    supermarket_credentials = relationship("SupermarketCredential", back_populates="user", cascade="all, delete-orphan")
+    purchase_orders = relationship("PurchaseOrder", back_populates="user", cascade="all, delete-orphan")
 
 
 class UserWatchlist(Base):

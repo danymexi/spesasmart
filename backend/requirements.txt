@@ -42,6 +42,9 @@ bcrypt==4.0.1
 python-jose[cryptography]==3.3.0
 email-validator>=2.0.0
 
+# Credential encryption
+cryptography>=42.0.0
+
 # Utilities
 python-dotenv==1.0.1
 

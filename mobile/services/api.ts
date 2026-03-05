@@ -423,6 +423,69 @@ export interface ShoppingListSuggestionsResponse {
   complementary: SuggestionItem[];
 }
 
+// ── Purchase History Types ───────────────────────────────────────────────────
+
+export interface SupermarketAccount {
+  chain_slug: string;
+  masked_email: string;
+  is_valid: boolean;
+  last_error: string | null;
+  last_synced_at: string | null;
+}
+
+export interface PurchaseOrderItem {
+  id: string;
+  chain_slug: string;
+  external_order_id: string;
+  order_date: string;
+  total_amount: number | null;
+  store_name: string | null;
+  status: string | null;
+  items_count: number;
+}
+
+export interface PurchaseItemDetail {
+  id: string;
+  external_name: string;
+  external_code: string | null;
+  quantity: number | null;
+  unit_price: number | null;
+  total_price: number | null;
+  brand: string | null;
+  category: string | null;
+  product_id: string | null;
+  product_name: string | null;
+}
+
+export interface PurchaseHabit {
+  product_id: string;
+  product_name: string;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  total_purchases: number;
+  avg_interval_days: number;
+  avg_price: number | null;
+  last_purchased: string;
+  next_purchase_predicted: string | null;
+}
+
+export interface SmartListItem {
+  product_id: string;
+  product_name: string;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  total_purchases: number;
+  avg_interval_days: number;
+  avg_price: number | null;
+  urgency: "alta" | "media" | "bassa";
+  days_until_due: number;
+  best_current_price: number | null;
+  best_chain: string | null;
+  savings_vs_avg: number | null;
+}
+
 // ── Catalog Preload Types ───────────────────────────────────────────────────
 
 export interface CatalogPreloadItem {
@@ -870,6 +933,65 @@ export async function updateUserLocation(
     "/users/me/location",
     { lat, lon }
   );
+  return res.data;
+}
+
+// ── Supermarket Accounts ────────────────────────────────────────────────────
+
+export async function getSupermarketAccounts(): Promise<SupermarketAccount[]> {
+  const res = await apiClient.get<SupermarketAccount[]>("/users/me/supermarket-accounts");
+  return res.data;
+}
+
+export async function addSupermarketAccount(
+  chainSlug: string,
+  email: string,
+  password: string
+): Promise<SupermarketAccount> {
+  const res = await apiClient.post<SupermarketAccount>("/users/me/supermarket-accounts", {
+    chain_slug: chainSlug,
+    email,
+    password,
+  });
+  return res.data;
+}
+
+export async function removeSupermarketAccount(chainSlug: string): Promise<void> {
+  await apiClient.delete(`/users/me/supermarket-accounts/${chainSlug}`);
+}
+
+export async function triggerPurchaseSync(chainSlug: string): Promise<{ status: string; message: string }> {
+  const res = await apiClient.post<{ status: string; message: string }>(
+    `/users/me/supermarket-accounts/${chainSlug}/sync`
+  );
+  return res.data;
+}
+
+// ── Purchase History ────────────────────────────────────────────────────────
+
+export async function getPurchaseOrders(
+  limit: number = 50,
+  offset: number = 0,
+  chain?: string
+): Promise<PurchaseOrderItem[]> {
+  const res = await apiClient.get<PurchaseOrderItem[]>("/users/me/purchases", {
+    params: { limit, offset, chain },
+  });
+  return res.data;
+}
+
+export async function getPurchaseItems(orderId: string): Promise<PurchaseItemDetail[]> {
+  const res = await apiClient.get<PurchaseItemDetail[]>(`/users/me/purchases/${orderId}/items`);
+  return res.data;
+}
+
+export async function getPurchaseHabits(): Promise<PurchaseHabit[]> {
+  const res = await apiClient.get<PurchaseHabit[]>("/users/me/purchase-habits");
+  return res.data;
+}
+
+export async function getSmartList(): Promise<SmartListItem[]> {
+  const res = await apiClient.get<SmartListItem[]>("/users/me/smart-list");
   return res.data;
 }
 

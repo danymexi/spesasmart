@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_hours: int = 720  # 30 days
 
+    # Credential encryption (Fernet key for supermarket account passwords)
+    credential_encryption_key: str = ""
+
     # Scheduler
     scheduler_enabled: bool = True
 

@@ -39,6 +39,10 @@ _VARIANT_WORDS: set[str] = {
     "bio", "integrale", "integrali", "classico", "classica",
     "originale", "light", "zero", "senza", "glutine",
     "decaffeinato", "decaf",
+    # Private-label product lines
+    "top", "smart", "naturama", "premium", "selection",
+    # Milk / dairy specifics
+    "montagna", "parzialmente", "scremato",
     # Sizes / quantities that matter
     "mini", "maxi", "grande", "piccolo", "famiglia",
 }

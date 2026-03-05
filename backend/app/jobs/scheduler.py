@@ -321,6 +321,17 @@ async def check_freshness_and_scrape():
         asyncio.create_task(scrape_chain(slug))
 
 
+async def sync_all_purchase_histories():
+    """Sync purchase histories for all users with valid supermarket credentials."""
+    logger.info("Starting daily purchase history sync.")
+    try:
+        from app.services.purchase_sync import PurchaseSyncService
+        synced = await PurchaseSyncService.sync_all_users()
+        logger.info("Purchase history sync complete: %d users synced.", synced)
+    except Exception:
+        logger.exception("Purchase history sync failed.")
+
+
 async def cleanup_expired_offers():
     """Delete offers that expired more than 30 days ago.
 
@@ -435,6 +446,15 @@ def start_scheduler() -> AsyncIOScheduler:
         CronTrigger(day_of_week="sun", hour=2, minute=0, timezone=TZ),
         id="cleanup_expired_offers",
         name="Delete offers expired >30 days ago",
+        replace_existing=True,
+    )
+
+    # Purchase history sync: daily at 5:00 AM
+    scheduler.add_job(
+        sync_all_purchase_histories,
+        CronTrigger(hour=5, minute=0, timezone=TZ),
+        id="sync_purchase_histories",
+        name="Sync purchase histories for all users",
         replace_existing=True,
     )
 

@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api import auth, chains, flyers, offers, products, scraping, stores, users
+from app.api import auth, chains, flyers, offers, products, purchases, scraping, stores, users
 from app.api import web_push
 from app.config import get_settings
 from app.database import async_session
@@ -87,6 +87,7 @@ app.include_router(products.router, prefix="/api/v1")
 app.include_router(offers.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
 app.include_router(scraping.router, prefix="/api/v1")
+app.include_router(purchases.router, prefix="/api/v1")
 app.include_router(web_push.router, prefix="/api/v1")
 
 
