@@ -471,7 +471,7 @@ const styles = StyleSheet.create({
   headerSubtitle: { color: glassColors.greenSubtle, marginTop: 2 },
   searchContainer: { paddingHorizontal: 12, marginTop: 12 },
   searchbar: { ...glassSearchbar } as any,
-  searchInput: { fontSize: 14 },
+  searchInput: { fontSize: 16 },
   searchResults: { marginTop: 8 },
   chips: { paddingHorizontal: 12, paddingVertical: 12, flexGrow: 0 },
   chip: {
