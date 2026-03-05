@@ -155,3 +155,27 @@ class ShoppingListItem(Base):
     user = relationship("UserProfile", back_populates="shopping_list")
     product = relationship("Product")
     offer = relationship("Offer")
+    linked_products = relationship("ShoppingListItemProduct", back_populates="item", cascade="all, delete-orphan")
+
+
+class ShoppingListItemProduct(Base):
+    __tablename__ = "shopping_list_item_products"
+    __table_args__ = (
+        UniqueConstraint("item_id", "product_id", name="uq_slp_item_product"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("shopping_list_items.id", ondelete="CASCADE")
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    item = relationship("ShoppingListItem", back_populates="linked_products")
+    product = relationship("Product")

@@ -1,28 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ActivityIndicator, Button, Chip, Searchbar, Snackbar, Text } from "react-native-paper";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
+import type { SmartSearchResult } from "../../services/api";
 import {
   addToShoppingList,
   getActiveOffers,
   getBestOffers,
   getHistoricLows,
-  getShoppingListCompare,
   getShoppingListCount,
-  getShoppingListSuggestions,
+  getShoppingListCompare,
   smartSearch,
 } from "../../services/api";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import OfferCard from "../../components/OfferCard";
 import SmartCompareCard from "../../components/SmartCompareCard";
-import ChainTotalsSummary from "../../components/ChainTotalsSummary";
-import ShoppingListCompareGrid from "../../components/ShoppingListCompareGrid";
-import SuggestionsSection from "../../components/SuggestionsSection";
-import TripOptimizer from "../../components/TripOptimizer";
+import HomeSpesaSummary from "../../components/HomeSpesaSummary";
 import { useAppStore } from "../../stores/useAppStore";
-import { glassColors, glassChip, glassPanel, glassSearchbar } from "../../styles/glassStyles";
+import { glassCard, glassColors, glassChip, glassPanel, glassSearchbar } from "../../styles/glassStyles";
 
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
 
@@ -35,8 +32,8 @@ export default function HomeScreen() {
   const [selectedChain, setSelectedChain] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [showOptimizer, setShowOptimizer] = useState(false);
   const [snackMsg, setSnackMsg] = useState("");
+  const [selectedProducts, setSelectedProducts] = useState<Map<string, SmartSearchResult>>(new Map());
 
   // Debounce search input
   useEffect(() => {
@@ -58,7 +55,7 @@ export default function HomeScreen() {
   // Smart search (API) — fires alongside local results
   const { data: searchResults, isLoading: loadingSearch } = useQuery({
     queryKey: ["smartSearch", debouncedQuery],
-    queryFn: () => smartSearch(debouncedQuery, 5),
+    queryFn: () => smartSearch(debouncedQuery, 15),
     enabled: isSearching,
   });
 
@@ -70,13 +67,9 @@ export default function HomeScreen() {
   });
   const hasShoppingList = isLoggedIn && (shoppingListCount ?? 0) > 0;
 
-  // Shopping list compare
-  const {
-    data: compareData,
-    isLoading: loadingCompare,
-    refetch: refetchCompare,
-  } = useQuery({
-    queryKey: ["shoppingListCompare", nearbyChains.join(",")],
+  // Shopping list compare data
+  const { data: compareData, isLoading: loadingCompare } = useQuery({
+    queryKey: ["shoppingListCompare", nearbyChains],
     queryFn: () =>
       getShoppingListCompare(
         nearbyChains.length > 0 ? nearbyChains.join(",") : undefined
@@ -84,19 +77,9 @@ export default function HomeScreen() {
     enabled: hasShoppingList,
   });
 
-  // Shopping list suggestions
-  const {
-    data: suggestionsData,
-    refetch: refetchSuggestions,
-  } = useQuery({
-    queryKey: ["shoppingListSuggestions"],
-    queryFn: () => getShoppingListSuggestions(),
-    enabled: hasShoppingList,
-  });
-
-  // Add to shopping list mutation (for quick-add and suggestions)
+  // Add to shopping list mutation (for quick-add and multi-select)
   const addMutation = useMutation({
-    mutationFn: (params: { product_id?: string; custom_name?: string }) =>
+    mutationFn: (params: { product_id?: string; product_ids?: string[]; custom_name?: string }) =>
       addToShoppingList(params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
@@ -166,16 +149,37 @@ export default function HomeScreen() {
     refetchBest();
     refetchActive();
     refetchHistoric();
-    if (hasShoppingList) {
-      refetchCompare();
-      refetchSuggestions();
-    }
-  }, [refetchBest, refetchActive, refetchHistoric, refetchCompare, refetchSuggestions, hasShoppingList]);
+  }, [refetchBest, refetchActive, refetchHistoric]);
 
   // Quick-add: submit search query as custom_name to shopping list
   const handleQuickAdd = () => {
     if (!isLoggedIn || !searchQuery.trim()) return;
     addMutation.mutate({ custom_name: searchQuery.trim() });
+    setSearchQuery("");
+  };
+
+  // Toggle product selection for multi-add
+  const toggleProductSelection = useCallback((result: SmartSearchResult) => {
+    setSelectedProducts((prev) => {
+      const next = new Map(prev);
+      if (next.has(result.product.id)) {
+        next.delete(result.product.id);
+      } else {
+        next.set(result.product.id, result);
+      }
+      return next;
+    });
+  }, []);
+
+  // Multi-add: add selected products as linked items
+  const handleMultiAdd = () => {
+    if (!isLoggedIn || selectedProducts.size === 0) return;
+    const ids = Array.from(selectedProducts.keys());
+    addMutation.mutate({
+      product_ids: ids,
+      custom_name: searchQuery.trim() || undefined,
+    });
+    setSelectedProducts(new Map());
     setSearchQuery("");
   };
 
@@ -231,7 +235,13 @@ export default function HomeScreen() {
               <ActivityIndicator style={{ marginTop: 20 }} />
             ) : searchResults && searchResults.length > 0 ? (
               searchResults.map((result) => (
-                <SmartCompareCard key={result.product.id} result={result} />
+                <SmartCompareCard
+                  key={result.product.id}
+                  result={result}
+                  selectable={isLoggedIn}
+                  isSelected={selectedProducts.has(result.product.id)}
+                  onToggleSelect={() => toggleProductSelection(result)}
+                />
               ))
             ) : (
               <Text variant="bodyMedium" style={styles.emptyText}>
@@ -241,36 +251,37 @@ export default function HomeScreen() {
           </View>
         ) : (
           <>
-            {/* ─── STATE 1: Logged in with shopping list items ─── */}
+            {/* ─── Shopping list summary ─── */}
             {hasShoppingList && (
-              <>
-                {/* Chain totals comparison */}
-                {loadingCompare ? (
-                  <ActivityIndicator style={{ marginTop: 16 }} />
-                ) : compareData && compareData.chain_totals.length > 0 ? (
-                  <>
-                    <ChainTotalsSummary
-                      chainTotals={compareData.chain_totals}
-                      itemsTotal={compareData.items_total}
-                      multiStoreTotal={compareData.multi_store_total}
-                      potentialSavings={compareData.potential_savings}
-                      onOpenOptimizer={() => setShowOptimizer(true)}
-                    />
-                    <ShoppingListCompareGrid items={compareData.items} />
-                  </>
-                ) : null}
-
-                {/* Suggestions */}
-                {suggestionsData && (
-                  <SuggestionsSection
-                    alternatives={suggestionsData.alternatives}
-                    complementary={suggestionsData.complementary}
-                    onAddToList={(productId) =>
-                      addMutation.mutate({ product_id: productId })
-                    }
+              compareData ? (
+                <HomeSpesaSummary
+                  compareData={compareData}
+                  itemCount={shoppingListCount ?? 0}
+                />
+              ) : (
+                <Pressable
+                  style={styles.shoppingBanner}
+                  onPress={() => router.push("/(tabs)/watchlist")}
+                >
+                  <MaterialCommunityIcons
+                    name="cart-check"
+                    size={20}
+                    color={glassColors.greenDark}
                   />
-                )}
-              </>
+                  <Text style={styles.bannerText}>
+                    {shoppingListCount} articol{shoppingListCount === 1 ? "o" : "i"} nella lista
+                  </Text>
+                  {loadingCompare ? (
+                    <ActivityIndicator size={14} color={glassColors.greenMedium} />
+                  ) : (
+                    <MaterialCommunityIcons
+                      name="chevron-right"
+                      size={18}
+                      color={glassColors.textMuted}
+                    />
+                  )}
+                </Pressable>
+              )
             )}
 
             {/* ─── STATE 2: Logged in but empty list ─── */}
@@ -351,18 +362,17 @@ export default function HomeScreen() {
               Migliori Offerte
             </Text>
             {filteredBest.length > 0 ? (
-              <FlatList
+              <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                data={filteredBest}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <View style={styles.horizontalCard}>
+                contentContainerStyle={styles.horizontalList}
+              >
+                {filteredBest.map((item) => (
+                  <View key={item.id} style={styles.horizontalCard}>
                     <OfferCard offer={item} compact />
                   </View>
-                )}
-                contentContainerStyle={styles.horizontalList}
-              />
+                ))}
+              </ScrollView>
             ) : (
               <Text variant="bodyMedium" style={styles.emptyText}>
                 Nessuna offerta disponibile
@@ -381,18 +391,17 @@ export default function HomeScreen() {
               </Text>
             </View>
             {filteredHistoric.length > 0 ? (
-              <FlatList
+              <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                data={filteredHistoric}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <View style={styles.horizontalCard}>
+                contentContainerStyle={styles.horizontalList}
+              >
+                {filteredHistoric.map((item) => (
+                  <View key={item.id} style={styles.horizontalCard}>
                     <OfferCard offer={item} compact />
                   </View>
-                )}
-                contentContainerStyle={styles.horizontalList}
-              />
+                ))}
+              </ScrollView>
             ) : (
               <Text variant="bodyMedium" style={styles.emptyText}>
                 Nessun minimo storico disponibile
@@ -412,11 +421,28 @@ export default function HomeScreen() {
         )}
       </ScrollView>
 
-      {/* Trip Optimizer Modal */}
-      <TripOptimizer
-        visible={showOptimizer}
-        onDismiss={() => setShowOptimizer(false)}
-      />
+      {/* Floating action: multi-add to shopping list */}
+      {selectedProducts.size > 0 && (
+        <View style={styles.floatingAction}>
+          <Button
+            mode="contained"
+            onPress={handleMultiAdd}
+            loading={addMutation.isPending}
+            style={styles.floatingBtn}
+            labelStyle={styles.floatingBtnLabel}
+            icon="cart-plus"
+          >
+            Aggiungi {selectedProducts.size} alla lista
+          </Button>
+          <Button
+            mode="text"
+            onPress={() => setSelectedProducts(new Map())}
+            labelStyle={styles.floatingCancelLabel}
+          >
+            Annulla
+          </Button>
+        </View>
+      )}
 
       {/* Snackbar */}
       <Snackbar
@@ -495,6 +521,53 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderRadius: 16,
     backgroundColor: glassColors.greenMedium,
+  },
+  shoppingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 12,
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    ...glassCard,
+    borderColor: "rgba(46,125,50,0.2)",
+  } as any,
+  bannerText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    color: glassColors.greenDark,
+  },
+  floatingAction: {
+    position: "absolute",
+    bottom: 80,
+    left: 12,
+    right: 12,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    zIndex: 100,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  floatingBtn: {
+    width: "100%",
+    borderRadius: 12,
+    backgroundColor: glassColors.greenDark,
+  },
+  floatingBtnLabel: {
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  floatingCancelLabel: {
+    color: "#666",
+    fontSize: 13,
   },
   snackbar: {
     marginBottom: 80,

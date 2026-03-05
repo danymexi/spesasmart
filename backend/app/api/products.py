@@ -13,10 +13,26 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from sqlalchemy import or_
+
 from app.database import get_db
 from app.models import Chain, Offer, Product
 
 router = APIRouter(prefix="/products", tags=["products"])
+
+
+def _build_search_filter(q: str):
+    """Build a search filter that matches each word against name OR brand.
+
+    "latte valtellina" → name+brand must contain both "latte" AND "valtellina"
+    (each word can be in either field).
+    """
+    words = q.strip().split()
+    conditions = []
+    for word in words:
+        pattern = f"%{word}%"
+        conditions.append(or_(Product.name.ilike(pattern), Product.brand.ilike(pattern)))
+    return conditions
 
 
 class ProductResponse(BaseModel):
@@ -241,7 +257,8 @@ async def get_catalog_products(
     if brand:
         query = query.where(Product.brand.ilike(f"%{brand}%"))
     if q:
-        query = query.where(Product.name.ilike(f"%{q}%"))
+        for cond in _build_search_filter(q):
+            query = query.where(cond)
 
     # When filtering by chain, only show products with an active offer in that chain
     if chain:
@@ -311,7 +328,7 @@ def _normalize_product_name(name: str) -> str:
     """Normalize a product name for fuzzy grouping."""
     n = name.lower().strip()
     # Remove common quantity/size suffixes and trailing numbers
-    n = re.sub(r"\b\d+\s*(pz|pezzi|rotoli|rotoloni|x|ml|cl|l|g|kg|gr)\b", "", n)
+    n = re.sub(r"\b\d+\s*(pz|pezzi|rotoli|x|ml|cl|l|g|kg|gr)\b", "", n)
     n = re.sub(r"\bx\s*\d+\b", "", n)
     # Remove "carta igienica", "carta cucina" etc. (generic product type)
     n = re.sub(r"\bcarta\s+(igienica|cucina|assorbente)\b", "", n)
@@ -485,7 +502,8 @@ async def get_catalog_grouped(
     if brand:
         prod_query = prod_query.where(Product.brand.ilike(f"%{brand}%"))
     if q:
-        prod_query = prod_query.where(Product.name.ilike(f"%{q}%"))
+        for cond in _build_search_filter(q):
+            prod_query = prod_query.where(cond)
 
     # If chain filter, only products that have an active offer in that chain
     if chain:
@@ -722,11 +740,11 @@ async def smart_search(
     from app.services.price_analyzer import PriceAnalyzer
 
     # Find matching products
+    smart_query = select(Product)
+    for cond in _build_search_filter(q):
+        smart_query = smart_query.where(cond)
     prod_result = await db.execute(
-        select(Product)
-        .where(Product.name.ilike(f"%{q}%"))
-        .order_by(Product.name)
-        .limit(limit)
+        smart_query.order_by(Product.name).limit(limit)
     )
     products = list(prod_result.scalars().all())
 

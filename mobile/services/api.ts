@@ -308,6 +308,12 @@ export interface AuthResponse {
   user: UserProfile;
 }
 
+export interface LinkedProductDetail {
+  id: string;
+  name: string;
+  brand: string | null;
+}
+
 export interface ShoppingListItem {
   id: string;
   product_id: string | null;
@@ -320,6 +326,9 @@ export interface ShoppingListItem {
   chain_name: string | null;
   offer_price: number | null;
   notes: string | null;
+  linked_product_ids: string[];
+  linked_product_count: number;
+  linked_products_details: LinkedProductDetail[];
   created_at: string;
 }
 
@@ -354,6 +363,7 @@ export interface ChainPriceInfo {
 
 export interface CompareItemInfo {
   item_id: string;
+  product_id: string | null;
   display_name: string;
   image_url: string | null;
   quantity: number;
@@ -727,6 +737,7 @@ export async function getShoppingListCount(): Promise<number> {
 
 export async function addToShoppingList(params: {
   product_id?: string;
+  product_ids?: string[];
   custom_name?: string;
   quantity?: number;
   unit?: string;
@@ -750,6 +761,14 @@ export async function removeShoppingItem(itemId: string): Promise<void> {
 
 export async function clearCheckedItems(): Promise<void> {
   await apiClient.delete("/users/me/shopping-list/checked");
+}
+
+export async function updateLinkedProducts(itemId: string, productIds: string[]): Promise<ShoppingListItem> {
+  const res = await apiClient.put<ShoppingListItem>(
+    `/users/me/shopping-list/${itemId}/products`,
+    { product_ids: productIds }
+  );
+  return res.data;
 }
 
 // ── Compare Prices ──────────────────────────────────────────────────────────

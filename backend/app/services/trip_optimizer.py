@@ -37,7 +37,7 @@ _FILLER_WORDS = frozenset({
 def _normalize_product_name(name: str) -> str:
     """Normalize a product name for fuzzy grouping (copied from products.py)."""
     n = name.lower().strip()
-    n = re.sub(r"\b\d+\s*(pz|pezzi|rotoli|rotoloni|x|ml|cl|l|g|kg|gr)\b", "", n)
+    n = re.sub(r"\b\d+\s*(pz|pezzi|rotoli|x|ml|cl|l|g|kg|gr)\b", "", n)
     n = re.sub(r"\bx\s*\d+\b", "", n)
     n = re.sub(r"\bcarta\s+(igienica|cucina|assorbente)\b", "", n)
     n = re.sub(r"\s+", " ", n).strip()

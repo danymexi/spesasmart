@@ -1,20 +1,23 @@
 """Product image finder service.
 
 Searches for product images using:
-  1. Open Food Facts (free API, reliable)
-  2. Google Image Search (fallback)
+  1. Claude Haiku to generate optimized search queries (batch)
+  2. Open Food Facts (free API, reliable)
+  3. Google Image Search (fallback)
 
 Tracks search attempts via `image_searched_at` to avoid re-searching
 products that have already been tried recently.
 """
 
 import asyncio
+import json
 import logging
+import os
 import re
 from difflib import SequenceMatcher
 
 import httpx
-from sqlalchemy import select, func, or_, text
+from sqlalchemy import select, func, or_, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Product
@@ -49,7 +52,28 @@ BROKEN_DOMAINS = {
 }
 
 # Minimum similarity ratio (0-1) for Open Food Facts name matching
-OFF_MIN_SIMILARITY = 0.45
+OFF_MIN_SIMILARITY = 0.40
+
+# Claude batch size for query generation
+CLAUDE_BATCH_SIZE = 40
+
+CLAUDE_SYSTEM_PROMPT = """\
+Sei un assistente che genera query di ricerca per trovare immagini di prodotti \
+da supermercato italiano.
+
+Riceverai una lista JSON di prodotti con "idx", "name" e "brand".
+Per ciascuno restituisci un oggetto con:
+- "idx": lo stesso indice ricevuto
+- "off_query": query ottimizzata per Open Food Facts (brand + nome pulito del \
+prodotto, senza quantita/peso/pezzi). Esempio: "Mulino Bianco Fette Biscottate"
+- "google_query": query per Google Images (brand + prodotto + "prodotto \
+supermercato"). Esempio: "Mulino Bianco Fette Biscottate prodotto supermercato"
+
+Regole:
+- Rimuovi quantita, pesi, formati (es. "500g", "6x1.5L", "12 pz")
+- Mantieni il brand se presente
+- Se il nome e' criptico o troncato, ricostruisci il nome piu probabile
+- Restituisci SOLO un JSON array valido, nessun commento"""
 
 
 async def _check_url(url: str, client: httpx.AsyncClient) -> bool:
@@ -62,21 +86,14 @@ async def _check_url(url: str, client: httpx.AsyncClient) -> bool:
 
 
 async def _search_off(
-    product_name: str, brand: str | None, client: httpx.AsyncClient
+    query: str, client: httpx.AsyncClient
 ) -> str | None:
-    """Search Open Food Facts for a product image.
-
-    Returns the image URL if a good match is found, None otherwise.
-    """
-    search_terms = product_name
-    if brand:
-        search_terms = f"{brand} {product_name}"
-
+    """Search Open Food Facts for a product image."""
     try:
         r = await client.get(
             "https://world.openfoodfacts.org/cgi/search.pl",
             params={
-                "search_terms": search_terms,
+                "search_terms": query,
                 "json": "1",
                 "page_size": "5",
                 "fields": "product_name,image_url,brands",
@@ -89,6 +106,7 @@ async def _search_off(
         data = r.json()
         products = data.get("products", [])
 
+        target = query.lower()
         for p in products:
             off_name = (p.get("product_name") or "").lower()
             off_brands = (p.get("brands") or "").lower()
@@ -97,22 +115,19 @@ async def _search_off(
             if not image_url:
                 continue
 
-            # Check name similarity
-            target = product_name.lower()
             ratio = SequenceMatcher(None, target, off_name).ratio()
-
-            # Boost similarity if brand matches
-            if brand and brand.lower() in off_brands:
+            # Boost if brands overlap
+            if any(w in off_brands for w in target.split() if len(w) > 3):
                 ratio += 0.15
 
             if ratio >= OFF_MIN_SIMILARITY:
                 logger.debug(
-                    "OFF match for %r: %r (ratio=%.2f)", product_name, off_name, ratio
+                    "OFF match for %r: %r (ratio=%.2f)", query, off_name, ratio
                 )
                 return image_url
 
     except Exception as e:
-        logger.warning("Open Food Facts search failed for %r: %s", product_name, e)
+        logger.warning("Open Food Facts search failed for %r: %s", query, e)
 
     return None
 
@@ -144,8 +159,86 @@ async def _search_google(query: str, client: httpx.AsyncClient) -> str | None:
     return None
 
 
+async def _generate_queries_batch(
+    products: list[Product],
+    api_key: str,
+) -> dict[str, dict]:
+    """Use Claude Haiku to generate optimized search queries in batch.
+
+    Returns a dict mapping product.id (str) -> {"off_query": ..., "google_query": ...}
+    """
+    import anthropic
+
+    payload = []
+    idx_to_id: dict[int, str] = {}
+    for i, p in enumerate(products):
+        payload.append({
+            "idx": i,
+            "name": p.name,
+            "brand": p.brand or "",
+        })
+        idx_to_id[i] = str(p.id)
+
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+    result_map: dict[str, dict] = {}
+
+    try:
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            system=CLAUDE_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": json.dumps(payload, ensure_ascii=False),
+            }],
+        )
+        raw = response.content[0].text
+
+        # Parse JSON (strip markdown fences if present)
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError:
+            cleaned = raw
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+            if cleaned.endswith("```"):
+                cleaned = cleaned.rsplit("```", 1)[0]
+            items = json.loads(cleaned.strip())
+
+        for item in items:
+            idx = item.get("idx")
+            if idx is not None and idx in idx_to_id:
+                pid = idx_to_id[idx]
+                result_map[pid] = {
+                    "off_query": item.get("off_query", ""),
+                    "google_query": item.get("google_query", ""),
+                }
+
+        logger.info(
+            "Claude generated queries for %d/%d products.",
+            len(result_map), len(products),
+        )
+
+    except Exception as e:
+        logger.warning("Claude query generation failed: %s", e)
+        # Fallback: use raw product name + brand
+        for p in products:
+            pid = str(p.id)
+            name = p.name
+            brand = p.brand or ""
+            result_map[pid] = {
+                "off_query": f"{brand} {name}".strip(),
+                "google_query": f"{brand} {name} prodotto supermercato".strip(),
+            }
+
+    return result_map
+
+
 class ProductImageFinder:
     """Find and update images for products missing or broken image_url."""
+
+    def __init__(self, anthropic_api_key: str | None = None):
+        self.anthropic_api_key = anthropic_api_key
 
     async def backfill(
         self, session: AsyncSession, limit: int = 50
@@ -155,6 +248,15 @@ class ProductImageFinder:
         Skips products searched in the last 7 days (via image_searched_at).
         """
         seven_days_ago = text("now() - interval '7 days'")
+
+        # Phase 0: Null out known broken domain URLs so they appear as "no image"
+        for domain in BROKEN_DOMAINS:
+            await session.execute(
+                update(Product)
+                .where(Product.image_url.ilike(f"%{domain}%"))
+                .values(image_url=None, image_searched_at=None)
+            )
+        await session.flush()
 
         # Products with no image and not recently searched
         result = await session.execute(
@@ -169,55 +271,61 @@ class ProductImageFinder:
             .order_by(func.random())
             .limit(limit)
         )
-        products_no_img = list(result.scalars().all())
+        products = list(result.scalars().all())
 
-        # Products with known broken domains
-        remaining = limit - len(products_no_img)
-        products_broken: list[Product] = []
-        if remaining > 0 and BROKEN_DOMAINS:
-            conditions = [
-                Product.image_url.ilike(f"%{d}%") for d in BROKEN_DOMAINS
-            ]
-            result = await session.execute(
-                select(Product)
-                .where(
-                    or_(*conditions),
-                    or_(
-                        Product.image_searched_at.is_(None),
-                        Product.image_searched_at < seven_days_ago,
-                    ),
-                )
-                .order_by(func.random())
-                .limit(remaining)
-            )
-            products_broken = list(result.scalars().all())
-
-        products = products_no_img + products_broken
         if not products:
             logger.info("No products needing images found.")
             return 0
 
-        logger.info(
-            "Found %d products to fix (%d no image, %d broken URL).",
-            len(products), len(products_no_img), len(products_broken),
-        )
+        logger.info("Found %d products to search images for.", len(products))
 
+        # Phase 1: Generate optimized search queries via Claude (in batches)
+        query_map: dict[str, dict] = {}
+        if self.anthropic_api_key:
+            for batch_start in range(0, len(products), CLAUDE_BATCH_SIZE):
+                batch = products[batch_start:batch_start + CLAUDE_BATCH_SIZE]
+                batch_queries = await _generate_queries_batch(
+                    batch, self.anthropic_api_key
+                )
+                query_map.update(batch_queries)
+                if batch_start + CLAUDE_BATCH_SIZE < len(products):
+                    await asyncio.sleep(1.0)
+        else:
+            # No Claude key: fallback to simple queries
+            for p in products:
+                pid = str(p.id)
+                brand = p.brand or ""
+                query_map[pid] = {
+                    "off_query": f"{brand} {p.name}".strip(),
+                    "google_query": f"{brand} {p.name} prodotto supermercato".strip(),
+                }
+
+        # Phase 2: Search for images using the generated queries
         updated = 0
         async with httpx.AsyncClient(follow_redirects=True) as client:
             for idx, product in enumerate(products, 1):
-                image_url = await self._find_image(product, client)
+                pid = str(product.id)
+                queries = query_map.get(pid, {})
+                off_q = queries.get("off_query", product.name)
+                google_q = queries.get("google_query", f"{product.name} prodotto")
+
+                image_url = await self._find_image(
+                    product, off_q, google_q, client
+                )
 
                 if image_url:
                     product.image_url = image_url
                     updated += 1
                     logger.info(
-                        "Found image for %s (%s): %s",
-                        product.name, product.brand, image_url[:80],
+                        "[%d/%d] Found image for %s (%s): %s",
+                        idx, len(products),
+                        product.name[:50], product.brand, image_url[:80],
                     )
                 else:
                     logger.debug(
-                        "No image found for %s (%s)",
-                        product.name, product.brand,
+                        "[%d/%d] No image for %s (%s)",
+                        idx, len(products),
+                        product.name[:50], product.brand,
                     )
 
                 # Mark search attempt regardless of result
@@ -231,42 +339,39 @@ class ProductImageFinder:
                     )
 
                 # Rate limit between searches
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(1.0)
 
         await session.commit()
 
         logger.info(
-            "Image backfill: %d/%d products updated.", updated, len(products)
+            "Image backfill complete: %d/%d products updated.", updated, len(products)
         )
         return updated
 
     async def _find_image(
-        self, product: Product, client: httpx.AsyncClient
+        self,
+        product: Product,
+        off_query: str,
+        google_query: str,
+        client: httpx.AsyncClient,
     ) -> str | None:
         """Try sources in order: Open Food Facts, then Google."""
 
-        # 1. Open Food Facts (primary — free, reliable)
-        url = await _search_off(product.name, product.brand, client)
+        # 1. Open Food Facts with Claude-optimized query
+        url = await _search_off(off_query, client)
         if url and await _check_url(url, client):
-            logger.debug("Image from OFF for %s", product.name)
             return url
 
-        # 2. Google Images — try brand+name first, then name only
-        queries = self._build_google_queries(product)
-        for query in queries:
-            url = await _search_google(query, client)
+        # 2. Google Images with Claude-optimized query
+        url = await _search_google(google_query, client)
+        if url and await _check_url(url, client):
+            return url
+        await asyncio.sleep(1.5)
+
+        # 3. Google fallback: try just product name
+        if google_query != f"{product.name} prodotto":
+            url = await _search_google(f"{product.name} prodotto", client)
             if url and await _check_url(url, client):
-                logger.debug("Image from Google for %s (query=%r)", product.name, query)
                 return url
-            # Rate limit between Google queries
-            await asyncio.sleep(2.0)
 
         return None
-
-    def _build_google_queries(self, product: Product) -> list[str]:
-        """Build ordered list of Google search queries for a product."""
-        queries = []
-        if product.brand:
-            queries.append(f"{product.brand} {product.name} supermercato")
-        queries.append(f"{product.name} prodotto")
-        return queries

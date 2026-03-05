@@ -29,10 +29,8 @@ export default function ShoppingListCompareGrid({ items }: Props) {
           style={styles.card}
           activeOpacity={0.7}
           onPress={() => {
-            // Navigate if this item has chain prices (i.e., a linked product)
-            if (item.chain_prices.length > 0) {
-              // No direct product_id available, so use first chain price context
-              // The card is informational - tap behavior is optional
+            if (item.product_id) {
+              router.push(`/product/${item.product_id}`);
             }
           }}
         >

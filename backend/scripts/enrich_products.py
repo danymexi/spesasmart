@@ -1,13 +1,14 @@
-"""Enrich products with Gemini AI: category, subcategory, and unit.
+"""Enrich products with AI: category, subcategory, and unit.
 
-Finds products where category IS NULL and sends them in batches to Gemini
-for classification. Then backfills unit_reference on offers whose products
-now have a unit.
+Supports both Claude (Anthropic) and Gemini (Google) as AI backends.
+Finds products where category IS NULL or 'Supermercato' (generic) and sends
+them in batches for classification. Then backfills unit_reference on offers.
 
 Run from the backend directory:
-    PYTHONPATH=. python scripts/enrich_products.py
-    PYTHONPATH=. python scripts/enrich_products.py --dry-run
-    PYTHONPATH=. python scripts/enrich_products.py --batch-size 10 --sleep 8
+    PYTHONPATH=. python scripts/enrich_products.py --target supermercato
+    PYTHONPATH=. python scripts/enrich_products.py --target supermercato --provider claude
+    PYTHONPATH=. python scripts/enrich_products.py --dry-run --target all
+    PYTHONPATH=. python scripts/enrich_products.py --batch-size 50 --sleep 2 --provider claude
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ import logging
 import re
 import time
 
-import google.generativeai as genai
 from sqlalchemy import select, update
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -48,13 +48,20 @@ VALID_CATEGORIES = {
     "Caffe e Te",
     "Neonati e Infanzia",
     "Pet Care",
+    "Gastronomia",
+    "Benessere e Intolleranze",
     "Altro",
 }
 
+_CATEGORIES_STR = ", ".join(f'"{c}"' for c in sorted(VALID_CATEGORIES))
+
+# Categories considered "generic" — products with these get re-classified
+_GENERIC_CATEGORIES = {"Supermercato", None}
+
 # ---------------------------------------------------------------------------
-# Gemini system prompt
+# System prompt (shared across providers)
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT = f"""\
 Sei un assistente specializzato nella classificazione di prodotti da supermercato italiano.
 
 Riceverai una lista di prodotti in formato JSON, ciascuno con "id", "name" e "brand".
@@ -62,22 +69,72 @@ Per ogni prodotto devi restituire un oggetto JSON con:
 
 - "id" (int) -- lo stesso id ricevuto in input, per il matching.
 - "category" (string) -- UNA fra queste categorie (tassativo, scegli la piu appropriata):
-  "Latticini", "Frutta e Verdura", "Bevande", "Carne", "Pesce", "Surgelati",
-  "Dolci e Snack", "Igiene Personale", "Pulizia Casa", "Pasta e Riso",
-  "Pane e Cereali", "Salumi e Formaggi", "Condimenti e Conserve", "Uova",
-  "Alcolici", "Acqua", "Caffe e Te", "Neonati e Infanzia", "Pet Care", "Altro".
+  {_CATEGORIES_STR}.
 - "subcategory" (string) -- sottocategoria libera in italiano (es. "Yogurt", \
 "Shampoo", "Birra", "Pasta fresca").
 - "unit" (string) -- la confezione tipica di questo prodotto come si trova al \
 supermercato (es. "500 g", "1 kg", "1 L", "6 x 1.5 L", "200 ml", "1 pz"). \
 Se non riesci a determinarlo, usa null.
 
-Restituisci SOLO un JSON array valido. Nessun commento, nessun markdown fence.
-"""
+Restituisci SOLO un JSON array valido. Nessun commento, nessun markdown fence."""
 
 
-def _parse_gemini_json(raw: str) -> list[dict]:
-    """Parse JSON from Gemini response, stripping markdown fences if needed."""
+# ---------------------------------------------------------------------------
+# AI Provider abstraction
+# ---------------------------------------------------------------------------
+
+class AIProvider:
+    """Base class for AI providers."""
+    async def classify(self, payload_json: str) -> str:
+        raise NotImplementedError
+
+
+class ClaudeProvider(AIProvider):
+    """Anthropic Claude provider."""
+
+    def __init__(self, api_key: str, model: str = "claude-haiku-4-5-20251001"):
+        import anthropic
+        self.client = anthropic.AsyncAnthropic(api_key=api_key)
+        self.model = model
+
+    async def classify(self, payload_json: str) -> str:
+        response = await self.client.messages.create(
+            model=self.model,
+            max_tokens=8192,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": payload_json}],
+        )
+        return response.content[0].text
+
+
+class GeminiProvider(AIProvider):
+    """Google Gemini provider."""
+
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(
+            model_name=model,
+            system_instruction=SYSTEM_PROMPT,
+            generation_config=genai.GenerationConfig(
+                temperature=0.1,
+                top_p=0.95,
+                max_output_tokens=8192,
+                response_mime_type="application/json",
+            ),
+        )
+
+    async def classify(self, payload_json: str) -> str:
+        response = await self.model.generate_content_async(payload_json)
+        return response.text.strip()
+
+
+# ---------------------------------------------------------------------------
+# JSON parsing
+# ---------------------------------------------------------------------------
+
+def _parse_json_response(raw: str) -> list[dict]:
+    """Parse JSON from AI response, stripping markdown fences if needed."""
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -89,23 +146,8 @@ def _parse_gemini_json(raw: str) -> list[dict]:
         try:
             return json.loads(cleaned.strip())
         except json.JSONDecodeError:
-            logger.error("Could not parse Gemini response:\n%s", raw[:2000])
+            logger.error("Could not parse AI response:\n%s", raw[:2000])
             return []
-
-
-def _init_gemini_model(api_key: str, model_name: str):
-    """Initialise Gemini model (same pattern as pipeline.py)."""
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(
-        model_name=model_name,
-        system_instruction=SYSTEM_PROMPT,
-        generation_config=genai.GenerationConfig(
-            temperature=0.1,
-            top_p=0.95,
-            max_output_tokens=8192,
-            response_mime_type="application/json",
-        ),
-    )
 
 
 def _infer_unit_reference_from_unit(unit: str | None) -> str | None:
@@ -122,11 +164,17 @@ def _infer_unit_reference_from_unit(unit: str | None) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Main enrichment logic
+# ---------------------------------------------------------------------------
+
 async def enrich_products(
     dry_run: bool = False,
     batch_size: int = 25,
     sleep_seconds: int = 5,
     model_name: str | None = None,
+    target: str = "null",
+    provider_name: str = "claude",
 ) -> None:
     from app.config import get_settings
     from app.database import async_session
@@ -135,30 +183,50 @@ async def enrich_products(
 
     settings = get_settings()
 
-    if not settings.gemini_api_key:
-        logger.error("GEMINI_API_KEY not set. Aborting.")
-        return
-
-    gemini_model_name = model_name or settings.gemini_model
-    logger.info("Using Gemini model: %s", gemini_model_name)
-    model = _init_gemini_model(settings.gemini_api_key, gemini_model_name)
+    # Initialise AI provider
+    if provider_name == "claude":
+        api_key = settings.anthropic_api_key
+        if not api_key:
+            logger.error("ANTHROPIC_API_KEY not set. Aborting.")
+            return
+        model = model_name or "claude-haiku-4-5-20251001"
+        provider = ClaudeProvider(api_key, model)
+        logger.info("Using Claude model: %s", model)
+    else:
+        api_key = settings.gemini_api_key
+        if not api_key:
+            logger.error("GEMINI_API_KEY not set. Aborting.")
+            return
+        model = model_name or settings.gemini_model
+        provider = GeminiProvider(api_key, model)
+        logger.info("Using Gemini model: %s", model)
 
     # ------------------------------------------------------------------
     # Phase 1: Enrich products with category/subcategory/unit
     # ------------------------------------------------------------------
     async with async_session() as session:
-        result = await session.execute(
-            select(
-                Product.id,
-                Product.name,
-                Product.brand,
-                Product.category,
-                Product.subcategory,
-                Product.unit,
-            ).where(Product.category.is_(None))
+        base_query = select(
+            Product.id,
+            Product.name,
+            Product.brand,
+            Product.category,
+            Product.subcategory,
+            Product.unit,
         )
+
+        if target == "supermercato":
+            query = base_query.where(Product.category == "Supermercato")
+        elif target == "all":
+            from sqlalchemy import or_
+            query = base_query.where(
+                or_(Product.category.is_(None), Product.category == "Supermercato")
+            )
+        else:  # "null"
+            query = base_query.where(Product.category.is_(None))
+
+        result = await session.execute(query)
         products = result.all()
-        logger.info("Found %d products with category=NULL.", len(products))
+        logger.info("Found %d products to enrich (target=%s).", len(products), target)
 
         if not products:
             logger.info("Nothing to enrich.")
@@ -174,7 +242,7 @@ async def enrich_products(
 
             # Build input payload (use sequential int ids for matching)
             payload = []
-            id_map = {}  # local_idx -> row (id, name, brand, category, subcategory, unit)
+            id_map = {}
             for local_idx, row in enumerate(batch):
                 payload.append({
                     "id": local_idx,
@@ -184,8 +252,8 @@ async def enrich_products(
                 id_map[local_idx] = row
 
             logger.info(
-                "Batch %d/%d: sending %d products to Gemini...",
-                batch_idx + 1, total_batches, len(payload),
+                "Batch %d/%d: sending %d products to %s...",
+                batch_idx + 1, total_batches, len(payload), provider_name,
             )
 
             if dry_run:
@@ -196,23 +264,22 @@ async def enrich_products(
                     )
                 continue
 
-            # Call Gemini
+            # Call AI provider
             user_prompt = json.dumps(payload, ensure_ascii=False)
             try:
-                response = await model.generate_content_async(user_prompt)
-                raw_json = response.text.strip()
+                raw_json = await provider.classify(user_prompt)
             except Exception:
                 logger.exception(
-                    "Gemini API call failed for batch %d. Skipping.",
+                    "AI call failed for batch %d. Skipping.",
                     batch_idx + 1,
                 )
                 if batch_idx < total_batches - 1:
                     time.sleep(sleep_seconds)
                 continue
 
-            items = _parse_gemini_json(raw_json)
+            items = _parse_json_response(raw_json)
             if not isinstance(items, list):
-                logger.error("Gemini returned non-list for batch %d. Skipping.", batch_idx + 1)
+                logger.error("AI returned non-list for batch %d. Skipping.", batch_idx + 1)
                 if batch_idx < total_batches - 1:
                     time.sleep(sleep_seconds)
                 continue
@@ -236,11 +303,11 @@ async def enrich_products(
                         category, row.name[:50],
                     )
 
-                # Build update values (only NULL fields)
+                # Build update values (overwrite generic categories)
                 values = {}
-                if row.category is None and category:
+                if category and (row.category is None or row.category in _GENERIC_CATEGORIES):
                     values["category"] = category
-                if row.subcategory is None and subcategory:
+                if subcategory and (row.subcategory is None or row.subcategory in _GENERIC_CATEGORIES):
                     values["subcategory"] = subcategory
                 if row.unit is None and unit:
                     values["unit"] = unit
@@ -306,7 +373,7 @@ async def enrich_products(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Enrich products with Gemini AI (category, subcategory, unit)."
+        description="Enrich products with AI (category, subcategory, unit)."
     )
     parser.add_argument(
         "--dry-run",
@@ -317,19 +384,32 @@ def main():
         "--batch-size",
         type=int,
         default=25,
-        help="Number of products per Gemini API call (default: 25).",
+        help="Number of products per API call (default: 25).",
     )
     parser.add_argument(
         "--sleep",
         type=int,
-        default=5,
-        help="Seconds to wait between API calls (default: 5).",
+        default=2,
+        help="Seconds to wait between API calls (default: 2).",
     )
     parser.add_argument(
         "--model",
         type=str,
         default=None,
-        help="Gemini model to use (default: from settings, usually gemini-2.0-flash).",
+        help="Model name (default: claude-haiku-4-5-20251001 for Claude, gemini-2.0-flash for Gemini).",
+    )
+    parser.add_argument(
+        "--target",
+        choices=["null", "supermercato", "all"],
+        default="null",
+        help="Which products to enrich: 'null' (category IS NULL), "
+             "'supermercato' (category='Supermercato'), 'all' (both). Default: null.",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["claude", "gemini"],
+        default="claude",
+        help="AI provider to use (default: claude).",
     )
     args = parser.parse_args()
 
@@ -339,6 +419,8 @@ def main():
             model_name=args.model,
             batch_size=args.batch_size,
             sleep_seconds=args.sleep,
+            target=args.target,
+            provider_name=args.provider,
         )
     )
 

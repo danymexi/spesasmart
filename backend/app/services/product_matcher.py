@@ -81,6 +81,7 @@ _UNIT_MAP: dict[str, str] = {
 
 # Common Italian supermarket brand aliases (lowercase variant -> canonical)
 BRAND_ALIASES: dict[str, str] = {
+    # Pasta & bakery
     "mulino bianco": "Mulino Bianco",
     "mulinobianco": "Mulino Bianco",
     "barilla": "Barilla",
@@ -89,28 +90,45 @@ BRAND_ALIASES: dict[str, str] = {
     "voiello": "Voiello",
     "rummo": "Rummo",
     "garofalo": "Garofalo",
-    "rio mare": "Rio Mare",
-    "rio-mare": "Rio Mare",
-    "star": "Star",
-    "knorr": "Knorr",
-    "findus": "Findus",
+    "la molisana": "La Molisana",
+    "agnesi": "Agnesi",
     "buitoni": "Buitoni",
+    "giovanni rana": "Giovanni Rana",
+    "rana": "Giovanni Rana",
+    # Dairy & cheese
     "galbani": "Galbani",
     "parmalat": "Parmalat",
     "granarolo": "Granarolo",
     "muller": "Muller",
     "müller": "Muller",
     "danone": "Danone",
-    "ferrero": "Ferrero",
-    "nutella": "Ferrero",
-    "lavazza": "Lavazza",
-    "illy": "Illy",
-    "kimbo": "Kimbo",
-    "scottex": "Scottex",
-    "regina": "Regina",
-    "dash": "Dash",
-    "dixan": "Dixan",
-    "ace": "ACE",
+    "yomo": "Yomo",
+    "philadelphia": "Philadelphia",
+    "president": "Président",
+    "président": "Président",
+    "kraft": "Kraft",
+    "vallelata": "Vallelata",
+    "nonno nanni": "Nonno Nanni",
+    "santa lucia": "Santa Lucia",
+    # Meat & deli
+    "amadori": "Amadori",
+    "aia": "Aia",
+    "beretta": "Beretta",
+    "rovagnati": "Rovagnati",
+    "negroni": "Negroni",
+    "fiorucci": "Fiorucci",
+    "citterio": "Citterio",
+    # Canned & preserves
+    "rio mare": "Rio Mare",
+    "rio-mare": "Rio Mare",
+    "star": "Star",
+    "cirio": "Cirio",
+    "mutti": "Mutti",
+    "valfrutta": "Valfrutta",
+    "de rica": "De Rica",
+    "pomì": "Pomi",
+    "pomi": "Pomi",
+    # Beverages
     "cocacola": "Coca-Cola",
     "coca cola": "Coca-Cola",
     "coca-cola": "Coca-Cola",
@@ -119,8 +137,276 @@ BRAND_ALIASES: dict[str, str] = {
     "san pellegrino": "San Pellegrino",
     "sanpellegrino": "San Pellegrino",
     "levissima": "Levissima",
+    "sant'anna": "Sant'Anna",
+    "sant anna": "Sant'Anna",
+    "yoga": "Yoga",
+    "santal": "Santal",
+    "schweppes": "Schweppes",
+    "fanta": "Fanta",
+    "sprite": "Sprite",
+    # Coffee & tea
+    "lavazza": "Lavazza",
+    "illy": "Illy",
+    "kimbo": "Kimbo",
+    "borbone": "Borbone",
+    "nescafé": "Nescafe",
+    "nescafe": "Nescafe",
+    "bialetti": "Bialetti",
+    # Snacks & sweets
+    "ferrero": "Ferrero",
+    "nutella": "Ferrero",
+    "kinder": "Kinder",
+    "loacker": "Loacker",
+    "pavesi": "Pavesi",
+    "pan di stelle": "Pan di Stelle",
+    "oro saiwa": "Oro Saiwa",
+    "ringo": "Ringo",
+    # Condiments & oils
+    "barilla pesto": "Barilla",
+    "knorr": "Knorr",
+    "calvé": "Calve",
+    "calve": "Calve",
+    "de nigris": "De Nigris",
+    "monini": "Monini",
+    "carapelli": "Carapelli",
+    "bertolli": "Bertolli",
+    "farchioni": "Farchioni",
+    # Frozen
+    "findus": "Findus",
+    "4 salti in padella": "Findus",
+    "orogel": "Orogel",
+    "birdseye": "Birds Eye",
+    # Hygiene & cleaning
+    "scottex": "Scottex",
+    "regina": "Regina",
+    "dash": "Dash",
+    "dixan": "Dixan",
+    "ace": "ACE",
+    "napisan": "Napisan",
+    "swiffer": "Swiffer",
+    "fairy": "Fairy",
+    "finish": "Finish",
+    "dove": "Dove",
+    "pantene": "Pantene",
+    "garnier": "Garnier",
+    "colgate": "Colgate",
+    "oral-b": "Oral-B",
+    "oral b": "Oral-B",
+    "neutromed": "Neutromed",
+    "borotalco": "Borotalco",
+    "viakal": "Viakal",
+    "lysoform": "Lysoform",
+    # Baby & pet
+    "pampers": "Pampers",
+    "huggies": "Huggies",
+    "mellin": "Mellin",
+    "plasmon": "Plasmon",
+    "whiskas": "Whiskas",
+    "felix": "Felix",
+    "sheba": "Sheba",
+    "purina": "Purina",
+    # Private labels
     "esselunga": "Esselunga",
+    "iperal": "Iperal",
 }
+
+# Compound brands where the sub-brand is more specific than the parent.
+# "parent sub" → "Sub" (canonical sub-brand)
+COMPOUND_BRANDS: dict[str, str] = {
+    "barilla mulino bianco": "Mulino Bianco",
+    "barilla pavesi": "Pavesi",
+    "barilla pan di stelle": "Pan di Stelle",
+    "barilla ringo": "Ringo",
+    "barilla wasa": "Wasa",
+    "ferrero kinder": "Kinder",
+    "ferrero nutella": "Nutella",
+    "ferrero rocher": "Ferrero Rocher",
+    "kraft philadelphia": "Philadelphia",
+    "mondelez oreo": "Oreo",
+    "unilever knorr": "Knorr",
+    "unilever dove": "Dove",
+    "p&g dash": "Dash",
+    "p&g fairy": "Fairy",
+    "p&g swiffer": "Swiffer",
+    "nestle nescafe": "Nescafe",
+    "nestlé nescafé": "Nescafe",
+}
+
+# ---------------------------------------------------------------------------
+# Category keyword mapping (name tokens → category)
+# ---------------------------------------------------------------------------
+CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "Pasta e Riso": [
+        "penne", "spaghetti", "fusilli", "rigatoni", "farfalle", "linguine",
+        "pasta", "lasagne", "gnocchi", "tagliatelle", "maccheroni", "bucatini",
+        "paccheri", "orecchiette", "tortellini", "ravioli", "riso", "risotto",
+        "arborio", "basmati", "carnaroli",
+    ],
+    "Bevande": [
+        "birra", "succo", "cola", "aranciata", "energy", "drink", "sprite",
+        "fanta", "schweppes", "gassosa", "chinotto", "limonata", "the freddo",
+        "te freddo",
+    ],
+    "Acqua": ["acqua minerale", "acqua naturale", "acqua frizzante"],
+    "Latticini": [
+        "latte", "yogurt", "panna", "burro", "ricotta", "mascarpone",
+        "kefir", "skyr",
+    ],
+    "Salumi e Formaggi": [
+        "parmigiano", "mozzarella", "gorgonzola", "provolone", "pecorino",
+        "formaggio", "stracchino", "emmental", "edamer", "grana padano",
+        "asiago", "fontina", "taleggio", "brie", "camembert",
+        "prosciutto", "salame", "mortadella", "bresaola", "speck",
+        "coppa", "pancetta", "guanciale", "wurstel", "würstel",
+    ],
+    "Pane e Cereali": [
+        "pane", "grissini", "cracker", "fette biscottate", "focaccia",
+        "cereali", "muesli", "corn flakes", "gallette", "pancarré",
+        "piadina", "wrap",
+    ],
+    "Carne": [
+        "pollo", "manzo", "maiale", "vitello", "tacchino", "hamburger",
+        "salsiccia", "agnello", "coniglio", "scottona", "fettine",
+        "arrosto", "bistecca", "carpaccio", "polpette",
+    ],
+    "Pesce": [
+        "salmone", "merluzzo", "gamberi", "pesce", "orata", "branzino",
+        "vongole", "cozze", "calamari", "polpo", "tonno fresco",
+        "trota", "sogliola", "platessa",
+    ],
+    "Frutta e Verdura": [
+        "mele", "banane", "arance", "fragole", "uva", "pere", "kiwi",
+        "ananas", "limoni", "pesche", "albicocche", "ciliegie",
+        "insalata", "pomodori", "zucchine", "carote", "patate", "cipolla",
+        "melanzane", "peperoni", "broccoli", "cavolfiore", "spinaci",
+        "rucola", "lattuga", "finocchi", "carciofi", "funghi",
+    ],
+    "Surgelati": [
+        "surgelat", "frozen", "4 salti", "sofficini", "bastoncini",
+        "pizza surgelata", "gelato", "ghiacciolo",
+    ],
+    "Dolci e Snack": [
+        "cioccolat", "torta", "biscott", "merendina", "nutella", "wafer",
+        "crostata", "croissant", "brioche", "plumcake", "muffin",
+        "patatine", "pop corn", "taralli", "salatini", "snack",
+        "caramelle", "chewing gum", "gomme",
+    ],
+    "Caffe e Te": [
+        "caffè", "caffe", "espresso", "capsule caffè", "capsule caffe",
+        "cialde", "te ", "tè ", "tisana", "camomilla", "infuso",
+    ],
+    "Condimenti e Conserve": [
+        "pelati", "passata", "sugo", "conserva", "pesto", "ragù", "ragu",
+        "olio", "aceto", "sale fino", "sale grosso", "pepe",
+        "maionese", "ketchup", "senape", "salsa", "dado",
+    ],
+    "Igiene Personale": [
+        "shampoo", "bagnodoccia", "bagnoschiuma", "dentifricio",
+        "deodorante", "sapone mani", "crema viso", "crema corpo",
+        "rasoio", "assorbent", "salvaslip", "cotton fioc",
+    ],
+    "Pulizia Casa": [
+        "detersivo", "ammorbidente", "candeggina", "sgrassatore", "spugna",
+        "carta igienica", "tovaglioli", "pellicola", "alluminio",
+        "sacchetti spazzatura", "anticalcare",
+    ],
+    "Alcolici": [
+        "vino rosso", "vino bianco", "prosecco", "spumante", "champagne",
+        "grappa", "amaro", "limoncello", "vodka", "gin", "rum", "whisky",
+    ],
+    "Uova": ["uova"],
+    "Neonati e Infanzia": [
+        "pannolini", "latte crescita", "omogenizzat", "pastina bimbi",
+    ],
+    "Pet Care": [
+        "cibo gatti", "cibo cani", "croccantini", "umido gatto",
+        "umido cane", "lettiera",
+    ],
+}
+
+# Brand → likely category (used as fallback when keyword matching fails)
+BRAND_TO_CATEGORY: dict[str, str] = {
+    "Barilla": "Pasta e Riso",
+    "De Cecco": "Pasta e Riso",
+    "Divella": "Pasta e Riso",
+    "Voiello": "Pasta e Riso",
+    "Rummo": "Pasta e Riso",
+    "Garofalo": "Pasta e Riso",
+    "La Molisana": "Pasta e Riso",
+    "Agnesi": "Pasta e Riso",
+    "Giovanni Rana": "Pasta e Riso",
+    "Lavazza": "Caffe e Te",
+    "Illy": "Caffe e Te",
+    "Kimbo": "Caffe e Te",
+    "Borbone": "Caffe e Te",
+    "Nescafe": "Caffe e Te",
+    "Granarolo": "Latticini",
+    "Parmalat": "Latticini",
+    "Muller": "Latticini",
+    "Danone": "Latticini",
+    "Yomo": "Latticini",
+    "Galbani": "Salumi e Formaggi",
+    "Philadelphia": "Salumi e Formaggi",
+    "Nonno Nanni": "Salumi e Formaggi",
+    "Beretta": "Salumi e Formaggi",
+    "Rovagnati": "Salumi e Formaggi",
+    "Negroni": "Salumi e Formaggi",
+    "Citterio": "Salumi e Formaggi",
+    "Coca-Cola": "Bevande",
+    "Pepsi": "Bevande",
+    "Fanta": "Bevande",
+    "Sprite": "Bevande",
+    "Schweppes": "Bevande",
+    "San Benedetto": "Bevande",
+    "Yoga": "Bevande",
+    "Santal": "Bevande",
+    "Levissima": "Acqua",
+    "San Pellegrino": "Acqua",
+    "Sant'Anna": "Acqua",
+    "Findus": "Surgelati",
+    "Orogel": "Surgelati",
+    "Amadori": "Carne",
+    "Aia": "Carne",
+    "Rio Mare": "Pesce",
+    "Mulino Bianco": "Dolci e Snack",
+    "Pavesi": "Dolci e Snack",
+    "Kinder": "Dolci e Snack",
+    "Loacker": "Dolci e Snack",
+    "Cirio": "Condimenti e Conserve",
+    "Mutti": "Condimenti e Conserve",
+    "Valfrutta": "Condimenti e Conserve",
+    "Pomi": "Condimenti e Conserve",
+    "Knorr": "Condimenti e Conserve",
+    "Star": "Condimenti e Conserve",
+    "Monini": "Condimenti e Conserve",
+    "Carapelli": "Condimenti e Conserve",
+    "Bertolli": "Condimenti e Conserve",
+    "Dash": "Pulizia Casa",
+    "Dixan": "Pulizia Casa",
+    "ACE": "Pulizia Casa",
+    "Fairy": "Pulizia Casa",
+    "Finish": "Pulizia Casa",
+    "Swiffer": "Pulizia Casa",
+    "Scottex": "Pulizia Casa",
+    "Regina": "Pulizia Casa",
+    "Dove": "Igiene Personale",
+    "Pantene": "Igiene Personale",
+    "Garnier": "Igiene Personale",
+    "Colgate": "Igiene Personale",
+    "Oral-B": "Igiene Personale",
+    "Neutromed": "Igiene Personale",
+    "Borotalco": "Igiene Personale",
+    "Pampers": "Neonati e Infanzia",
+    "Plasmon": "Neonati e Infanzia",
+    "Mellin": "Neonati e Infanzia",
+    "Whiskas": "Pet Care",
+    "Felix": "Pet Care",
+    "Sheba": "Pet Care",
+    "Purina": "Pet Care",
+}
+
+# Private-label brand names (chain own-brands)
+PRIVATE_LABELS: set[str] = {"Esselunga", "Iperal", "Coop", "Lidl"}
 
 
 class ProductMatcher:
@@ -221,11 +507,142 @@ class ProductMatcher:
 
     @staticmethod
     def normalize_brand(brand: str | None) -> str | None:
-        """Return canonical brand name or the original (title-cased)."""
+        """Return canonical brand name or the original (title-cased).
+
+        Also resolves compound brands (e.g. "Barilla Mulino Bianco" → "Mulino Bianco").
+        Treats "Null"/"null"/empty as None.
+        """
         if not brand:
             return None
-        key = brand.lower().strip()
-        return BRAND_ALIASES.get(key, brand.strip().title())
+        stripped = brand.strip()
+        if stripped.lower() in ("null", "none", ""):
+            return None
+        key = stripped.lower()
+        # Check compound brands first
+        compound = COMPOUND_BRANDS.get(key)
+        if compound:
+            return compound
+        return BRAND_ALIASES.get(key, stripped.title())
+
+    # ------------------------------------------------------------------
+    # New harmonisation helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def extract_brand_from_product_name(name: str) -> str | None:
+        """Try to identify a brand from the first words of a product name.
+
+        Checks 1-word, 2-word and 3-word prefixes against BRAND_ALIASES.
+        Returns the canonical brand or None.
+        """
+        if not name:
+            return None
+        words = name.strip().split()
+        # Try longest prefix first (3 words, 2 words, 1 word)
+        for n in (3, 2, 1):
+            if len(words) >= n:
+                candidate = " ".join(words[:n]).lower()
+                if candidate in BRAND_ALIASES:
+                    return BRAND_ALIASES[candidate]
+        return None
+
+    @staticmethod
+    def categorize_by_keywords(name: str, brand: str | None = None) -> str | None:
+        """Return a category based on keyword matching in name (and optionally brand).
+
+        Checks multi-word keywords first, then single-word. Returns None if no match.
+        Falls back to BRAND_TO_CATEGORY if keyword matching fails.
+        """
+        if not name:
+            return None
+        text = name.lower()
+
+        # Try keyword matching (prefer longer keywords first for specificity)
+        best_category = None
+        best_keyword_len = 0
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            for kw in keywords:
+                if kw in text and len(kw) > best_keyword_len:
+                    best_category = category
+                    best_keyword_len = len(kw)
+
+        if best_category:
+            return best_category
+
+        # Fallback: use brand → category hint
+        if brand:
+            canonical = BRAND_ALIASES.get(brand.lower().strip(), brand.strip().title())
+            return BRAND_TO_CATEGORY.get(canonical)
+
+        return None
+
+    @staticmethod
+    def clean_product_name(name: str, brand: str | None = None) -> str:
+        """Clean a product name: strip brand prefix, normalise units, title-case.
+
+        Steps:
+          1. Strip brand from beginning of name
+          2. Normalise unit formats ("500 G" → "500g", "1,5 L" → "1.5l")
+          3. Title-case with Italian preposition exceptions
+          4. Clean up whitespace and punctuation
+        """
+        if not name:
+            return name
+
+        # 1. Strip brand prefix
+        cleaned = ProductMatcher._strip_brand(name, brand)
+
+        # 2. Normalise unit patterns in the name
+        # "500 G" → "500g", "1,5 L" → "1.5l", "1000 ML" → "1000ml"
+        def _norm_unit(m: re.Match) -> str:
+            num = m.group(1).replace(",", ".")
+            unit = m.group(2).lower()
+            return f"{num}{unit}"
+
+        cleaned = re.sub(
+            r"(\d+(?:[.,]\d+)?)\s+(g|kg|ml|cl|l)\b",
+            _norm_unit,
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+        # 3. Normalise multi-pack: "6 X 1,5 L" → "6x1.5l"
+        def _norm_multipack(m: re.Match) -> str:
+            count = m.group(1)
+            num = m.group(2).replace(",", ".")
+            unit = m.group(3).lower()
+            return f"{count}x{num}{unit}"
+
+        cleaned = re.sub(
+            r"(\d+)\s*[Xx]\s*(\d+(?:[.,]\d+)?)\s*(g|kg|ml|cl|l)\b",
+            _norm_multipack,
+            cleaned,
+        )
+
+        # 4. Clean whitespace
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        # 5. Title-case with Italian preposition exceptions
+        _lowercase_words = {
+            "di", "del", "della", "delle", "dei", "degli", "da", "al", "alla",
+            "alle", "il", "lo", "la", "le", "gli", "i", "un", "una", "uno",
+            "con", "per", "in", "su", "tra", "fra", "e", "o", "ed", "n.",
+        }
+        words = cleaned.split()
+        result = []
+        for idx, word in enumerate(words):
+            # Skip unit-like tokens (e.g. "500g", "1.5l")
+            if re.match(r"^\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?)?(?:g|kg|ml|cl|l|pz)$", word, re.IGNORECASE):
+                result.append(word.lower())
+            elif idx == 0:
+                # Always capitalise first word
+                result.append(word.capitalize())
+            elif word.lower() in _lowercase_words:
+                result.append(word.lower())
+            else:
+                result.append(word.capitalize())
+
+        return " ".join(result)
 
     # ------------------------------------------------------------------
     # Fuzzy matching

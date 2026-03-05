@@ -7,6 +7,7 @@ from app.models.product import Product
 from app.models.store import Store
 from app.models.user import (
     ShoppingListItem,
+    ShoppingListItemProduct,
     UserBrand,
     UserProfile,
     UserStore,
@@ -21,6 +22,7 @@ __all__ = [
     "Offer",
     "Product",
     "ShoppingListItem",
+    "ShoppingListItemProduct",
     "Store",
     "UserBrand",
     "UserProfile",

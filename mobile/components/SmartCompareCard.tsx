@@ -16,9 +16,12 @@ interface Props {
   isInWatchlist?: boolean;
   onWatchlistToggle?: (productId: string) => void;
   onAddToShoppingList?: (productId: string) => void;
+  selectable?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 }
 
-export default function SmartCompareCard({ result, isInWatchlist, onWatchlistToggle, onAddToShoppingList }: Props) {
+export default function SmartCompareCard({ result, isInWatchlist, onWatchlistToggle, onAddToShoppingList, selectable, isSelected, onToggleSelect }: Props) {
   const { product, offers, price_indicator, best_price_per_unit, unit_reference } = result;
 
   const bestPrice = offers.length > 0
@@ -29,12 +32,29 @@ export default function SmartCompareCard({ result, isInWatchlist, onWatchlistTog
 
   return (
     <TouchableOpacity
-      style={styles.card}
-      onPress={() => router.push(`/product/${product.id}`)}
+      style={[
+        styles.card,
+        isSelected && styles.cardSelected,
+      ]}
+      onPress={() => {
+        if (selectable && onToggleSelect) {
+          onToggleSelect();
+        } else {
+          router.push(`/product/${product.id}`);
+        }
+      }}
       activeOpacity={0.7}
     >
       {/* Header: image + product name + indicator badge + watchlist */}
       <View style={styles.header}>
+        {selectable && (
+          <MaterialCommunityIcons
+            name={isSelected ? "checkbox-marked" : "checkbox-blank-outline"}
+            size={24}
+            color={isSelected ? glassColors.greenDark : "#999"}
+            style={styles.checkbox}
+          />
+        )}
         {product.image_url ? (
           <Image
             source={{ uri: product.image_url }}
@@ -63,7 +83,7 @@ export default function SmartCompareCard({ result, isInWatchlist, onWatchlistTog
             </Text>
           </View>
         )}
-        {onAddToShoppingList && (
+        {!selectable && onAddToShoppingList && (
           <IconButton
             icon="cart-plus"
             iconColor={glassColors.greenMedium}
@@ -72,7 +92,7 @@ export default function SmartCompareCard({ result, isInWatchlist, onWatchlistTog
             style={styles.watchlistBtn}
           />
         )}
-        {onWatchlistToggle && (
+        {!selectable && onWatchlistToggle && (
           <IconButton
             icon={isInWatchlist ? "check-circle" : "plus-circle-outline"}
             iconColor={isInWatchlist ? glassColors.greenMedium : "#999"}
@@ -146,6 +166,15 @@ const styles = StyleSheet.create({
     padding: 14,
     ...glassCard,
   } as any,
+  cardSelected: {
+    borderColor: glassColors.greenDark,
+    borderWidth: 2,
+    backgroundColor: "rgba(46,125,50,0.06)",
+  },
+  checkbox: {
+    marginRight: 8,
+    marginTop: 2,
+  },
   header: {
     flexDirection: "row",
     alignItems: "flex-start",

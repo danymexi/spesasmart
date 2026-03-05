@@ -1,74 +1,185 @@
-import { useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
-import { Button, Checkbox, IconButton, Text, TextInput, useTheme } from "react-native-paper";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import {
+  ActivityIndicator,
+  Button,
+  Checkbox,
+  IconButton,
+  Modal,
+  Portal,
+  Text,
+  TextInput,
+  useTheme,
+} from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   getShoppingList,
+  getShoppingListCompare,
+  getShoppingListSuggestions,
   addToShoppingList,
   toggleShoppingItem,
   removeShoppingItem,
   clearCheckedItems,
-  optimizeTrip,
-  ShoppingListItem,
+  updateLinkedProducts,
+  smartSearch,
+  type ShoppingListItem,
+  type CompareItemInfo,
+  type ChainPriceInfo,
+  type SmartSearchResult,
+  type LinkedProductDetail,
 } from "../services/api";
 import { glassCard, glassColors } from "../styles/glassStyles";
+import { useAppStore } from "../stores/useAppStore";
+import ChainTotalsSummary from "./ChainTotalsSummary";
+import SuggestionsSection from "./SuggestionsSection";
 import TripOptimizer from "./TripOptimizer";
+
+const INVALIDATE_KEYS = [
+  "shoppingList",
+  "shoppingListCount",
+  "shoppingListCompare",
+  "shoppingListSuggestions",
+];
 
 export default function ShoppingList() {
   const theme = useTheme();
   const queryClient = useQueryClient();
+  const nearbyChains = useAppStore((s) => s.nearbyChains);
   const [customInput, setCustomInput] = useState("");
   const [showOptimizer, setShowOptimizer] = useState(false);
+  const [suggestions, setSuggestions] = useState<SmartSearchResult[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Map<string, SmartSearchResult>>(new Map());
+  const [editingItem, setEditingItem] = useState<ShoppingListItem | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: items, isLoading, refetch } = useQuery({
+  // Debounced autocomplete search
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const query = customInput.trim();
+    if (query.length < 2 || !inputFocused) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setLoadingSuggestions(false);
+      return;
+    }
+    setLoadingSuggestions(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const results = await smartSearch(query, 15);
+        setSuggestions(results);
+        setShowSuggestions(true);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [customInput, inputFocused]);
+
+  // ── Queries ──────────────────────────────────────────────────────────────
+
+  const {
+    data: items,
+    isLoading,
+    refetch,
+  } = useQuery({
     queryKey: ["shoppingList"],
     queryFn: getShoppingList,
   });
 
-  const uncheckedProductItems = (items || []).filter(
-    (i) => !i.checked && i.product_id
-  );
+  const hasUnchecked = (items || []).some((i) => !i.checked);
 
-  const { data: optimizationData } = useQuery({
-    queryKey: ["tripOptimize"],
-    queryFn: optimizeTrip,
-    enabled: uncheckedProductItems.length > 0,
+  const {
+    data: compareData,
+    isLoading: loadingCompare,
+  } = useQuery({
+    queryKey: ["shoppingListCompare", nearbyChains.join(",")],
+    queryFn: () =>
+      getShoppingListCompare(
+        nearbyChains.length > 0 ? nearbyChains.join(",") : undefined
+      ),
+    enabled: hasUnchecked,
   });
+
+  const { data: suggestionsData } = useQuery({
+    queryKey: ["shoppingListSuggestions"],
+    queryFn: () => getShoppingListSuggestions(),
+    enabled: (items || []).length > 0,
+  });
+
+  // ── Mutations ────────────────────────────────────────────────────────────
+
+  const invalidateAll = () => {
+    INVALIDATE_KEYS.forEach((key) =>
+      queryClient.invalidateQueries({ queryKey: [key] })
+    );
+  };
 
   const addMutation = useMutation({
     mutationFn: addToShoppingList,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
-      queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
+      invalidateAll();
       setCustomInput("");
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setSelectedSuggestions(new Map());
     },
   });
 
   const toggleMutation = useMutation({
     mutationFn: toggleShoppingItem,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
-      queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
-    },
+    onSuccess: invalidateAll,
   });
 
   const removeMutation = useMutation({
     mutationFn: removeShoppingItem,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
-      queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
-    },
+    onSuccess: invalidateAll,
   });
 
   const clearMutation = useMutation({
     mutationFn: clearCheckedItems,
+    onSuccess: invalidateAll,
+  });
+
+  const updateLinksMutation = useMutation({
+    mutationFn: ({ itemId, productIds }: { itemId: string; productIds: string[] }) =>
+      updateLinkedProducts(itemId, productIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
-      queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
+      invalidateAll();
+      setEditingItem(null);
     },
   });
+
+  // ── Derived data ─────────────────────────────────────────────────────────
+
+  const compareMap = useMemo(() => {
+    const map = new Map<string, CompareItemInfo>();
+    if (!compareData) return map;
+    for (const ci of compareData.items) {
+      map.set(ci.item_id, ci);
+    }
+    return map;
+  }, [compareData]);
+
+  const uncheckedItems = useMemo(
+    () => (items || []).filter((i) => !i.checked),
+    [items]
+  );
+
+  const checkedItems = useMemo(
+    () => (items || []).filter((i) => i.checked),
+    [items]
+  );
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleAddCustom = () => {
     const name = customInput.trim();
@@ -76,182 +187,409 @@ export default function ShoppingList() {
     addMutation.mutate({ custom_name: name });
   };
 
-  // Group items by chain (null chain = "Altro")
-  const grouped = (items || []).reduce<Record<string, ShoppingListItem[]>>((acc, item) => {
-    const key = item.chain_name || "Altro";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(item);
-    return acc;
-  }, {});
+  const handleAddSuggestion = (productId: string) => {
+    addMutation.mutate({ product_id: productId });
+  };
 
-  const sections = Object.entries(grouped).sort(([a], [b]) => {
-    if (a === "Altro") return 1;
-    if (b === "Altro") return -1;
-    return a.localeCompare(b);
-  });
+  const toggleSuggestionSelection = useCallback((result: SmartSearchResult) => {
+    setSelectedSuggestions((prev) => {
+      const next = new Map(prev);
+      if (next.has(result.product.id)) {
+        next.delete(result.product.id);
+      } else {
+        next.set(result.product.id, result);
+      }
+      return next;
+    });
+  }, []);
 
-  const checkedCount = (items || []).filter((i) => i.checked).length;
+  const handleAddSelected = () => {
+    if (selectedSuggestions.size === 0) return;
+    const ids = Array.from(selectedSuggestions.keys());
+    addMutation.mutate({
+      product_ids: ids,
+      custom_name: customInput.trim() || undefined,
+    });
+  };
 
-  const flatData = sections.flatMap(([chain, chainItems]) => [
-    { type: "header" as const, chain },
-    ...chainItems.map((item) => ({ type: "item" as const, ...item })),
-  ]);
+  const handleRemoveLinkedProduct = (productId: string) => {
+    if (!editingItem) return;
+    const remaining = editingItem.linked_products_details.filter((p) => p.id !== productId);
+    if (remaining.length === 0) {
+      // If removing all products, delete the entire item
+      removeMutation.mutate(editingItem.id);
+      setEditingItem(null);
+      return;
+    }
+    updateLinksMutation.mutate({
+      itemId: editingItem.id,
+      productIds: remaining.map((p) => p.id),
+    });
+    // Optimistically update local state for instant feedback
+    setEditingItem({
+      ...editingItem,
+      linked_products_details: remaining,
+      linked_product_ids: remaining.map((p) => p.id),
+      linked_product_count: remaining.length,
+    });
+  };
+
+  const handleInputBlur = useCallback(() => {
+    // Delay to allow tap on suggestion before closing
+    setTimeout(() => {
+      if (selectedSuggestions.size > 0) return; // keep open while selecting
+      setInputFocused(false);
+      setShowSuggestions(false);
+    }, 200);
+  }, [selectedSuggestions.size]);
+
+  // ── Render helpers ───────────────────────────────────────────────────────
+
+  const renderPricePills = (itemId: string) => {
+    if (loadingCompare) {
+      return (
+        <Text variant="labelSmall" style={styles.loadingPrices}>
+          Cercando prezzi...
+        </Text>
+      );
+    }
+
+    const compareInfo = compareMap.get(itemId);
+    if (!compareInfo || compareInfo.chain_prices.length === 0) {
+      return (
+        <Text variant="labelSmall" style={styles.noPrices}>
+          Nessuna offerta trovata
+        </Text>
+      );
+    }
+
+    return (
+      <View style={styles.pillsRow}>
+        {compareInfo.chain_prices.map((cp: ChainPriceInfo) => (
+          <View
+            key={cp.chain_slug}
+            style={[styles.pill, cp.is_best && styles.pillBest]}
+          >
+            <Text
+              style={[styles.pillText, cp.is_best && styles.pillTextBest]}
+              numberOfLines={1}
+            >
+              {cp.chain_name} {"\u20AC"}
+              {Number(cp.offer_price).toFixed(2)}
+              {cp.is_best ? " \u2605" : ""}
+            </Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderItem = (item: ShoppingListItem, isChecked: boolean) => {
+    const displayName = item.product_name || item.custom_name || "\u2014";
+    const hasLinked = item.linked_product_count > 0;
+
+    return (
+      <Pressable
+        key={item.id}
+        style={[styles.itemCard, isChecked && styles.itemChecked]}
+        onPress={() => {
+          if (hasLinked && !isChecked) {
+            setEditingItem(item);
+          } else if (item.product_id) {
+            router.push(`/product/${item.product_id}`);
+          }
+        }}
+      >
+        <Checkbox
+          status={isChecked ? "checked" : "unchecked"}
+          onPress={() => toggleMutation.mutate(item.id)}
+          color={theme.colors.primary}
+        />
+        <View style={styles.itemContent}>
+          <Text
+            variant="bodyMedium"
+            style={[styles.itemName, isChecked && styles.itemNameChecked]}
+            numberOfLines={2}
+          >
+            {displayName}
+            {item.quantity > 1 ? `  x${item.quantity}` : ""}
+          </Text>
+          {hasLinked && !isChecked && (
+            <Text variant="labelSmall" style={styles.linkedBadge}>
+              {item.linked_product_count} prodotti collegati
+            </Text>
+          )}
+          {!isChecked && renderPricePills(item.id)}
+          {item.notes && (
+            <Text variant="labelSmall" style={styles.noteText}>
+              {item.notes}
+            </Text>
+          )}
+        </View>
+        <IconButton
+          icon="close"
+          size={18}
+          onPress={() => removeMutation.mutate(item.id)}
+        />
+      </Pressable>
+    );
+  };
+
+  // ── Main render ──────────────────────────────────────────────────────────
 
   return (
     <View style={styles.container}>
-      {/* Manual input */}
-      <View style={styles.inputRow}>
-        <TextInput
-          label="Aggiungi articolo"
-          value={customInput}
-          onChangeText={setCustomInput}
-          mode="outlined"
-          style={styles.input}
-          dense
-          onSubmitEditing={handleAddCustom}
-        />
-        <IconButton
-          icon="plus"
-          mode="contained"
-          onPress={handleAddCustom}
-          disabled={!customInput.trim()}
-          style={styles.addButton}
-        />
-      </View>
-
-      {optimizationData && optimizationData.all_single_stores.length > 0 && (
-        <Pressable onPress={() => setShowOptimizer(true)} style={styles.costBanner}>
-          <MaterialCommunityIcons name="store" size={16} color={glassColors.greenDark} />
-          <Text variant="bodySmall" style={styles.costBannerText}>
-            {optimizationData.all_single_stores[0].chain_name}{" "}
-            {"\u20AC"}{Number(optimizationData.all_single_stores[0].total).toFixed(2)}
-          </Text>
-          {optimizationData.multi_store_plan.length > 1 && (
-            <>
-              <Text variant="bodySmall" style={styles.costBannerSep}>{"\u00B7"}</Text>
-              <MaterialCommunityIcons name="store-plus" size={16} color={glassColors.greenDark} />
-              <Text variant="bodySmall" style={styles.costBannerText}>
-                {"\u20AC"}{Number(optimizationData.multi_store_total).toFixed(2)}
-              </Text>
-            </>
-          )}
-          <MaterialCommunityIcons name="chevron-right" size={16} color="#888" />
-        </Pressable>
-      )}
-
-      <FlatList
-        data={flatData}
-        keyExtractor={(item, idx) =>
-          item.type === "header" ? `h-${item.chain}` : `i-${(item as any).id}`
-        }
-        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} />}
-        renderItem={({ item }) => {
-          if (item.type === "header") {
-            return (
-              <View style={styles.sectionHeader}>
-                <Text variant="titleSmall" style={styles.sectionTitle}>
-                  {item.chain}
-                </Text>
-              </View>
-            );
-          }
-
-          const shopItem = item as ShoppingListItem & { type: "item" };
-          const displayName = shopItem.product_name || shopItem.custom_name || "—";
-
-          return (
-            <View style={[styles.itemCard, shopItem.checked && styles.itemChecked]}>
-              <Checkbox
-                status={shopItem.checked ? "checked" : "unchecked"}
-                onPress={() => toggleMutation.mutate(shopItem.id)}
-                color={theme.colors.primary}
-              />
-              <View style={styles.itemContent}>
-                <Text
-                  variant="bodyMedium"
-                  style={[
-                    styles.itemName,
-                    shopItem.checked && styles.itemNameChecked,
-                  ]}
-                  onPress={() =>
-                    shopItem.product_id
-                      ? router.push(`/product/${shopItem.product_id}`)
-                      : undefined
-                  }
-                  numberOfLines={2}
-                >
-                  {displayName}
-                  {shopItem.quantity > 1 ? ` x${shopItem.quantity}` : ""}
-                </Text>
-                {shopItem.offer_price != null && (
-                  <Text variant="labelSmall" style={styles.priceText}>
-                    {"\u20AC"}{Number(shopItem.offer_price).toFixed(2)}
-                    {shopItem.chain_name ? ` @ ${shopItem.chain_name}` : ""}
-                  </Text>
-                )}
-                {shopItem.notes && (
-                  <Text variant="labelSmall" style={styles.noteText}>
-                    {shopItem.notes}
-                  </Text>
-                )}
-              </View>
-              <IconButton
-                icon="close"
-                size={18}
-                onPress={() => removeMutation.mutate(shopItem.id)}
-              />
-            </View>
-          );
-        }}
-        ListEmptyComponent={
-          !isLoading ? (
-            <View style={styles.emptyContainer}>
-              <Text variant="titleMedium" style={styles.emptyTitle}>
-                Lista della spesa vuota
-              </Text>
-              <Text variant="bodyMedium" style={styles.emptyText}>
-                Aggiungi prodotti dal catalogo o scrivi un articolo qui sopra.
-              </Text>
-            </View>
-          ) : null
-        }
-        contentContainerStyle={styles.listContent}
-      />
-
-      {/* Action buttons */}
-      <View style={styles.clearRow}>
-        {(items?.length ?? 0) > 0 && (
-          <Button
-            mode="contained"
-            icon="map-marker-path"
-            onPress={() => setShowOptimizer(true)}
-            style={styles.optimizeButton}
-          >
-            Ottimizza Spesa
-          </Button>
-        )}
-        {checkedCount > 0 && (
-          <Button
+      {/* Input row + autocomplete dropdown */}
+      <View style={styles.inputWrapper}>
+        <View style={styles.inputRow}>
+          <TextInput
+            label="Aggiungi articolo"
+            value={customInput}
+            onChangeText={setCustomInput}
             mode="outlined"
-            icon="delete-sweep"
-            onPress={() => clearMutation.mutate()}
-            loading={clearMutation.isPending}
-          >
-            Svuota completati ({checkedCount})
-          </Button>
+            style={styles.input}
+            dense
+            onSubmitEditing={handleAddCustom}
+            onFocus={() => setInputFocused(true)}
+            onBlur={handleInputBlur}
+          />
+          <IconButton
+            icon="plus"
+            mode="contained"
+            onPress={handleAddCustom}
+            disabled={!customInput.trim()}
+            style={styles.addButton}
+          />
+        </View>
+
+        {/* Autocomplete dropdown */}
+        {inputFocused && customInput.trim().length >= 2 && (showSuggestions || loadingSuggestions || selectedSuggestions.size > 0) && (
+          <View style={styles.autocompleteDropdown}>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              style={styles.autocompleteScroll}
+            >
+              {loadingSuggestions && suggestions.length === 0 && (
+                <View style={styles.autocompleteLoading}>
+                  <ActivityIndicator size={16} />
+                  <Text variant="bodySmall" style={styles.autocompleteLoadingText}>
+                    Cercando...
+                  </Text>
+                </View>
+              )}
+              {suggestions.map((result) => {
+                const bestOffer = result.offers.length > 0
+                  ? result.offers.reduce((a, b) => (a.offer_price < b.offer_price ? a : b))
+                  : null;
+                const isSelected = selectedSuggestions.has(result.product.id);
+                return (
+                  <Pressable
+                    key={result.product.id}
+                    style={[styles.autocompleteItem, isSelected && styles.autocompleteItemSelected]}
+                    onPress={() => toggleSuggestionSelection(result)}
+                  >
+                    <MaterialCommunityIcons
+                      name={isSelected ? "checkbox-marked" : "checkbox-blank-outline"}
+                      size={20}
+                      color={isSelected ? glassColors.greenDark : "#999"}
+                      style={styles.autocompleteCheckbox}
+                    />
+                    <View style={styles.autocompleteTextWrap}>
+                      <Text variant="bodyMedium" style={styles.autocompleteName} numberOfLines={1}>
+                        {result.product.name}
+                      </Text>
+                      <Text variant="labelSmall" style={styles.autocompleteMeta} numberOfLines={1}>
+                        {result.product.brand || ""}
+                        {bestOffer
+                          ? `${result.product.brand ? " \u00B7 " : ""}\u20AC${Number(bestOffer.offer_price).toFixed(2)} — ${bestOffer.chain_name}`
+                          : ""}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            {/* Action buttons at bottom */}
+            {selectedSuggestions.size > 0 ? (
+              <View style={styles.autocompleteActions}>
+                <Pressable style={styles.autocompleteAddBtn} onPress={handleAddSelected}>
+                  <MaterialCommunityIcons name="cart-plus" size={16} color="#fff" />
+                  <Text style={styles.autocompleteAddBtnText}>
+                    Aggiungi {selectedSuggestions.size} alla lista
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={styles.autocompleteCancelBtn}
+                  onPress={() => setSelectedSuggestions(new Map())}
+                >
+                  <Text style={styles.autocompleteCancelText}>Annulla</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable style={styles.autocompleteCustom} onPress={handleAddCustom}>
+                <MaterialCommunityIcons name="magnify" size={16} color="#666" />
+                <Text variant="bodySmall" style={styles.autocompleteCustomText} numberOfLines={1}>
+                  Aggiungi "{customInput.trim()}" (auto-match)
+                </Text>
+              </Pressable>
+            )}
+          </View>
         )}
       </View>
+
+      <ScrollView
+        refreshControl={
+          <RefreshControl refreshing={isLoading} onRefresh={refetch} />
+        }
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Empty state */}
+        {!isLoading && (items || []).length === 0 && (
+          <View style={styles.emptyContainer}>
+            <Text variant="titleMedium" style={styles.emptyTitle}>
+              Lista della spesa vuota
+            </Text>
+            <Text variant="bodyMedium" style={styles.emptyText}>
+              Aggiungi prodotti dal catalogo o scrivi un articolo qui sopra.
+            </Text>
+          </View>
+        )}
+
+        {/* Chain totals summary */}
+        {hasUnchecked &&
+          compareData &&
+          compareData.chain_totals.length > 0 && (
+            <ChainTotalsSummary
+              chainTotals={compareData.chain_totals}
+              itemsTotal={compareData.items_total}
+              multiStoreTotal={compareData.multi_store_total}
+              potentialSavings={compareData.potential_savings}
+              onOpenOptimizer={() => setShowOptimizer(true)}
+            />
+          )}
+
+        {hasUnchecked && loadingCompare && (
+          <ActivityIndicator style={{ marginVertical: 12 }} />
+        )}
+
+        {/* Unchecked items */}
+        {uncheckedItems.map((item) => renderItem(item, false))}
+
+        {/* Action buttons */}
+        {(items || []).length > 0 && (
+          <View style={styles.actionRow}>
+            <Button
+              mode="contained"
+              icon="map-marker-path"
+              onPress={() => setShowOptimizer(true)}
+              style={styles.optimizeButton}
+              labelStyle={styles.actionLabel}
+              compact
+            >
+              Ottimizza Spesa
+            </Button>
+            {checkedItems.length > 0 && (
+              <Button
+                mode="outlined"
+                icon="delete-sweep"
+                onPress={() => clearMutation.mutate()}
+                loading={clearMutation.isPending}
+                compact
+              >
+                Svuota completati ({checkedItems.length})
+              </Button>
+            )}
+          </View>
+        )}
+
+        {/* Checked items */}
+        {checkedItems.length > 0 && (
+          <>
+            <View style={styles.checkedHeader}>
+              <Text variant="labelMedium" style={styles.checkedHeaderText}>
+                Completati ({checkedItems.length})
+              </Text>
+            </View>
+            {checkedItems.map((item) => renderItem(item, true))}
+          </>
+        )}
+
+        {/* Suggestions */}
+        {suggestionsData && (
+          <SuggestionsSection
+            alternatives={suggestionsData.alternatives}
+            complementary={suggestionsData.complementary}
+            onAddToList={handleAddSuggestion}
+          />
+        )}
+
+        <View style={styles.bottomPadding} />
+      </ScrollView>
 
       <TripOptimizer
         visible={showOptimizer}
         onDismiss={() => setShowOptimizer(false)}
       />
+
+      {/* Linked products detail modal */}
+      <Portal>
+        <Modal
+          visible={!!editingItem}
+          onDismiss={() => setEditingItem(null)}
+          contentContainerStyle={styles.modalContainer}
+        >
+          {editingItem && (
+            <View>
+              <Text variant="titleMedium" style={styles.modalTitle}>
+                Prodotti collegati
+              </Text>
+              <Text variant="bodySmall" style={styles.modalSubtitle}>
+                {editingItem.custom_name || editingItem.product_name}
+              </Text>
+              <View style={styles.modalList}>
+                {editingItem.linked_products_details.map((p) => (
+                  <View key={p.id} style={styles.modalItem}>
+                    <View style={styles.modalItemInfo}>
+                      <Text variant="bodyMedium" style={styles.modalItemName} numberOfLines={2}>
+                        {p.name}
+                      </Text>
+                      {p.brand && (
+                        <Text variant="labelSmall" style={styles.modalItemBrand}>
+                          {p.brand}
+                        </Text>
+                      )}
+                    </View>
+                    <IconButton
+                      icon="close-circle-outline"
+                      size={20}
+                      iconColor="#C62828"
+                      onPress={() => handleRemoveLinkedProduct(p.id)}
+                      style={styles.modalRemoveBtn}
+                    />
+                  </View>
+                ))}
+              </View>
+              <Button
+                mode="outlined"
+                onPress={() => setEditingItem(null)}
+                style={styles.modalCloseBtn}
+              >
+                Chiudi
+              </Button>
+            </View>
+          )}
+        </Modal>
+      </Portal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  inputWrapper: {
+    zIndex: 10,
+  },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -262,19 +600,112 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1 },
   addButton: { marginTop: 6 },
-  listContent: { paddingBottom: 96 },
-  sectionHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
+  scrollContent: { paddingBottom: 24 },
+
+  // Autocomplete dropdown
+  autocompleteDropdown: {
+    position: "absolute",
+    top: "100%",
+    left: 12,
+    right: 12,
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 4,
+    zIndex: 20,
+    maxHeight: 320,
   },
-  sectionTitle: {
-    fontWeight: "bold",
-    color: glassColors.greenDark,
-    textTransform: "uppercase",
-    fontSize: 12,
-    letterSpacing: 1,
+  autocompleteScroll: {
+    maxHeight: 260,
   },
+  autocompleteLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    gap: 8,
+  },
+  autocompleteLoadingText: {
+    color: "#999",
+  },
+  autocompleteItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#eee",
+  },
+  autocompleteItemSelected: {
+    backgroundColor: "rgba(46,125,50,0.06)",
+  },
+  autocompleteCheckbox: {
+    marginRight: 10,
+  },
+  autocompleteTextWrap: {
+    flex: 1,
+  },
+  autocompleteName: {
+    fontWeight: "600",
+    color: "#1a1a1a",
+  },
+  autocompleteMeta: {
+    color: "#888",
+    marginTop: 2,
+  },
+  autocompleteActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#e0e0e0",
+    backgroundColor: "#fafafa",
+  },
+  autocompleteAddBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: glassColors.greenDark,
+    borderRadius: 8,
+    paddingVertical: 8,
+  },
+  autocompleteAddBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  autocompleteCancelBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  autocompleteCancelText: {
+    color: "#666",
+    fontSize: 13,
+  },
+  autocompleteCustom: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#e0e0e0",
+    backgroundColor: "#fafafa",
+  },
+  autocompleteCustomText: {
+    color: "#666",
+    flex: 1,
+  },
+
+  // Items
   itemCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -285,7 +716,7 @@ const styles = StyleSheet.create({
     ...glassCard,
   } as any,
   itemChecked: {
-    opacity: 0.6,
+    opacity: 0.55,
   },
   itemContent: { flex: 1, paddingVertical: 4 },
   itemName: { fontWeight: "600", color: "#1a1a1a" },
@@ -293,39 +724,129 @@ const styles = StyleSheet.create({
     textDecorationLine: "line-through",
     color: "#999",
   },
-  priceText: { color: glassColors.greenMedium, marginTop: 2 },
   noteText: { color: "#666", marginTop: 2, fontStyle: "italic" },
-  emptyContainer: { alignItems: "center", padding: 40 },
-  emptyTitle: { marginBottom: 8, color: "#1a1a1a" },
-  emptyText: { color: "#555", textAlign: "center" },
-  clearRow: {
-    position: "absolute",
-    bottom: 80,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    paddingVertical: 8,
-    gap: 8,
+
+  // Price pills
+  pillsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 6,
+  },
+  pill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: "rgba(0,0,0,0.05)",
+  },
+  pillBest: {
+    backgroundColor: "rgba(46,125,50,0.14)",
+  },
+  pillText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#555",
+  },
+  pillTextBest: {
+    color: glassColors.greenDark,
+    fontWeight: "bold",
+  },
+  loadingPrices: {
+    color: "#999",
+    marginTop: 4,
+    fontStyle: "italic",
+  },
+  noPrices: {
+    color: "#aaa",
+    marginTop: 4,
+    fontStyle: "italic",
+  },
+
+  // Action row
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
   },
   optimizeButton: {
     backgroundColor: glassColors.greenDark,
   },
-  costBanner: {
+  actionLabel: { fontSize: 13 },
+
+  // Checked header
+  checkedHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  checkedHeaderText: {
+    color: "#999",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    fontSize: 11,
+  },
+
+  // Empty
+  emptyContainer: { alignItems: "center", padding: 40 },
+  emptyTitle: { marginBottom: 8, color: "#1a1a1a" },
+  emptyText: { color: "#555", textAlign: "center" },
+
+  bottomPadding: { height: 60 },
+
+  // Linked badge
+  linkedBadge: {
+    color: glassColors.greenDark,
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+
+  // Modal
+  modalContainer: {
+    backgroundColor: "#fff",
+    marginHorizontal: 24,
+    borderRadius: 16,
+    padding: 20,
+    maxHeight: "70%",
+  },
+  modalTitle: {
+    fontWeight: "700",
+    color: "#1a1a1a",
+    marginBottom: 2,
+  },
+  modalSubtitle: {
+    color: "#666",
+    marginBottom: 16,
+  },
+  modalList: {
+    gap: 2,
+  },
+  modalItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginHorizontal: 12,
-    marginBottom: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: "rgba(27,94,32,0.06)",
-    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#eee",
   },
-  costBannerText: {
-    color: glassColors.greenDark,
+  modalItemInfo: {
+    flex: 1,
+  },
+  modalItemName: {
     fontWeight: "600",
+    color: "#1a1a1a",
   },
-  costBannerSep: {
-    color: "#aaa",
+  modalItemBrand: {
+    color: "#888",
+    marginTop: 1,
+  },
+  modalRemoveBtn: {
+    margin: 0,
+  },
+  modalCloseBtn: {
+    marginTop: 16,
   },
 });

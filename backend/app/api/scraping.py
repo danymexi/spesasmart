@@ -240,17 +240,21 @@ async def trigger_esselunga_online_sync():
 
 
 @router.post("/backfill-images")
-async def trigger_image_backfill(limit: int = 30):
+async def trigger_image_backfill(limit: int = 50):
     """Find images for products without image_url.
 
-    Uses Google Image Search to find product photos.
+    Uses Claude Haiku for query generation, then Open Food Facts + Google Images.
     """
     try:
+        from app.config import get_settings
         from app.database import async_session
         from app.services.image_finder import ProductImageFinder
 
+        settings = get_settings()
         async with async_session() as session:
-            finder = ProductImageFinder()
+            finder = ProductImageFinder(
+                anthropic_api_key=settings.anthropic_api_key or None,
+            )
             updated = await finder.backfill(session, limit=limit)
             return {
                 "status": "completed",

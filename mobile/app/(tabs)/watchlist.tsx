@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Button, IconButton, SegmentedButtons, Text, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -84,13 +84,15 @@ export default function WatchlistScreen() {
             const hasOffer = item.best_current_price != null;
 
             return (
-              <View style={styles.card}>
+              <Pressable
+                style={styles.card}
+                onPress={() => router.push(`/product/${item.product_id}`)}
+              >
                 <View style={styles.cardContent}>
                   <View style={styles.infoSection}>
                     <Text
                       variant="titleMedium"
                       numberOfLines={2}
-                      onPress={() => router.push(`/product/${item.product_id}`)}
                       style={styles.productName}
                     >
                       {item.product_name}
@@ -135,16 +137,22 @@ export default function WatchlistScreen() {
                     <IconButton
                       icon="cart-plus"
                       size={20}
-                      onPress={() => addToListMutation.mutate({ productId: item.product_id })}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        addToListMutation.mutate({ productId: item.product_id });
+                      }}
                     />
                     <IconButton
                       icon="delete-outline"
                       size={20}
-                      onPress={() => removeMutation.mutate({ productId: item.product_id })}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        removeMutation.mutate({ productId: item.product_id });
+                      }}
                     />
                   </View>
                 </View>
-              </View>
+              </Pressable>
             );
           }}
           ListEmptyComponent={

@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Chain, Offer, Product, ShoppingListItem, UserBrand, UserProfile, UserStore, UserWatchlist
+from app.models import Chain, Offer, Product, ShoppingListItem, ShoppingListItemProduct, UserBrand, UserProfile, UserStore, UserWatchlist
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -122,11 +122,18 @@ class BrandDealResponse(BaseModel):
 
 class ShoppingListAddRequest(BaseModel):
     product_id: uuid.UUID | None = None
+    product_ids: list[uuid.UUID] | None = None
     custom_name: str | None = None
     quantity: int = 1
     unit: str | None = None
     offer_id: uuid.UUID | None = None
     notes: str | None = None
+
+
+class LinkedProductDetail(BaseModel):
+    id: uuid.UUID
+    name: str
+    brand: str | None = None
 
 
 class ShoppingListItemResponse(BaseModel):
@@ -141,6 +148,9 @@ class ShoppingListItemResponse(BaseModel):
     chain_name: str | None
     offer_price: Decimal | None
     notes: str | None
+    linked_product_ids: list[uuid.UUID] = []
+    linked_product_count: int = 0
+    linked_products_details: list[LinkedProductDetail] = []
     created_at: datetime
 
 
@@ -662,6 +672,7 @@ async def get_shopping_list(
         .options(
             joinedload(ShoppingListItem.product),
             joinedload(ShoppingListItem.offer).joinedload(Offer.chain),
+            joinedload(ShoppingListItem.linked_products).joinedload(ShoppingListItemProduct.product),
         )
         .where(ShoppingListItem.user_id == user.id)
         .order_by(ShoppingListItem.checked, ShoppingListItem.created_at.desc())
@@ -681,6 +692,12 @@ async def get_shopping_list(
             chain_name=item.offer.chain.name if item.offer and item.offer.chain else None,
             offer_price=item.offer.offer_price if item.offer else None,
             notes=item.notes,
+            linked_product_ids=[lp.product_id for lp in item.linked_products],
+            linked_product_count=len(item.linked_products),
+            linked_products_details=[
+                LinkedProductDetail(id=lp.product_id, name=lp.product.name, brand=lp.product.brand)
+                for lp in item.linked_products if lp.product
+            ],
             created_at=item.created_at,
         )
         for item in items
@@ -712,16 +729,72 @@ async def add_to_shopping_list(
     db: AsyncSession = Depends(get_db),
 ):
     """Add an item to the shopping list."""
-    if not data.product_id and not data.custom_name:
-        raise HTTPException(status_code=400, detail="Either product_id or custom_name is required")
+    if not data.product_id and not data.product_ids and not data.custom_name:
+        raise HTTPException(status_code=400, detail="Either product_id, product_ids, or custom_name is required")
 
     product_name = None
-    if data.product_id:
-        prod = await db.execute(select(Product).where(Product.id == data.product_id))
-        product = prod.scalar_one_or_none()
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-        product_name = product.name
+    linked_product_ids: list[uuid.UUID] = []
+    linked_details: list[LinkedProductDetail] = []
+
+    if data.product_ids and len(data.product_ids) > 0:
+        # Multi-product mode: validate all products exist
+        prods_result = await db.execute(
+            select(Product).where(Product.id.in_(data.product_ids))
+        )
+        found_products = {p.id: p for p in prods_result.scalars().all()}
+        missing = [pid for pid in data.product_ids if pid not in found_products]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Products not found: {missing}")
+        # Use first product's name as display name if no custom_name
+        first_product = found_products[data.product_ids[0]]
+        product_name = first_product.name
+
+        # Create item without product_id (linked via junction table)
+        item = ShoppingListItem(
+            user_id=user.id,
+            product_id=None,
+            custom_name=data.custom_name or product_name,
+            quantity=data.quantity,
+            unit=data.unit,
+            offer_id=data.offer_id,
+            notes=data.notes,
+        )
+        db.add(item)
+        await db.flush()
+
+        # Create junction table entries
+        for pid in data.product_ids:
+            link = ShoppingListItemProduct(item_id=item.id, product_id=pid)
+            db.add(link)
+        await db.flush()
+        await db.refresh(item)
+        linked_product_ids = list(data.product_ids)
+        linked_details = [
+            LinkedProductDetail(id=pid, name=found_products[pid].name, brand=found_products[pid].brand)
+            for pid in data.product_ids if pid in found_products
+        ]
+
+    else:
+        # Single product or custom_name mode (backward compatible)
+        if data.product_id:
+            prod = await db.execute(select(Product).where(Product.id == data.product_id))
+            product = prod.scalar_one_or_none()
+            if not product:
+                raise HTTPException(status_code=404, detail="Product not found")
+            product_name = product.name
+
+        item = ShoppingListItem(
+            user_id=user.id,
+            product_id=data.product_id,
+            custom_name=data.custom_name,
+            quantity=data.quantity,
+            unit=data.unit,
+            offer_id=data.offer_id,
+            notes=data.notes,
+        )
+        db.add(item)
+        await db.flush()
+        await db.refresh(item)
 
     chain_name = None
     offer_price = None
@@ -733,19 +806,6 @@ async def add_to_shopping_list(
         if offer:
             chain_name = offer.chain.name if offer.chain else None
             offer_price = offer.offer_price
-
-    item = ShoppingListItem(
-        user_id=user.id,
-        product_id=data.product_id,
-        custom_name=data.custom_name,
-        quantity=data.quantity,
-        unit=data.unit,
-        offer_id=data.offer_id,
-        notes=data.notes,
-    )
-    db.add(item)
-    await db.flush()
-    await db.refresh(item)
 
     return ShoppingListItemResponse(
         id=item.id,
@@ -759,6 +819,9 @@ async def add_to_shopping_list(
         chain_name=chain_name,
         offer_price=offer_price,
         notes=item.notes,
+        linked_product_ids=linked_product_ids,
+        linked_product_count=len(linked_product_ids),
+        linked_products_details=linked_details,
         created_at=item.created_at,
     )
 
@@ -818,6 +881,84 @@ async def remove_shopping_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     await db.delete(item)
+
+
+class UpdateLinkedProductsRequest(BaseModel):
+    product_ids: list[uuid.UUID]
+
+
+@router.put("/me/shopping-list/{item_id}/products", response_model=ShoppingListItemResponse)
+async def update_linked_products(
+    item_id: uuid.UUID,
+    data: UpdateLinkedProductsRequest,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the linked products for a shopping list item."""
+    result = await db.execute(
+        select(ShoppingListItem)
+        .options(
+            joinedload(ShoppingListItem.product),
+            joinedload(ShoppingListItem.offer).joinedload(Offer.chain),
+            joinedload(ShoppingListItem.linked_products),
+        )
+        .where(
+            ShoppingListItem.id == item_id,
+            ShoppingListItem.user_id == user.id,
+        )
+    )
+    item = result.unique().scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Validate all product_ids exist
+    if data.product_ids:
+        prods_result = await db.execute(
+            select(Product).where(Product.id.in_(data.product_ids))
+        )
+        found = {p.id for p in prods_result.scalars().all()}
+        missing = [pid for pid in data.product_ids if pid not in found]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Products not found: {missing}")
+
+    # Delete existing links
+    from sqlalchemy import delete as sql_delete
+    await db.execute(
+        sql_delete(ShoppingListItemProduct).where(ShoppingListItemProduct.item_id == item.id)
+    )
+
+    # Insert new links
+    for pid in data.product_ids:
+        db.add(ShoppingListItemProduct(item_id=item.id, product_id=pid))
+    await db.flush()
+
+    linked_ids = list(data.product_ids)
+    # Fetch product details for the new linked products
+    product_details = []
+    if linked_ids:
+        prods = await db.execute(select(Product).where(Product.id.in_(linked_ids)))
+        prod_map = {p.id: p for p in prods.scalars().all()}
+        product_details = [
+            LinkedProductDetail(id=pid, name=prod_map[pid].name, brand=prod_map[pid].brand)
+            for pid in linked_ids if pid in prod_map
+        ]
+    return ShoppingListItemResponse(
+        id=item.id,
+        product_id=item.product_id,
+        product_name=item.product.name if item.product else None,
+        custom_name=item.custom_name,
+        quantity=item.quantity,
+        unit=item.unit,
+        checked=item.checked,
+        offer_id=item.offer_id,
+        chain_name=item.offer.chain.name if item.offer and item.offer.chain else None,
+        offer_price=item.offer.offer_price if item.offer else None,
+        notes=item.notes,
+        linked_product_ids=linked_ids,
+        linked_product_count=len(linked_ids),
+        linked_products_details=product_details,
+        created_at=item.created_at,
+    )
 
 
 # --- Trip Optimizer ---
@@ -900,6 +1041,7 @@ class ChainPriceInfo(BaseModel):
 
 class CompareItem(BaseModel):
     item_id: uuid.UUID
+    product_id: uuid.UUID | None
     display_name: str
     image_url: str | None
     quantity: int
@@ -945,7 +1087,10 @@ async def compare_shopping_list(
     # Fetch unchecked shopping list items
     sl_result = await db.execute(
         select(ShoppingListItem)
-        .options(joinedload(ShoppingListItem.product))
+        .options(
+            joinedload(ShoppingListItem.product),
+            joinedload(ShoppingListItem.linked_products),
+        )
         .where(
             ShoppingListItem.user_id == user.id,
             ShoppingListItem.checked.is_(False),
@@ -959,8 +1104,10 @@ async def compare_shopping_list(
             multi_store_total=Decimal("0"), potential_savings=Decimal("0"),
         )
 
-    product_items = [i for i in items if i.product_id is not None]
-    custom_items = [i for i in items if i.product_id is None and i.custom_name]
+    # Three buckets: linked (multi-product), single product, custom name
+    linked_items = [i for i in items if len(i.linked_products) > 0]
+    product_items = [i for i in items if i.product_id is not None and len(i.linked_products) == 0]
+    custom_items = [i for i in items if i.product_id is None and len(i.linked_products) == 0 and i.custom_name]
 
     # Build chain slug -> (id, name) map
     chains_result = await db.execute(select(Chain))
@@ -1004,6 +1151,45 @@ async def compare_shopping_list(
                     "discount_pct": o.discount_pct,
                     "product_name": o.product.name if o.product else "Unknown",
                 }
+
+    # --- Linked items (multi-product) ---
+    if linked_items:
+        all_linked_pids = []
+        for i in linked_items:
+            for lp in i.linked_products:
+                all_linked_pids.append(lp.product_id)
+
+        if all_linked_pids:
+            linked_offers_result = await db.execute(
+                select(Offer)
+                .options(joinedload(Offer.chain), joinedload(Offer.product))
+                .where(Offer.product_id.in_(all_linked_pids), *offer_where)
+                .order_by(Offer.offer_price)
+            )
+            linked_offers = linked_offers_result.unique().scalars().all()
+
+            # Build product_id -> list of offers
+            pid_offers: dict[uuid.UUID, list] = defaultdict(list)
+            for o in linked_offers:
+                if o.chain:
+                    pid_offers[o.product_id].append(o)
+
+            # For each linked item, find best offer per chain across all linked products
+            for item in linked_items:
+                linked_pids = [lp.product_id for lp in item.linked_products]
+                for pid in linked_pids:
+                    for o in pid_offers.get(pid, []):
+                        slug = o.chain.slug
+                        # Keep cheapest offer per chain across all linked products
+                        if slug not in item_prices[item.id] or o.offer_price < item_prices[item.id][slug]["offer_price"]:
+                            item_prices[item.id][slug] = {
+                                "offer_price": o.offer_price,
+                                "chain_name": o.chain.name,
+                                "chain_slug": slug,
+                                "original_price": o.original_price,
+                                "discount_pct": o.discount_pct,
+                                "product_name": o.product.name if o.product else "Unknown",
+                            }
 
     # --- Custom-name items ---
     if custom_items:
@@ -1078,6 +1264,7 @@ async def compare_shopping_list(
 
         compare_items.append(CompareItem(
             item_id=item.id,
+            product_id=item.product_id,
             display_name=display_name,
             image_url=image_url,
             quantity=item.quantity,
