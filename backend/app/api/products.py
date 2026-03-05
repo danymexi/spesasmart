@@ -727,19 +727,19 @@ def _build_smart_result(
 @router.get("/smart-search", response_model=list[SmartSearchResult])
 async def smart_search(
     q: str = Query(..., min_length=2, description="Search query"),
-    limit: int = Query(5, le=20),
+    limit: int = Query(10, le=50),
     db: AsyncSession = Depends(get_db),
 ):
     """Combined search + multi-chain compare in a single efficient query.
 
-    For fresh-category products (Formaggi, Salumi, etc.), also includes
-    same-subcategory products sorted by PPU for cross-brand comparison.
+    Returns up to `limit` direct matches, plus up to 5 category-match
+    products from the same fresh subcategory (appended separately).
     """
     today = date.today()
     from collections import defaultdict
     from app.services.price_analyzer import PriceAnalyzer
 
-    # Find matching products
+    # Find matching products — direct matches only
     smart_query = select(Product)
     for cond in _build_search_filter(q):
         smart_query = smart_query.where(cond)
@@ -753,14 +753,12 @@ async def smart_search(
 
     product_ids = [p.id for p in products]
 
-    # Check if any matched product is in a fresh category
+    # Category-match: only add a few fresh-category alternatives as extras
     fresh_subcategories: set[str] = set()
-    matched_product_ids: set[uuid.UUID] = set(product_ids)
     for p in products:
         if p.category and p.category in FRESH_CATEGORIES and p.subcategory:
             fresh_subcategories.add(p.subcategory)
 
-    # Add category-match products for fresh subcategories
     category_products: list[Product] = []
     if fresh_subcategories:
         cat_result = await db.execute(
@@ -770,7 +768,7 @@ async def smart_search(
                 Product.id.notin_(product_ids),
             )
             .order_by(Product.name)
-            .limit(limit)
+            .limit(5)
         )
         category_products = list(cat_result.scalars().all())
         product_ids.extend([p.id for p in category_products])
@@ -798,7 +796,7 @@ async def smart_search(
 
     results = []
 
-    # Exact matches first
+    # Direct matches first (up to limit)
     for product in products:
         results.append(
             _build_smart_result(
@@ -808,10 +806,10 @@ async def smart_search(
             )
         )
 
-    # Category matches (fresh products from same subcategory)
+    # Category matches appended as extras (max 5, only if they have offers)
     for product in category_products:
         offers = offers_by_product.get(product.id, [])
-        if offers:  # Only include if there are active offers
+        if offers:
             results.append(
                 _build_smart_result(
                     product,

@@ -791,7 +791,7 @@ export async function updateUserProfile(data: {
 
 // ── Smart Search ─────────────────────────────────────────────────────────────
 
-export async function smartSearch(q: string, limit: number = 5): Promise<SmartSearchResult[]> {
+export async function smartSearch(q: string, limit: number = 10): Promise<SmartSearchResult[]> {
   const res = await apiClient.get<SmartSearchResult[]>("/products/smart-search", {
     params: { q, limit },
   });
