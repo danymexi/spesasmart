@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MATCH_THRESHOLD = 85  # similarity >= 85 % ⇒ treat as the same product
-BRAND_MATCH_THRESHOLD = 80  # lower threshold when brands match exactly
+BRAND_MATCH_THRESHOLD = 85  # threshold when brands match exactly
 
 # Italian food-variant words that DISTINGUISH products (not stopwords).
 # If these appear only in one name, the products are likely different.
@@ -577,20 +577,31 @@ class ProductMatcher:
         return None
 
     @staticmethod
-    def clean_product_name(name: str, brand: str | None = None) -> str:
-        """Clean a product name: strip brand prefix, normalise units, title-case.
+    def clean_product_name(
+        name: str,
+        brand: str | None = None,
+        *,
+        strip_brand: bool = False,
+    ) -> str:
+        """Clean a product name: normalise units, title-case.
 
         Steps:
-          1. Strip brand from beginning of name
+          1. Optionally strip brand from beginning of name
           2. Normalise unit formats ("500 G" → "500g", "1,5 L" → "1.5l")
           3. Title-case with Italian preposition exceptions
           4. Clean up whitespace and punctuation
+
+        By default the brand is NOT stripped from the saved name — the brand
+        prefix is only removed internally for fuzzy-match scoring.
         """
         if not name:
             return name
 
-        # 1. Strip brand prefix
-        cleaned = ProductMatcher._strip_brand(name, brand)
+        # 1. Optionally strip brand prefix
+        if strip_brand:
+            cleaned = ProductMatcher._strip_brand(name, brand)
+        else:
+            cleaned = name
 
         # 2. Normalise unit patterns in the name
         # "500 G" → "500g", "1,5 L" → "1.5l", "1000 ML" → "1000ml"
@@ -693,10 +704,19 @@ class ProductMatcher:
 
             # Guard against overly-generic short names (< 2 significant tokens)
             shorter = n1 if len(n1) < len(n2) else n2
+            longer = n2 if len(n1) < len(n2) else n1
             sig_tokens = [t for t in shorter.split() if len(t) > 2]
             if len(sig_tokens) < 2:
                 # Too short to trust token_set_ratio alone — dampen it
                 set_score = min(set_score, sort_score + 15)
+
+            # Guard against subset matches where the shorter name covers
+            # less than 55% of the longer name.
+            # e.g. "Latte Fresco" (12 ch) vs "Latte Fresco Intero 100%
+            # Italiano Alta Qualità" (42 ch) → ratio 0.28 → different products
+            len_ratio = len(shorter) / len(longer) if longer else 1.0
+            if len_ratio < 0.55:
+                set_score = min(set_score, sort_score)
 
             # Guard against generic overlap: if the shorter name's
             # product-identifying tokens (alphabetic, len>3) have low

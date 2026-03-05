@@ -390,7 +390,7 @@ class IperalOnlineScraper:
         if unit and len(unit) > 50:
             unit = unit[:47] + "..."
 
-        # Clean product name before matching (strip brand prefix, normalise)
+        # Clean product name (normalise units, title-case — keep brand in name)
         clean_name = ProductMatcher.clean_product_name(name, brand)
 
         product = await self._matcher.create_or_match_product(

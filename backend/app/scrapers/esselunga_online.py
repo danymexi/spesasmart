@@ -507,7 +507,7 @@ class EsselungaOnlineScraper:
         # Use parent category name as main category
         category = parent_name or category_name
 
-        # Clean product name before matching (strip brand prefix, normalise)
+        # Clean product name (normalise units, title-case — keep brand in name)
         clean_name = ProductMatcher.clean_product_name(description, brand)
 
         product = await self._matcher.create_or_match_product(
