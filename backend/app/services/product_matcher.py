@@ -782,6 +782,28 @@ class ProductMatcher:
         return " ".join(result)
 
     # ------------------------------------------------------------------
+    # Category helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _categories_compatible(cat1: str | None, cat2: str | None) -> bool:
+        """Check if two categories are compatible (same, related, or missing).
+
+        Returns True when categories should NOT block a match.
+        """
+        if not cat1 or not cat2:
+            return True
+        c1 = cat1.strip().lower()
+        c2 = cat2.strip().lower()
+        if c1 == c2:
+            return True
+        if c1 == "supermercato" or c2 == "supermercato":
+            return True
+        if c1 in c2 or c2 in c1:
+            return True
+        return False
+
+    # ------------------------------------------------------------------
     # Fuzzy matching
     # ------------------------------------------------------------------
 
@@ -961,15 +983,9 @@ class ProductMatcher:
                     brand1=brand, brand2=product.brand,
                 )
 
-                # Category guard: if both have a category and they differ,
+                # Category guard: if both have incompatible categories,
                 # cap score to prevent cross-category false merges
-                if (
-                    category
-                    and product.category
-                    and category != product.category
-                    and category != "Supermercato"
-                    and product.category != "Supermercato"
-                ):
+                if not self._categories_compatible(category, product.category):
                     score = min(score, 70.0)
 
                 # Give a bonus when brands match exactly

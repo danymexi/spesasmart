@@ -21,6 +21,31 @@ from app.models import Chain, Offer, Product
 router = APIRouter(prefix="/products", tags=["products"])
 
 
+def _categories_compatible(cat1: str | None, cat2: str | None) -> bool:
+    """Check if two categories are compatible (same, related, or missing).
+
+    Returns True when categories should NOT block a match.  Categories are
+    compatible when:
+    - Either is None/empty
+    - They are equal (case-insensitive)
+    - Either is the generic "Supermercato"
+    - One contains the other as a substring (e.g. "Conserve" in
+      "Condimenti e Conserve")
+    """
+    if not cat1 or not cat2:
+        return True
+    c1 = cat1.strip().lower()
+    c2 = cat2.strip().lower()
+    if c1 == c2:
+        return True
+    if c1 == "supermercato" or c2 == "supermercato":
+        return True
+    # Substring check: "conserve" in "condimenti e conserve"
+    if c1 in c2 or c2 in c1:
+        return True
+    return False
+
+
 def _build_search_filter(q: str):
     """Build a search filter that matches each word against name OR brand.
 
@@ -423,13 +448,8 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
             cat_j = (q.category or "").strip()
             brands_differ = brand_i and brand_j and brand_i != brand_j
 
-            # Category guard: never group products from different categories
-            if (
-                cat_i and cat_j
-                and cat_i != cat_j
-                and cat_i != "Supermercato"
-                and cat_j != "Supermercato"
-            ):
+            # Category guard: never group products from incompatible categories
+            if not _categories_compatible(cat_i, cat_j):
                 continue
 
             if not _names_match(normalized[i], normalized[j]):
@@ -469,12 +489,7 @@ def _is_similar_product(
 ) -> bool:
     """Check if a candidate product is similar enough to group with prod."""
     # Category guard
-    if (
-        prod_category and candidate_category
-        and prod_category != candidate_category
-        and prod_category != "Supermercato"
-        and candidate_category != "Supermercato"
-    ):
+    if not _categories_compatible(prod_category, candidate_category):
         return False
     if not _names_match(prod_norm, candidate_norm, threshold=0.80):
         return False
@@ -978,10 +993,12 @@ async def get_price_history(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    product_ids = await _find_similar_ids(product, db)
+
     offers_result = await db.execute(
         select(Offer)
         .options(joinedload(Offer.chain))
-        .where(Offer.product_id == product_id)
+        .where(Offer.product_id.in_(product_ids))
         .order_by(Offer.valid_from.desc())
         .limit(100)
     )
