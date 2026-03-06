@@ -209,38 +209,26 @@ async def backfill_unmatched_receipt_items(user_id: uuid.UUID) -> dict:
         items = result.scalars().all()
         total = len(items)
 
-        # ── Step 1: Fuzzy matching (existing logic) ──
+        # ── Step 1: Fuzzy matching (find_matching_product only, no auto-create) ──
         still_unmatched: list[PurchaseItem] = []
         for item in items:
             try:
-                product = await matcher.create_or_match_product(
-                    {"name": item.external_name, "category": item.category},
+                product = await matcher.find_matching_product(
+                    item.external_name,
+                    item.brand,
                     session=session,
                 )
-                # create_or_match_product always returns a product (creates if no match).
-                # We need to check if it *matched* an existing one or created new.
-                # If it created a new one, the name will be very close to external_name.
-                # A better check: see if product was just created (no offers, same name).
-                # For now, trust the matcher — if it returns, it's a match or new product.
-                item.product_id = product.id
-                matched += 1
+                if product is not None:
+                    item.product_id = product.id
+                    matched += 1
+                else:
+                    still_unmatched.append(item)
             except Exception:
                 logger.debug("Backfill fuzzy matching failed for '%s'", item.external_name)
                 still_unmatched.append(item)
 
-        # ── Step 2: AI matching for items that fuzzy matching didn't confidently match ──
-        # Re-collect items where product_id is still None (fuzzy failed completely)
-        # plus items where matcher created a new product (we want AI to try linking to existing)
-        ai_unmatched = [it for it in items if it.product_id is None]
-        # Add back items from exceptions
-        ai_unmatched.extend(still_unmatched)
-        # Deduplicate
-        seen_ids = set()
-        unique_unmatched: list[PurchaseItem] = []
-        for it in ai_unmatched:
-            if it.id not in seen_ids:
-                seen_ids.add(it.id)
-                unique_unmatched.append(it)
+        # ── Step 2: AI matching for items that fuzzy matching couldn't match ──
+        unique_unmatched = still_unmatched
 
         if unique_unmatched:
             logger.info(
@@ -288,6 +276,19 @@ async def backfill_unmatched_receipt_items(user_id: uuid.UUID) -> dict:
             if ai_matched > 0:
                 matched += ai_matched
                 logger.info("AI matching: %d additional items matched", ai_matched)
+
+        # ── Step 3: Create new products for anything still unmatched ──
+        final_unmatched = [it for it in items if it.product_id is None]
+        for item in final_unmatched:
+            try:
+                product = await matcher.create_or_match_product(
+                    {"name": item.external_name, "category": item.category},
+                    session=session,
+                )
+                item.product_id = product.id
+                matched += 1
+            except Exception:
+                logger.debug("Backfill create failed for '%s'", item.external_name)
 
         if matched > 0:
             await session.commit()
