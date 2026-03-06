@@ -26,6 +26,88 @@ logger = logging.getLogger(__name__)
 MATCH_THRESHOLD = 85  # similarity >= 85 % ⇒ treat as the same product
 BRAND_MATCH_THRESHOLD = 85  # threshold when brands match exactly
 
+# ---------------------------------------------------------------------------
+# Italian plural → singular stemming map (grocery nouns)
+# ---------------------------------------------------------------------------
+_ITALIAN_STEM_MAP: dict[str, str] = {
+    # -chi / -che → -co / -ca
+    "finocchi": "finocchio", "carciofi": "carciofo", "pistacchi": "pistacchio",
+    "ravanelli": "ravanello", "broccoli": "broccolo", "fagioli": "fagiolo",
+    "fagiolini": "fagiolino", "piselli": "pisello",
+    # -i → -o (masc)
+    "pomodori": "pomodoro", "biscotti": "biscotto", "grissini": "grissino",
+    "cracker": "cracker", "cornetti": "cornetto", "croissant": "croissant",
+    "wurstel": "wurstel", "würstel": "wurstel",
+    "tortellini": "tortellino", "ravioli": "raviolo", "cannelloni": "cannellone",
+    "rigatoni": "rigatone", "fusilli": "fusillo", "maccheroni": "maccherone",
+    "paccheri": "pacchero", "bucatini": "bucatino", "cappelletti": "cappelletto",
+    "panini": "panino", "taralli": "tarallo", "salatini": "salatino",
+    "rotoloni": "rotolone", "tovaglioli": "tovagliolo", "fazzoletti": "fazzoletto",
+    "pannolini": "pannolino",
+    # -e → -a (fem)
+    "zucchine": "zucchina", "melanzane": "melanzana", "banane": "banana",
+    "mele": "mela", "pere": "pera", "arance": "arancia", "fragole": "fragola",
+    "pesche": "pesca", "ciliegie": "ciliegia", "albicocche": "albicocca",
+    "cipolle": "cipolla", "carote": "carota", "patate": "patata",
+    "olive": "oliva", "sardine": "sardina", "acciughe": "acciuga",
+    "vongole": "vongola", "cozze": "cozza",
+    "merendine": "merendina", "caramelle": "caramella",
+    "fettine": "fettina", "polpette": "polpetta",
+    "salsicce": "salsiccia", "bistecche": "bistecca",
+    "uova": "uovo",
+    # -i → -e (fem plural)
+    "lasagne": "lasagna", "penne": "penna", "farfalle": "farfalla",
+    "tagliatelle": "tagliatella", "orecchiette": "orecchietta",
+    "linguine": "linguina", "fettuccine": "fettuccina",
+    # irregular / invariable
+    "funghi": "fungo", "limoni": "limone", "peperoni": "peperone",
+    "spinaci": "spinacio", "ceci": "cece", "lenticchie": "lenticchia",
+    "mandorle": "mandorla", "noci": "noce", "nocciole": "nocciola",
+    "arachidi": "arachide", "gamberetti": "gamberetto", "gamberi": "gambero",
+    "calamari": "calamaro",
+}
+
+# ---------------------------------------------------------------------------
+# Abbreviation expansion map (token-level, keys are lowercase)
+# ---------------------------------------------------------------------------
+_ABBREVIATION_MAP: dict[str, str] = {
+    "parz.": "parzialmente", "parz": "parzialmente",
+    "screm.": "scremato", "screm": "scremato",
+    "surg.": "surgelato", "surg": "surgelato",
+    "conf.": "confezionato",
+    "bio": "biologico",
+    "aut.": "autunnale",
+    "det.": "detersivo",
+    "ammorb.": "ammorbidente",
+    "dec.": "decaffeinato",
+    "int.": "integrale",
+    "orig.": "originale",
+    "class.": "classico",
+}
+
+# Multi-token abbreviation expansions (applied before tokenizing)
+_MULTI_TOKEN_ABBREVS: dict[str, str] = {
+    "s/glutine": "senza glutine",
+    "s/lattosio": "senza lattosio",
+}
+
+# ---------------------------------------------------------------------------
+# Private-label prefixes (chain own-brand product lines)
+# ---------------------------------------------------------------------------
+PRIVATE_LABEL_PREFIXES: list[str] = [
+    # Esselunga
+    "esselunga bio", "esselunga naturama", "esselunga top",
+    "esselunga equilibrio", "esselunga",
+    # Coop
+    "coop vivi verde", "coop origine", "coop fior fiore",
+    "coop bene si", "coop solidal", "coop crescendo", "coop",
+    # Lidl
+    "milbona", "italiamo", "combino", "cien", "freeway",
+    "solevita", "favorina", "deluxe",
+    # Iperal
+    "via verde bio", "primia", "vale",
+]
+
 # Italian food-variant words that DISTINGUISH products (not stopwords).
 # If these appear only in one name, the products are likely different.
 _VARIANT_WORDS: set[str] = {
@@ -421,24 +503,64 @@ class ProductMatcher:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _stem_italian(token: str) -> str:
+        """Return singular form of an Italian grocery noun, or the token itself."""
+        return _ITALIAN_STEM_MAP.get(token, token)
+
+    @staticmethod
+    def _expand_abbreviations(text: str) -> str:
+        """Expand common Italian grocery abbreviations in text.
+
+        Handles multi-token abbreviations first (e.g. "s/glutine" → "senza glutine"),
+        then single-token abbreviations are handled per-token in normalize_text().
+        """
+        lower = text.lower()
+        for abbrev, expansion in _MULTI_TOKEN_ABBREVS.items():
+            if abbrev in lower:
+                # Case-insensitive replacement
+                idx = lower.find(abbrev)
+                text = text[:idx] + expansion + text[idx + len(abbrev):]
+                lower = text.lower()
+        return text
+
+    @staticmethod
+    def _strip_private_label(name: str) -> str:
+        """Remove private-label prefixes from a product name."""
+        name_lower = name.lower().strip()
+        for prefix in PRIVATE_LABEL_PREFIXES:
+            if name_lower.startswith(prefix):
+                rest = name[len(prefix):].lstrip(" ,-–")
+                if rest and len(rest) >= 3:
+                    return rest
+        return name
+
+    @staticmethod
     def normalize_text(text: str) -> str:
-        """Lowercase, strip accents, remove stopwords and normalise units."""
+        """Lowercase, strip accents, expand abbreviations, stem Italian plurals,
+        remove stopwords and normalise units."""
         if not text:
             return ""
 
         text = text.lower().strip()
 
+        # Expand multi-token abbreviations first
+        text = ProductMatcher._expand_abbreviations(text)
+
         # Collapse multiple spaces / tabs
         text = re.sub(r"\s+", " ", text)
 
-        # Normalise units that appear as standalone tokens
+        # Normalise units, expand single-token abbreviations, stem Italian, remove stopwords
         tokens: list[str] = []
         for token in text.split():
+            # Check single-token abbreviation first
+            expanded = _ABBREVIATION_MAP.get(token)
+            if expanded:
+                token = expanded
             canonical = _UNIT_MAP.get(token)
             if canonical:
                 tokens.append(canonical)
             elif token not in _STOPWORDS:
-                tokens.append(token)
+                tokens.append(ProductMatcher._stem_italian(token))
 
         return " ".join(tokens)
 
@@ -679,9 +801,11 @@ class ProductMatcher:
         Otherwise fall back to ``token_sort_ratio`` which handles word-order
         differences common in OCR output.
         """
-        # Clean names: strip brand and unit patterns
-        c1 = ProductMatcher._strip_units(ProductMatcher._strip_brand(name1, brand1))
-        c2 = ProductMatcher._strip_units(ProductMatcher._strip_brand(name2, brand2))
+        # Clean names: strip private labels, brand and unit patterns
+        c1 = ProductMatcher._strip_units(ProductMatcher._strip_brand(
+            ProductMatcher._strip_private_label(name1), brand1))
+        c2 = ProductMatcher._strip_units(ProductMatcher._strip_brand(
+            ProductMatcher._strip_private_label(name2), brand2))
 
         n1 = ProductMatcher.normalize_text(c1)
         n2 = ProductMatcher.normalize_text(c2)
@@ -767,6 +891,7 @@ class ProductMatcher:
         name: str,
         brand: str | None = None,
         *,
+        category: str | None = None,
         session: AsyncSession | None = None,
     ) -> Optional[Product]:
         """Search existing products and return the best fuzzy match.
@@ -774,6 +899,11 @@ class ProductMatcher:
         If a *brand* is supplied the search is restricted to products that
         share the same canonical brand first; if nothing is found it falls
         back to a brand-agnostic search.
+
+        If *category* is supplied and the candidate product also has a category,
+        mismatched categories cap the score at 70 (below threshold) to prevent
+        cross-category false merges (e.g. "Infuso Finocchio" tea vs "Finocchi"
+        vegetable).
 
         Returns ``None`` when no product scores above the match threshold.
         """
@@ -786,8 +916,9 @@ class ProductMatcher:
             canonical_brand = self.normalize_brand(brand)
 
             # Pre-filter: use significant tokens from the name (after
-            # stripping brand and units) to narrow candidates via SQL ILIKE.
-            cleaned = self._strip_units(self._strip_brand(name, brand))
+            # stripping private labels, brand and units) to narrow candidates via SQL ILIKE.
+            cleaned = self._strip_units(self._strip_brand(
+                self._strip_private_label(name), brand))
             tokens = self.normalize_text(cleaned).split()
             significant = [t for t in tokens if len(t) > 3][:3]
 
@@ -829,6 +960,17 @@ class ProductMatcher:
                     name, product.name,
                     brand1=brand, brand2=product.brand,
                 )
+
+                # Category guard: if both have a category and they differ,
+                # cap score to prevent cross-category false merges
+                if (
+                    category
+                    and product.category
+                    and category != product.category
+                    and category != "Supermercato"
+                    and product.category != "Supermercato"
+                ):
+                    score = min(score, 70.0)
 
                 # Give a bonus when brands match exactly
                 if canonical_brand and product.brand == canonical_brand:
@@ -920,6 +1062,11 @@ class ProductMatcher:
         if not name:
             raise ValueError("Product name is required in raw_data")
 
+        # Reject garbage product names
+        _GARBAGE_NAMES = {"-", ".", "N/A", "n/a", "--", "...", ""}
+        if len(name) < 2 or name in _GARBAGE_NAMES:
+            raise ValueError(f"Product name is garbage: '{name}'")
+
         close_session = False
         if session is None:
             session = async_session()
@@ -944,8 +1091,9 @@ class ProductMatcher:
                     return existing
 
             # --- 2. Fuzzy name match ---
+            category = raw_data.get("category")
             matched = await self.find_matching_product(
-                name, brand, session=session
+                name, brand, category=category, session=session
             )
             if matched is not None:
                 self._enrich_product(matched, raw_data, now)

@@ -1,10 +1,11 @@
 """One-time catalog harmonisation script.
 
-Processes the entire product catalog in 5 sequential phases:
+Processes the entire product catalog in 6 sequential phases:
+  0. Garbage cleanup (delete products with garbage names and no offers)
   1. Brand normalisation (fix nulls, resolve aliases, split compounds)
   2. Re-categorisation (move products out of generic "Supermercato")
   3. Name standardisation (strip brand, normalise units, title-case)
-  4. Deduplication (merge duplicates, migrate offers/watchlist/shopping list)
+  4. Deduplication (merge duplicates, migrate all FKs)
   5. Validation report
 
 Run from the backend directory:
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 from collections import defaultdict
 
@@ -29,6 +31,81 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 500
+
+
+# -----------------------------------------------------------------------
+# Phase 0 — Garbage cleanup
+# -----------------------------------------------------------------------
+
+_GARBAGE_NAMES = {"-", ".", "--", "...", "N/A", "n/a", ""}
+
+
+async def phase0_garbage_cleanup(session, dry_run: bool) -> dict:
+    """Delete products with garbage names that have no active offers."""
+    from app.models import Product
+    from app.models.offer import Offer
+    from app.models.purchase import PurchaseItem
+    from app.models.user import ShoppingListItem, ShoppingListItemProduct, UserWatchlist
+
+    # Find garbage products: name too short or in garbage set
+    result = await session.execute(select(Product))
+    all_products = list(result.scalars().all())
+
+    garbage_ids = []
+    for p in all_products:
+        name = (p.name or "").strip()
+        if len(name) < 2 or name in _GARBAGE_NAMES:
+            garbage_ids.append(p.id)
+
+    stats = {"garbage_found": len(garbage_ids), "deleted": 0, "skipped_has_offers": 0}
+
+    if not garbage_ids:
+        logger.info("Phase 0 — No garbage products found.")
+        return stats
+
+    # Check which garbage products have offers
+    offers_result = await session.execute(
+        select(Offer.product_id)
+        .where(Offer.product_id.in_(garbage_ids))
+        .distinct()
+    )
+    has_offers = {row[0] for row in offers_result.fetchall()}
+
+    to_delete = [pid for pid in garbage_ids if pid not in has_offers]
+    stats["skipped_has_offers"] = len(has_offers)
+
+    if to_delete and not dry_run:
+        # Clean up all FKs first
+        await session.execute(
+            delete(ShoppingListItemProduct).where(
+                ShoppingListItemProduct.product_id.in_(to_delete)
+            )
+        )
+        await session.execute(
+            delete(UserWatchlist).where(UserWatchlist.product_id.in_(to_delete))
+        )
+        await session.execute(
+            update(ShoppingListItem)
+            .where(ShoppingListItem.product_id.in_(to_delete))
+            .values(product_id=None)
+        )
+        await session.execute(
+            update(PurchaseItem)
+            .where(PurchaseItem.product_id.in_(to_delete))
+            .values(product_id=None)
+        )
+        await session.execute(
+            delete(Product).where(Product.id.in_(to_delete))
+        )
+        stats["deleted"] = len(to_delete)
+        await session.flush()
+
+    logger.info(
+        "Phase 0 — Garbage: %d found, %d deleted, %d skipped (have offers).",
+        stats["garbage_found"], stats["deleted"] if not dry_run else len(to_delete),
+        stats["skipped_has_offers"],
+    )
+    return stats
 
 
 # -----------------------------------------------------------------------
@@ -211,11 +288,16 @@ def _richness(p) -> int:
 
 
 async def phase4_deduplicate(session, dry_run: bool) -> dict:
-    """Find and merge duplicate products, migrating all foreign keys."""
+    """Find and merge duplicate products, migrating all foreign keys.
+
+    Includes cross-brand comparison for private-label products and
+    category guards to prevent false merges.
+    """
     from app.models import Product
     from app.models.offer import Offer
-    from app.models.user import ShoppingListItem, UserWatchlist
-    from app.services.product_matcher import ProductMatcher
+    from app.models.purchase import PurchaseItem
+    from app.models.user import ShoppingListItem, ShoppingListItemProduct, UserWatchlist
+    from app.services.product_matcher import PRIVATE_LABELS, ProductMatcher
 
     pm = ProductMatcher()
 
@@ -230,11 +312,22 @@ async def phase4_deduplicate(session, dry_run: bool) -> dict:
     merge_pairs: list[tuple] = []  # (keep, delete)
     seen_ids = set()
 
+    def _categories_conflict(p1, p2) -> bool:
+        """Return True if both have a real category and they differ."""
+        c1 = (p1.category or "").strip()
+        c2 = (p2.category or "").strip()
+        return (
+            bool(c1) and bool(c2)
+            and c1 != c2
+            and c1 != "Supermercato"
+            and c2 != "Supermercato"
+        )
+
+    # --- Within-brand comparison ---
     for brand, products in by_brand.items():
         if len(products) < 2:
             continue
 
-        # Sort by richness (descending) so the better product is preferred
         products.sort(key=lambda p: _richness(p), reverse=True)
 
         for i, p1 in enumerate(products):
@@ -245,9 +338,10 @@ async def phase4_deduplicate(session, dry_run: bool) -> dict:
                 if p2.id in seen_ids:
                     continue
 
-                # Skip same-source comparisons — within-source dupes
-                # are handled by barcode matching in the scrapers
                 if p1.source and p2.source and p1.source == p2.source:
+                    continue
+
+                if _categories_conflict(p1, p2):
                     continue
 
                 score = pm.fuzzy_match(
@@ -263,6 +357,46 @@ async def phase4_deduplicate(session, dry_run: bool) -> dict:
                     merge_pairs.append((p1, p2))
                     seen_ids.add(p2.id)
 
+    # --- Cross-brand: private-label vs generic/branded ---
+    # e.g. "Esselunga Naturama Finocchi" vs unbranded "Finocchi"
+    private_label_products = []
+    non_private_products = []
+    for p in all_products:
+        if p.id in seen_ids:
+            continue
+        if p.brand and p.brand in PRIVATE_LABELS:
+            private_label_products.append(p)
+        elif not p.brand:
+            non_private_products.append(p)
+
+    for pl_prod in private_label_products:
+        if pl_prod.id in seen_ids:
+            continue
+        # Strip the private-label prefix to get the generic name
+        stripped = pm._strip_private_label(pl_prod.name)
+        if stripped == pl_prod.name:
+            continue  # No prefix was stripped
+
+        for gen_prod in non_private_products:
+            if gen_prod.id in seen_ids:
+                continue
+
+            if _categories_conflict(pl_prod, gen_prod):
+                continue
+
+            score = pm.fuzzy_match(
+                stripped, gen_prod.name,
+                brand1=None, brand2=None,
+            )
+            if score >= 88:  # Higher threshold for cross-brand
+                # Keep the one with more data
+                if _richness(pl_prod) >= _richness(gen_prod):
+                    merge_pairs.append((pl_prod, gen_prod))
+                    seen_ids.add(gen_prod.id)
+                else:
+                    merge_pairs.append((gen_prod, pl_prod))
+                    seen_ids.add(pl_prod.id)
+
     stats = {
         "candidates": len(all_products),
         "duplicate_pairs": len(merge_pairs),
@@ -270,6 +404,8 @@ async def phase4_deduplicate(session, dry_run: bool) -> dict:
         "offers_migrated": 0,
         "watchlist_migrated": 0,
         "shopping_migrated": 0,
+        "shopping_linked_migrated": 0,
+        "purchase_items_migrated": 0,
     }
 
     logger.info(
@@ -285,6 +421,20 @@ async def phase4_deduplicate(session, dry_run: bool) -> dict:
         )
     if len(merge_pairs) > 20:
         logger.info("  ... and %d more.", len(merge_pairs) - 20)
+
+    # Export merge pairs for review (dry-run or live)
+    if merge_pairs:
+        pairs_export = [
+            {
+                "keep": {"id": str(k.id), "name": k.name, "brand": k.brand, "category": k.category, "source": k.source},
+                "delete": {"id": str(d.id), "name": d.name, "brand": d.brand, "category": d.category, "source": d.source},
+            }
+            for k, d in merge_pairs
+        ]
+        export_path = "/tmp/dedup_pairs.json"
+        with open(export_path, "w") as f:
+            json.dump(pairs_export, f, indent=2, ensure_ascii=False)
+        logger.info("Merge pairs exported to %s", export_path)
 
     if dry_run or not merge_pairs:
         return stats
@@ -330,7 +480,37 @@ async def phase4_deduplicate(session, dry_run: bool) -> dict:
             )
             stats["shopping_migrated"] += sl_result.rowcount
 
-            # 4. Enrich the kept product with missing data from duplicate
+            # 4. Migrate ShoppingListItemProduct (handle unique constraint)
+            existing_slp = await session.execute(
+                select(ShoppingListItemProduct.item_id)
+                .where(ShoppingListItemProduct.product_id == keep.id)
+            )
+            existing_item_ids = {row[0] for row in existing_slp.fetchall()}
+
+            if existing_item_ids:
+                await session.execute(
+                    delete(ShoppingListItemProduct).where(
+                        ShoppingListItemProduct.product_id == dup.id,
+                        ShoppingListItemProduct.item_id.in_(existing_item_ids),
+                    )
+                )
+
+            slp_result = await session.execute(
+                update(ShoppingListItemProduct)
+                .where(ShoppingListItemProduct.product_id == dup.id)
+                .values(product_id=keep.id)
+            )
+            stats["shopping_linked_migrated"] += slp_result.rowcount
+
+            # 5. Migrate PurchaseItem
+            pi_result = await session.execute(
+                update(PurchaseItem)
+                .where(PurchaseItem.product_id == dup.id)
+                .values(product_id=keep.id)
+            )
+            stats["purchase_items_migrated"] += pi_result.rowcount
+
+            # 6. Enrich the kept product with missing data from duplicate
             if not keep.image_url and dup.image_url:
                 keep.image_url = dup.image_url
             if (not keep.category or keep.category == "Supermercato") and dup.category:
@@ -342,7 +522,7 @@ async def phase4_deduplicate(session, dry_run: bool) -> dict:
             if not keep.barcode and dup.barcode:
                 keep.barcode = dup.barcode
 
-            # 5. Delete the duplicate
+            # 7. Delete the duplicate
             await session.execute(
                 delete(Product).where(Product.id == dup.id)
             )
@@ -357,10 +537,11 @@ async def phase4_deduplicate(session, dry_run: bool) -> dict:
     await session.flush()
 
     logger.info(
-        "Phase 4 — Merged %d duplicates. Offers migrated: %d, "
-        "watchlist: %d, shopping list: %d.",
+        "Phase 4 — Merged %d duplicates. Offers: %d, watchlist: %d, "
+        "shopping: %d, linked: %d, purchases: %d.",
         stats["merged"], stats["offers_migrated"],
         stats["watchlist_migrated"], stats["shopping_migrated"],
+        stats["shopping_linked_migrated"], stats["purchase_items_migrated"],
     )
     return stats
 
@@ -373,7 +554,8 @@ async def phase5_report(session, pre_stats: dict) -> dict:
     """Generate a before/after validation report."""
     from app.models import Product
     from app.models.offer import Offer
-    from app.models.user import ShoppingListItem, UserWatchlist
+    from app.models.purchase import PurchaseItem
+    from app.models.user import ShoppingListItem, ShoppingListItemProduct, UserWatchlist
 
     # Total products
     total = (await session.execute(
@@ -418,6 +600,19 @@ async def phase5_report(session, pre_stats: dict) -> dict:
         )
     )).scalar()
 
+    orphan_slp = (await session.execute(
+        select(func.count()).select_from(ShoppingListItemProduct)
+        .where(~ShoppingListItemProduct.product_id.in_(select(Product.id)))
+    )).scalar()
+
+    orphan_pi = (await session.execute(
+        select(func.count()).select_from(PurchaseItem)
+        .where(
+            PurchaseItem.product_id.isnot(None),
+            ~PurchaseItem.product_id.in_(select(Product.id)),
+        )
+    )).scalar()
+
     # Products by source
     source_counts = (await session.execute(
         select(Product.source, func.count())
@@ -442,9 +637,11 @@ async def phase5_report(session, pre_stats: dict) -> dict:
         logger.info("  %-25s %5d", src or "(null)", count)
     logger.info("")
     logger.info("Orphan checks:")
-    logger.info("  Offers → missing product:        %d", orphan_offers)
-    logger.info("  Watchlist → missing product:      %d", orphan_wl)
-    logger.info("  Shopping list → missing product:  %d", orphan_sl)
+    logger.info("  Offers → missing product:           %d", orphan_offers)
+    logger.info("  Watchlist → missing product:         %d", orphan_wl)
+    logger.info("  Shopping list → missing product:     %d", orphan_sl)
+    logger.info("  Shopping linked → missing product:   %d", orphan_slp)
+    logger.info("  Purchase items → missing product:    %d", orphan_pi)
     logger.info("=" * 60)
 
     return {
@@ -454,6 +651,8 @@ async def phase5_report(session, pre_stats: dict) -> dict:
         "orphan_offers": orphan_offers,
         "orphan_watchlist": orphan_wl,
         "orphan_shopping": orphan_sl,
+        "orphan_shopping_linked": orphan_slp,
+        "orphan_purchase_items": orphan_pi,
     }
 
 
@@ -474,6 +673,12 @@ async def harmonize(dry_run: bool = False):
             select(func.count()).select_from(Product)
         )).scalar()
         pre_stats = {"total": pre_total}
+
+        # Phase 0
+        logger.info("-" * 40)
+        logger.info("PHASE 0: Garbage cleanup")
+        logger.info("-" * 40)
+        await phase0_garbage_cleanup(session, dry_run)
 
         # Phase 1
         logger.info("-" * 40)

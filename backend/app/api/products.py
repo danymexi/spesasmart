@@ -325,15 +325,35 @@ async def get_catalog_products(
 
 
 def _normalize_product_name(name: str) -> str:
-    """Normalize a product name for fuzzy grouping."""
-    n = name.lower().strip()
+    """Normalize a product name for fuzzy grouping.
+
+    Applies: private-label stripping, abbreviation expansion,
+    Italian plural stemming, quantity removal.
+    """
+    from app.services.product_matcher import (
+        ProductMatcher,
+        _ABBREVIATION_MAP,
+    )
+
+    # Strip private-label prefixes first
+    n = ProductMatcher._strip_private_label(name)
+    n = n.lower().strip()
+    # Expand multi-token abbreviations
+    n = ProductMatcher._expand_abbreviations(n)
     # Remove common quantity/size suffixes and trailing numbers
     n = re.sub(r"\b\d+\s*(pz|pezzi|rotoli|x|ml|cl|l|g|kg|gr)\b", "", n)
     n = re.sub(r"\bx\s*\d+\b", "", n)
     # Remove "carta igienica", "carta cucina" etc. (generic product type)
     n = re.sub(r"\bcarta\s+(igienica|cucina|assorbente)\b", "", n)
     n = re.sub(r"\s+", " ", n).strip()
-    return n
+    # Expand single-token abbreviations and apply Italian stemming
+    tokens = []
+    for token in n.split():
+        expanded = _ABBREVIATION_MAP.get(token)
+        if expanded:
+            token = expanded
+        tokens.append(ProductMatcher._stem_italian(token))
+    return " ".join(tokens)
 
 
 def _names_match(norm_a: str, norm_b: str, threshold: float = 0.78) -> bool:
@@ -394,12 +414,23 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
         group = [p]
         used.add(i)
         brand_i = (p.brand or "").lower().strip()
+        cat_i = (p.category or "").strip()
         for j in range(i + 1, len(products)):
             if j in used:
                 continue
             q = products[j]
             brand_j = (q.brand or "").lower().strip()
+            cat_j = (q.category or "").strip()
             brands_differ = brand_i and brand_j and brand_i != brand_j
+
+            # Category guard: never group products from different categories
+            if (
+                cat_i and cat_j
+                and cat_i != cat_j
+                and cat_i != "Supermercato"
+                and cat_j != "Supermercato"
+            ):
+                continue
 
             if not _names_match(normalized[i], normalized[j]):
                 continue
@@ -434,8 +465,17 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
 def _is_similar_product(
     prod_norm: str, prod_brand: str,
     candidate_norm: str, candidate_brand: str,
+    prod_category: str = "", candidate_category: str = "",
 ) -> bool:
     """Check if a candidate product is similar enough to group with prod."""
+    # Category guard
+    if (
+        prod_category and candidate_category
+        and prod_category != candidate_category
+        and prod_category != "Supermercato"
+        and candidate_category != "Supermercato"
+    ):
+        return False
     if not _names_match(prod_norm, candidate_norm, threshold=0.80):
         return False
     shorter, longer = sorted([prod_norm, candidate_norm], key=len)
@@ -452,30 +492,44 @@ def _is_similar_product(
 
 async def _find_similar_ids(product: Product, db: AsyncSession) -> list:
     """Find product IDs similar to the given product (for cross-chain compare)."""
+    from app.services.product_matcher import ProductMatcher
+
     product_ids = [product.id]
-    words = product.name.split()
-    keyword = None
-    for w in words:
-        if len(w) >= 4 and w.lower() not in (
-            "alla", "allo", "alle", "della", "dello", "delle", "con", "per",
-        ):
-            keyword = w
-            break
-    if not keyword:
+
+    # Extract significant keywords (stemmed, >=4 chars, not stopwords)
+    _stopwords = {
+        "alla", "allo", "alle", "della", "dello", "delle", "con", "per",
+        "dei", "degli", "del", "una", "uno",
+    }
+    norm_name = _normalize_product_name(product.name)
+    keywords = [
+        w for w in norm_name.split()
+        if len(w) >= 4 and w.lower() not in _stopwords
+    ][:3]  # Use up to 3 keywords
+
+    if not keywords:
         return product_ids
 
-    prod_norm = _normalize_product_name(product.name)
-    prod_brand = (product.brand or "").lower().strip()
+    # Search using OR across multiple keywords
+    keyword_filters = [Product.name.ilike(f"%{kw}%") for kw in keywords]
     cands = await db.execute(
         select(Product).where(
-            Product.name.ilike(f"%{keyword}%"),
+            or_(*keyword_filters),
             Product.id != product.id,
         )
     )
+
+    prod_norm = norm_name
+    prod_brand = (product.brand or "").lower().strip()
+    prod_category = (product.category or "").strip()
     for cp in cands.scalars().all():
         cp_norm = _normalize_product_name(cp.name)
         cp_brand = (cp.brand or "").lower().strip()
-        if _is_similar_product(prod_norm, prod_brand, cp_norm, cp_brand):
+        cp_category = (cp.category or "").strip()
+        if _is_similar_product(
+            prod_norm, prod_brand, cp_norm, cp_brand,
+            prod_category, cp_category,
+        ):
             product_ids.append(cp.id)
     return product_ids
 
