@@ -11,13 +11,8 @@ function getBaseUrl(): string {
     }
     return "http://localhost:8000/api/v1";
   }
-  // Physical devices need the LAN IP
-  const API_HOST = Platform.select({
-    ios: "192.168.178.40",
-    android: "192.168.178.40",
-    default: "localhost",
-  });
-  return `http://${API_HOST}:8000/api/v1`;
+  // Physical devices use the production backend
+  return "https://spesasmart.spazioitech.it/api/v1";
 }
 
 const BASE_URL = getBaseUrl();
@@ -443,6 +438,8 @@ export interface PurchaseOrderItem {
   store_name: string | null;
   status: string | null;
   items_count: number;
+  has_receipt: boolean;
+  source: string | null;
 }
 
 export interface PurchaseItemDetail {
@@ -485,6 +482,7 @@ export interface SmartListItem {
   best_current_price: number | null;
   best_chain: string | null;
   savings_vs_avg: number | null;
+  in_watchlist: boolean;
 }
 
 // ── Catalog Preload Types ───────────────────────────────────────────────────
@@ -968,6 +966,54 @@ export async function triggerPurchaseSync(chainSlug: string): Promise<{ status: 
   return res.data;
 }
 
+// ── Remote Browser Login ─────────────────────────────────────────────────────
+
+export function getRemoteScreenshotUrl(sessionId: string): string {
+  return `${BASE_URL}/supermarket-login/${sessionId}/screenshot`;
+}
+
+export async function startRemoteLogin(
+  chainSlug: string,
+  viewportWidth?: number,
+  viewportHeight?: number
+): Promise<{ session_id: string; viewport_width: number; viewport_height: number }> {
+  const body: Record<string, number> = {};
+  if (viewportWidth) body.viewport_width = viewportWidth;
+  if (viewportHeight) body.viewport_height = viewportHeight;
+  const res = await apiClient.post<{ session_id: string; viewport_width: number; viewport_height: number }>(
+    `/supermarket-login/${chainSlug}/start`,
+    Object.keys(body).length > 0 ? body : undefined
+  );
+  return res.data;
+}
+
+export async function sendRemoteAction(
+  sessionId: string,
+  action: { type: string; x?: number; y?: number; text?: string; key?: string }
+): Promise<void> {
+  await apiClient.post(`/supermarket-login/${sessionId}/action`, action);
+}
+
+export async function getRemoteStatus(
+  sessionId: string
+): Promise<{ status: string; error: string | null }> {
+  const res = await apiClient.get<{ status: string; error: string | null }>(
+    `/supermarket-login/${sessionId}/status`
+  );
+  return res.data;
+}
+
+export async function cancelRemoteLogin(sessionId: string): Promise<void> {
+  await apiClient.delete(`/supermarket-login/${sessionId}`);
+}
+
+export async function fetchRemoteScreenshot(sessionId: string): Promise<Blob> {
+  const res = await apiClient.get(`/supermarket-login/${sessionId}/screenshot`, {
+    responseType: "blob",
+  });
+  return res.data;
+}
+
 export async function uploadSession(
   chainSlug: string,
   sessionData: object
@@ -984,6 +1030,71 @@ export async function getSessionStatus(
 ): Promise<{ status: string; detail: string }> {
   const res = await apiClient.get<{ status: string; detail: string }>(
     `/users/me/supermarket-accounts/${chainSlug}/session-status`
+  );
+  return res.data;
+}
+
+// ── Receipt Upload ──────────────────────────────────────────────────────────
+
+export interface ReceiptItem {
+  name: string;
+  quantity: number;
+  unit_price: string | null;
+  total_price: string;
+  discount: string | null;
+  category: string | null;
+  product_id: string | null;
+  product_name: string | null;
+}
+
+export interface ReceiptUploadResponse {
+  order_id: string;
+  store_name: string | null;
+  date: string | null;
+  total: string | null;
+  items_count: number;
+  items: ReceiptItem[];
+  skipped?: boolean;
+}
+
+export async function uploadReceipt(
+  fileUri: string,
+  chainSlug: string
+): Promise<ReceiptUploadResponse> {
+  const formData = new FormData();
+
+  if (Platform.OS === "web") {
+    // On web, fileUri is a blob URI — fetch it and append as File
+    const response = await fetch(fileUri);
+    const blob = await response.blob();
+    const isPdf = blob.type === "application/pdf";
+    const fileName = isPdf ? "receipt.pdf" : "receipt.jpg";
+    formData.append("file", blob, fileName);
+  } else {
+    // On native, use the URI-based object that React Native FormData supports
+    const isPdf = fileUri.toLowerCase().endsWith(".pdf");
+    formData.append("file", {
+      uri: fileUri,
+      type: isPdf ? "application/pdf" : "image/jpeg",
+      name: isPdf ? "receipt.pdf" : "receipt.jpg",
+    } as any);
+  }
+
+  formData.append("chain_slug", chainSlug);
+
+  const { useAppStore } = require("../stores/useAppStore");
+  const token = useAppStore.getState().accessToken;
+
+  const res = await axios.post<ReceiptUploadResponse>(
+    `${BASE_URL}/users/me/purchases/upload-receipt`,
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      timeout: 60000, // 60s — OCR can take a while
+    }
   );
   return res.data;
 }
@@ -1006,6 +1117,24 @@ export async function getPurchaseItems(orderId: string): Promise<PurchaseItemDet
   return res.data;
 }
 
+export async function fetchReceiptBlob(orderId: string): Promise<{ url: string; isPdf: boolean }> {
+  const res = await apiClient.get(`/users/me/purchases/${orderId}/receipt`, {
+    responseType: "blob",
+  });
+  const blob = res.data as Blob;
+  const isPdf = blob.type === "application/pdf";
+  const url = URL.createObjectURL(blob);
+  return { url, isPdf };
+}
+
+export async function updatePurchaseOrder(
+  orderId: string,
+  data: { chain_slug?: string }
+): Promise<PurchaseOrderItem> {
+  const res = await apiClient.patch<PurchaseOrderItem>(`/users/me/purchases/${orderId}`, data);
+  return res.data;
+}
+
 export async function getPurchaseHabits(): Promise<PurchaseHabit[]> {
   const res = await apiClient.get<PurchaseHabit[]>("/users/me/purchase-habits");
   return res.data;
@@ -1013,6 +1142,23 @@ export async function getPurchaseHabits(): Promise<PurchaseHabit[]> {
 
 export async function getSmartList(): Promise<SmartListItem[]> {
   const res = await apiClient.get<SmartListItem[]>("/users/me/smart-list");
+  return res.data;
+}
+
+export async function syncSmartListToWatchlist(
+  productIds: string[]
+): Promise<{ added: number; total_requested: number }> {
+  const res = await apiClient.post<{ added: number; total_requested: number }>(
+    "/users/me/smart-list/sync-watchlist",
+    { product_ids: productIds }
+  );
+  return res.data;
+}
+
+export async function backfillReceiptProducts(): Promise<{ matched: number; total: number }> {
+  const res = await apiClient.post<{ matched: number; total: number }>(
+    "/users/me/purchases/backfill-products"
+  );
   return res.data;
 }
 
