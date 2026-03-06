@@ -104,9 +104,16 @@ export default function CompareScreen() {
           >
             <View style={styles.offerHeader}>
               <View style={[styles.chainDot, { backgroundColor: chainColor }]} />
-              <Text variant="titleMedium" style={styles.chainName}>
-                {offer.chain_name}
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text variant="titleMedium" style={styles.chainName}>
+                  {offer.chain_name}
+                </Text>
+                {offer.product_name && (
+                  <Text variant="bodySmall" style={styles.productSubtitle} numberOfLines={2}>
+                    {offer.product_name}
+                  </Text>
+                )}
+              </View>
               {isCheapest && (
                 <View style={styles.bestBadge}>
                   <Text style={styles.bestBadgeText}>MIGLIOR PREZZO</Text>
@@ -205,7 +212,8 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginRight: 8,
   },
-  chainName: { fontWeight: "bold", flex: 1, color: "#1a1a1a" },
+  chainName: { fontWeight: "bold", color: "#1a1a1a" },
+  productSubtitle: { color: "#777", fontSize: 12, marginTop: 2 },
   bestBadge: {
     backgroundColor: "rgba(73, 177, 112, 0.15)",
     paddingHorizontal: 8,

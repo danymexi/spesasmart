@@ -58,6 +58,11 @@ export default function ProductComparison({ productId }: Props) {
               >
                 {offer.chain_name}
               </Text>
+              {offer.product_name && (
+                <Text variant="labelSmall" style={styles.productName} numberOfLines={1}>
+                  {offer.product_name}
+                </Text>
+              )}
             </View>
             <View style={styles.barContainer}>
               <View
@@ -103,6 +108,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
   chainLabel: { width: 90 },
   chainName: { fontSize: 13, color: "#1a1a1a" },
+  productName: { fontSize: 11, color: "#888", marginTop: 1 },
   barContainer: {
     flex: 1,
     height: 24,

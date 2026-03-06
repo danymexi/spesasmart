@@ -330,6 +330,8 @@ export interface ShoppingListItem {
 export interface CompareOffer {
   chain_name: string;
   chain_slug: string;
+  product_name: string;
+  product_image_url: string | null;
   offer_price: number;
   original_price: number | null;
   discount_pct: number | null;

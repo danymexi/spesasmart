@@ -1005,6 +1005,8 @@ async def get_best_price(
 class CompareOfferResponse(BaseModel):
     chain_name: str
     chain_slug: str
+    product_name: str
+    product_image_url: str | None
     offer_price: Decimal
     original_price: Decimal | None
     discount_pct: Decimal | None
@@ -1039,7 +1041,7 @@ async def compare_prices(
     # Get all active offers for this product + similar products
     offers_result = await db.execute(
         select(Offer)
-        .options(joinedload(Offer.chain))
+        .options(joinedload(Offer.chain), joinedload(Offer.product))
         .where(
             Offer.product_id.in_(product_ids),
             Offer.valid_from <= today,
@@ -1063,6 +1065,8 @@ async def compare_prices(
             CompareOfferResponse(
                 chain_name=o.chain.name if o.chain else "Unknown",
                 chain_slug=o.chain.slug if o.chain else "",
+                product_name=o.product.name if o.product else "",
+                product_image_url=o.product.image_url if o.product else None,
                 offer_price=o.offer_price,
                 original_price=o.original_price,
                 discount_pct=o.discount_pct,
