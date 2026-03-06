@@ -30,8 +30,12 @@ class SupermarketCredential(Base):
         UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="CASCADE")
     )
     chain_slug: Mapped[str] = mapped_column(String(50), nullable=False)
-    encrypted_email: Mapped[str] = mapped_column(Text, nullable=False)
-    encrypted_password: Mapped[str] = mapped_column(Text, nullable=False)
+    encrypted_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encrypted_password: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encrypted_session: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     is_valid: Mapped[bool] = mapped_column(Boolean, default=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(

@@ -36,6 +36,67 @@ class EsselungaOrderScraper(OrderScraperBase):
         self._playwright = None
         self._logged_in = False
 
+    async def login_with_session(self, session_data: dict) -> bool:
+        """Log in using a saved Playwright storageState (cookies + localStorage)."""
+        try:
+            from playwright.async_api import async_playwright
+
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.launch(headless=True)
+            context = await self._browser.new_context(
+                viewport={"width": 1280, "height": 720},
+                locale="it-IT",
+                timezone_id="Europe/Rome",
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+            )
+            context.set_default_timeout(30000)
+
+            # Load cookies from session
+            cookies = session_data.get("cookies", [])
+            if cookies:
+                await context.add_cookies(cookies)
+
+            self._page = await context.new_page()
+
+            # Navigate and verify session
+            logger.info("Esselunga: loading site with saved session...")
+            try:
+                await self._page.goto(
+                    f"{SITE_URL}/commerce/nav/supermercato/store/home",
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+            except Exception:
+                pass
+            await self._page.wait_for_timeout(3000)
+
+            # Verify session is valid
+            test = await self._page.evaluate(f"""async () => {{
+                try {{
+                    const resp = await fetch("{BASE_URL}/nav/supermercato", {{
+                        headers: {{ "Accept": "application/json" }},
+                        credentials: "include",
+                    }});
+                    return {{ ok: resp.ok, status: resp.status }};
+                }} catch (e) {{ return {{ error: e.message }}; }}
+            }}""")
+
+            if test and test.get("ok"):
+                self._logged_in = True
+                logger.info("Esselunga: session login successful.")
+                return True
+            else:
+                logger.warning("Esselunga: session expired or invalid: %s", test)
+                return False
+
+        except Exception:
+            logger.exception("Esselunga: session login failed.")
+            return False
+
     async def login(self, email: str, password: str) -> bool:
         """Log in via Playwright — loads the SPA, fills credentials, submits."""
         try:

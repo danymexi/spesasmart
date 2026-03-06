@@ -12,7 +12,7 @@ function showAlert(title: string, message: string) {
   }
 }
 import { useAppStore } from "../../stores/useAppStore";
-import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains, getNearbyStores, updateUserLocation, getSupermarketAccounts, addSupermarketAccount, removeSupermarketAccount, triggerPurchaseSync } from "../../services/api";
+import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains, getNearbyStores, updateUserLocation, getSupermarketAccounts, removeSupermarketAccount, triggerPurchaseSync } from "../../services/api";
 import type { NearbyChainInfo, SupermarketAccount } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors, glassCard } from "../../styles/glassStyles";
@@ -440,23 +440,11 @@ const SUPERMARKET_CHAINS = [
 
 function SupermarketAccountsSection() {
   const queryClient = useQueryClient();
-  const [selectedChain, setSelectedChain] = useState<string | null>(null);
-  const [smEmail, setSmEmail] = useState("");
-  const [smPassword, setSmPassword] = useState("");
+  const [showInstructions, setShowInstructions] = useState<string | null>(null);
 
   const { data: accounts } = useQuery({
     queryKey: ["supermarketAccounts"],
     queryFn: getSupermarketAccounts,
-  });
-
-  const addMutation = useMutation({
-    mutationFn: () => addSupermarketAccount(selectedChain!, smEmail, smPassword),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["supermarketAccounts"] });
-      setSelectedChain(null);
-      setSmEmail("");
-      setSmPassword("");
-    },
   });
 
   const removeMutation = useMutation({
@@ -472,22 +460,49 @@ function SupermarketAccountsSection() {
 
   const connectedSlugs = new Set((accounts || []).map((a) => a.chain_slug));
 
+  const getStatusColor = (acc: SupermarketAccount) => {
+    if (acc.session_status === "active" && acc.is_valid) return "#2E7D32";
+    if (acc.session_status === "expired" || !acc.is_valid) return "#E65100";
+    return "#9E9E9E";
+  };
+
+  const getStatusLabel = (acc: SupermarketAccount) => {
+    if (acc.session_status === "active" && acc.is_valid) return "Connesso";
+    if (acc.session_status === "expired" || !acc.is_valid) return "Sessione scaduta";
+    return "Non connesso";
+  };
+
+  const getHelperCommand = (slug: string) =>
+    `cd ~/spesasmart/backend && PYTHONPATH=. python -m app.scripts.${slug}_session_helper`;
+
   return (
     <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
       {/* Connected accounts */}
       {accounts && accounts.length > 0 && accounts.map((acc) => (
         <View key={acc.chain_slug} style={smStyles.accountRow}>
           <View style={{ flex: 1 }}>
-            <Text style={smStyles.accountChain}>
-              {acc.chain_slug.charAt(0).toUpperCase() + acc.chain_slug.slice(1)}
-            </Text>
-            <Text style={smStyles.accountEmail}>{acc.masked_email}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={smStyles.accountChain}>
+                {acc.chain_slug.charAt(0).toUpperCase() + acc.chain_slug.slice(1)}
+              </Text>
+              <View style={[smStyles.statusBadge, { backgroundColor: getStatusColor(acc) + "20" }]}>
+                <View style={[smStyles.statusDot, { backgroundColor: getStatusColor(acc) }]} />
+                <Text style={[smStyles.statusText, { color: getStatusColor(acc) }]}>
+                  {getStatusLabel(acc)}
+                </Text>
+              </View>
+            </View>
             {acc.last_error && (
               <Text style={smStyles.accountError}>{acc.last_error}</Text>
             )}
             {acc.last_synced_at && (
               <Text style={smStyles.accountSync}>
                 Ultimo sync: {new Date(acc.last_synced_at).toLocaleDateString("it-IT")}
+              </Text>
+            )}
+            {(acc.session_status === "expired" || !acc.is_valid) && (
+              <Text style={smStyles.accountHint}>
+                Riesegui il login manuale dal Mac per ricollegare.
               </Text>
             )}
           </View>
@@ -514,68 +529,48 @@ function SupermarketAccountsSection() {
         </View>
       ))}
 
-      {/* Add new account */}
-      {!selectedChain ? (
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          {SUPERMARKET_CHAINS.filter((c) => !connectedSlugs.has(c.slug)).map((c) => (
-            <Chip
-              key={c.slug}
-              onPress={() => setSelectedChain(c.slug)}
-              icon="plus"
-              compact
-            >
-              {c.label}
-            </Chip>
-          ))}
-        </View>
-      ) : (
+      {/* Unconnected chains */}
+      {SUPERMARKET_CHAINS.filter((c) => !connectedSlugs.has(c.slug)).length > 0 && (
         <View style={{ marginTop: 8 }}>
-          <Text variant="bodyMedium" style={{ fontWeight: "600", marginBottom: 8, color: "#1a1a1a" }}>
-            Collega {selectedChain.charAt(0).toUpperCase() + selectedChain.slice(1)}
-          </Text>
-          <TextInput
-            label="Email"
-            value={smEmail}
-            onChangeText={setSmEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            mode="outlined"
-            dense
-            style={{ marginBottom: 8 }}
-          />
-          <TextInput
-            label="Password"
-            value={smPassword}
-            onChangeText={setSmPassword}
-            secureTextEntry
-            mode="outlined"
-            dense
-            style={{ marginBottom: 8 }}
-          />
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <Button
-              mode="contained"
-              onPress={() => addMutation.mutate()}
-              loading={addMutation.isPending}
-              disabled={!smEmail || !smPassword || addMutation.isPending}
-              compact
-              style={{ flex: 1 }}
-            >
-              Collega
-            </Button>
-            <Button
-              mode="outlined"
-              onPress={() => { setSelectedChain(null); setSmEmail(""); setSmPassword(""); }}
-              compact
-            >
-              Annulla
-            </Button>
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            {SUPERMARKET_CHAINS.filter((c) => !connectedSlugs.has(c.slug)).map((c) => (
+              <Chip
+                key={c.slug}
+                onPress={() => setShowInstructions(showInstructions === c.slug ? null : c.slug)}
+                icon="link-plus"
+                compact
+              >
+                Collega {c.label}
+              </Chip>
+            ))}
           </View>
-          {addMutation.isError && (
-            <Text style={smStyles.accountError}>
-              Errore nel collegamento. Verifica le credenziali.
+        </View>
+      )}
+
+      {/* Instructions for connecting */}
+      {showInstructions && (
+        <View style={smStyles.instructionsBox}>
+          <Text style={smStyles.instructionsTitle}>
+            Come collegare {showInstructions.charAt(0).toUpperCase() + showInstructions.slice(1)}
+          </Text>
+          <Text style={smStyles.instructionsText}>
+            Esegui questo comando sul tuo Mac:
+          </Text>
+          <View style={smStyles.commandBox}>
+            <Text style={smStyles.commandText} selectable>
+              {getHelperCommand(showInstructions)}
             </Text>
-          )}
+          </View>
+          <Text style={smStyles.instructionsText}>
+            Si aprira' un browser dove potrai fare login con qualsiasi metodo (Google, passkey, email/password). La sessione verra' salvata automaticamente.
+          </Text>
+          <Button
+            mode="text"
+            compact
+            onPress={() => setShowInstructions(null)}
+          >
+            Chiudi
+          </Button>
         </View>
       )}
     </View>
@@ -591,9 +586,36 @@ const smStyles = StyleSheet.create({
     borderBottomColor: "rgba(0,0,0,0.06)",
   },
   accountChain: { fontWeight: "600", color: "#1a1a1a", fontSize: 14 },
-  accountEmail: { color: "#666", fontSize: 12, marginTop: 2 },
   accountError: { color: "#C62828", fontSize: 11, marginTop: 2 },
   accountSync: { color: "#666", fontSize: 11, marginTop: 2 },
+  accountHint: { color: "#E65100", fontSize: 11, marginTop: 2, fontStyle: "italic" },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    gap: 4,
+  },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 11, fontWeight: "600" },
+  instructionsBox: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: "rgba(0,0,0,0.03)",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+  },
+  instructionsTitle: { fontWeight: "600", color: "#1a1a1a", fontSize: 13, marginBottom: 8 },
+  instructionsText: { color: "#555", fontSize: 12, marginBottom: 8, lineHeight: 18 },
+  commandBox: {
+    backgroundColor: "#1a1a1a",
+    borderRadius: 6,
+    padding: 10,
+    marginBottom: 8,
+  },
+  commandText: { color: "#4FC3F7", fontSize: 11, fontFamily: Platform.OS === "web" ? "monospace" : undefined },
 });
 
 const CHAIN_OPTIONS = [

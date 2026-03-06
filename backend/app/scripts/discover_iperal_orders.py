@@ -265,6 +265,43 @@ async def run() -> None:
     for ep in output["promising_endpoints"]:
         logger.info("  %s %s => %d", ep["method"], ep["path"], ep["status"])
 
+    # Offer to upload session to backend
+    await _upload_session()
+
+
+BACKEND_BASE = "http://localhost:8000/api/v1"
+
+
+async def _upload_session() -> None:
+    """Upload the Iperal session to the backend API."""
+    if not SESSION_FILE.exists():
+        return
+
+    print()
+    print("Vuoi caricare la sessione nel backend?")
+    token = input("JWT token (invio per saltare): ").strip()
+    if not token:
+        logger.info("Upload saltato.")
+        return
+
+    session_data = json.loads(SESSION_FILE.read_text())
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{BACKEND_BASE}/users/me/supermarket-accounts/iperal/session",
+                json=session_data,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            if resp.status_code == 200:
+                logger.info("Sessione Iperal caricata nel backend!")
+            else:
+                logger.error("Upload fallito (status %d): %s", resp.status_code, resp.text[:300])
+    except Exception as e:
+        logger.error("Errore nell'upload: %s", e)
+
 
 def main() -> None:
     asyncio.run(run())

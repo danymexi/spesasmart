@@ -431,6 +431,7 @@ export interface SupermarketAccount {
   is_valid: boolean;
   last_error: string | null;
   last_synced_at: string | null;
+  session_status: "active" | "expired" | "missing";
 }
 
 export interface PurchaseOrderItem {
@@ -963,6 +964,26 @@ export async function removeSupermarketAccount(chainSlug: string): Promise<void>
 export async function triggerPurchaseSync(chainSlug: string): Promise<{ status: string; message: string }> {
   const res = await apiClient.post<{ status: string; message: string }>(
     `/users/me/supermarket-accounts/${chainSlug}/sync`
+  );
+  return res.data;
+}
+
+export async function uploadSession(
+  chainSlug: string,
+  sessionData: object
+): Promise<SupermarketAccount> {
+  const res = await apiClient.post<SupermarketAccount>(
+    `/users/me/supermarket-accounts/${chainSlug}/session`,
+    sessionData
+  );
+  return res.data;
+}
+
+export async function getSessionStatus(
+  chainSlug: string
+): Promise<{ status: string; detail: string }> {
+  const res = await apiClient.get<{ status: string; detail: string }>(
+    `/users/me/supermarket-accounts/${chainSlug}/session-status`
   );
   return res.data;
 }

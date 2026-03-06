@@ -77,28 +77,49 @@ class PurchaseSyncService:
             await session.commit()
             await session.refresh(sync_log)
 
-        # Decrypt credentials (never log them)
-        try:
-            email = decrypt(cred.encrypted_email)
-            password = decrypt(cred.encrypted_password)
-        except ValueError as e:
-            await _finish_sync_log(sync_log.id, "failed", error_message=str(e))
-            await _mark_cred_invalid(cred.id, str(e))
-            return {"status": "error", "error": str(e)}
-
         # Login + fetch orders
         scraper = _get_scraper(chain_slug)
+        logged_in = False
+
+        # Try session-based login first
+        if cred.encrypted_session:
+            try:
+                import json
+                session_data = json.loads(decrypt(cred.encrypted_session))
+                logged_in = await scraper.login_with_session(session_data)
+                if not logged_in:
+                    logger.info(
+                        "Session expired for user=%s chain=%s, trying credentials...",
+                        user_id, chain_slug,
+                    )
+            except ValueError as e:
+                logger.warning("Cannot decrypt session for user=%s chain=%s: %s", user_id, chain_slug, e)
+
+        # Fallback to email/password login
+        if not logged_in and cred.encrypted_email and cred.encrypted_password:
+            try:
+                email = decrypt(cred.encrypted_email)
+                password = decrypt(cred.encrypted_password)
+                logged_in = await scraper.login(email, password)
+            except ValueError as e:
+                await _finish_sync_log(sync_log.id, "failed", error_message=str(e))
+                await _mark_cred_invalid(cred.id, str(e))
+                return {"status": "error", "error": str(e)}
+
+        if not logged_in:
+            error = (
+                "Sessione scaduta — riesegui il login manuale"
+                if cred.encrypted_session
+                else "Login failed — check credentials."
+            )
+            await _finish_sync_log(sync_log.id, "failed", error_message=error)
+            await _mark_cred_invalid(cred.id, error)
+            await scraper.close()
+            return {"status": "error", "error": error}
+
+        # Fetch orders since last sync
         try:
-            logged_in = await scraper.login(email, password)
-            if not logged_in:
-                error = "Login failed — check credentials."
-                await _finish_sync_log(sync_log.id, "failed", error_message=error)
-                await _mark_cred_invalid(cred.id, error)
-                return {"status": "error", "error": error}
-
-            # Fetch orders since last sync
             orders = await scraper.fetch_orders(since=cred.last_synced_at)
-
         except Exception as e:
             error = f"Scraper error: {e}"
             logger.exception("Sync failed for user=%s chain=%s", user_id, chain_slug)

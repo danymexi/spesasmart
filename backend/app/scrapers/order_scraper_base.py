@@ -52,6 +52,15 @@ class OrderScraperBase(ABC):
         Raises on unexpected errors.
         """
 
+    async def login_with_session(self, session_data: dict) -> bool:
+        """Authenticate using a saved browser session (storageState).
+
+        Returns True on success, False if the session is expired/invalid.
+        Subclasses should override this to load cookies/localStorage and
+        verify the session is still valid.
+        """
+        return False
+
     @abstractmethod
     async def fetch_orders(self, since: datetime | None = None) -> list[Order]:
         """Fetch orders, optionally filtering to those after `since`.

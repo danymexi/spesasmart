@@ -34,6 +34,46 @@ class IperalOrderScraper(OrderScraperBase):
         self._client: httpx.AsyncClient | None = None
         self._logged_in = False
 
+    async def login_with_session(self, session_data: dict) -> bool:
+        """Authenticate using a saved session (cookies from Playwright storageState)."""
+        cookies = httpx.Cookies()
+        for c in session_data.get("cookies", []):
+            cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
+
+        self._client = httpx.AsyncClient(
+            base_url=BASE_URL,
+            cookies=cookies,
+            timeout=30.0,
+            follow_redirects=True,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": f"{BASE_URL}/",
+            },
+        )
+
+        try:
+            resp = await self._client.get("/ebsn/api/auth/test")
+            if resp.status_code == 200:
+                data = resp.json()
+                user_id = (
+                    data.get("data", {}).get("user", {}).get("userId")
+                    or data.get("user", {}).get("userId")
+                    or 0
+                )
+                if user_id and int(user_id) > 0:
+                    self._logged_in = True
+                    logger.info("Iperal: session login successful (userId=%s).", user_id)
+                    return True
+
+            logger.warning("Iperal: session expired or invalid.")
+            return False
+
+        except Exception:
+            logger.exception("Iperal: session login error.")
+            return False
+
     async def login(self, email: str, password: str) -> bool:
         """Authenticate via the Iperal API."""
         self._client = httpx.AsyncClient(

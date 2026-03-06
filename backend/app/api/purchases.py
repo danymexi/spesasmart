@@ -44,6 +44,7 @@ class SupermarketAccountResponse(BaseModel):
     is_valid: bool
     last_error: str | None
     last_synced_at: str | None
+    session_status: str  # "active" | "expired" | "missing"
 
 
 class PurchaseOrderResponse(BaseModel):
@@ -129,6 +130,7 @@ async def create_supermarket_account(
         is_valid=True,
         last_error=None,
         last_synced_at=None,
+        session_status="missing",
     )
 
 
@@ -147,11 +149,24 @@ async def list_supermarket_accounts(
 
     accounts = []
     for cred in creds:
-        try:
-            email = decrypt(cred.encrypted_email)
-            masked = mask_email(email)
-        except Exception:
-            masked = "***"
+        masked = "—"
+        if cred.encrypted_email:
+            try:
+                email = decrypt(cred.encrypted_email)
+                masked = mask_email(email)
+            except Exception:
+                masked = "***"
+
+        # Determine session status
+        if cred.encrypted_session:
+            if cred.session_expires_at and cred.session_expires_at < datetime.now(timezone.utc):
+                sess_status = "expired"
+            elif cred.is_valid:
+                sess_status = "active"
+            else:
+                sess_status = "expired"
+        else:
+            sess_status = "missing"
 
         accounts.append(SupermarketAccountResponse(
             chain_slug=cred.chain_slug,
@@ -159,6 +174,7 @@ async def list_supermarket_accounts(
             is_valid=cred.is_valid,
             last_error=cred.last_error,
             last_synced_at=cred.last_synced_at.isoformat() if cred.last_synced_at else None,
+            session_status=sess_status,
         ))
 
     return accounts
@@ -228,6 +244,94 @@ async def trigger_sync(
 
     background_tasks.add_task(_run_sync, user.id, chain_slug)
     return SyncResponse(status="started", message="Sync avviato in background.")
+
+
+# ── Session-based auth ───────────────────────────────────────────────────────
+
+@router.post("/supermarket-accounts/{chain_slug}/session", response_model=SupermarketAccountResponse)
+async def upload_session(
+    chain_slug: str,
+    session_data: dict,
+    background_tasks: BackgroundTasks,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a Playwright storageState JSON as session for a supermarket chain."""
+    if chain_slug not in SUPPORTED_CHAINS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported chain: {chain_slug}. Supported: {', '.join(SUPPORTED_CHAINS)}",
+        )
+
+    import json
+    encrypted = encrypt(json.dumps(session_data))
+
+    result = await db.execute(
+        select(SupermarketCredential).where(
+            SupermarketCredential.user_id == user.id,
+            SupermarketCredential.chain_slug == chain_slug,
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.encrypted_session = encrypted
+        existing.is_valid = True
+        existing.last_error = None
+        existing.updated_at = datetime.now(timezone.utc)
+    else:
+        cred = SupermarketCredential(
+            user_id=user.id,
+            chain_slug=chain_slug,
+            encrypted_session=encrypted,
+        )
+        db.add(cred)
+
+    await db.commit()
+
+    # Trigger initial sync in background
+    background_tasks.add_task(_run_sync, user.id, chain_slug)
+
+    return SupermarketAccountResponse(
+        chain_slug=chain_slug,
+        masked_email="—",
+        is_valid=True,
+        last_error=None,
+        last_synced_at=None,
+        session_status="active",
+    )
+
+
+@router.get("/supermarket-accounts/{chain_slug}/session-status")
+async def get_session_status(
+    chain_slug: str,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check session status for a specific chain."""
+    result = await db.execute(
+        select(SupermarketCredential).where(
+            SupermarketCredential.user_id == user.id,
+            SupermarketCredential.chain_slug == chain_slug,
+        )
+    )
+    cred = result.scalar_one_or_none()
+    if not cred:
+        return {"status": "missing", "detail": "Account non collegato."}
+
+    if cred.encrypted_session:
+        if cred.session_expires_at and cred.session_expires_at < datetime.now(timezone.utc):
+            return {"status": "expired", "detail": "Sessione scaduta — riesegui il login manuale."}
+        if cred.is_valid:
+            return {"status": "active", "detail": "Sessione attiva."}
+        return {"status": "expired", "detail": cred.last_error or "Sessione non valida."}
+
+    if cred.encrypted_email:
+        if cred.is_valid:
+            return {"status": "active", "detail": "Credenziali attive."}
+        return {"status": "expired", "detail": cred.last_error or "Credenziali non valide."}
+
+    return {"status": "missing", "detail": "Nessuna sessione o credenziale trovata."}
 
 
 # ── Purchase history ─────────────────────────────────────────────────────────
