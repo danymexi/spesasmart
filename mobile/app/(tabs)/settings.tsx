@@ -157,27 +157,30 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={styles.container}>
-      {/* Profile section */}
+      {/* ── 1. Profile ── */}
       <View style={styles.section}>
         <List.Section>
           <List.Subheader style={styles.listSubheader}>Profilo</List.Subheader>
           {isLoggedIn ? (
             <View style={styles.loggedInSection}>
               <List.Item
-                title="Email"
-                description={userEmail}
+                title={userEmail}
+                description="Account attivo"
                 titleStyle={styles.listTitle}
                 descriptionStyle={styles.listDescription}
-                left={(props) => <List.Icon {...props} icon="account" />}
+                left={(props) => <List.Icon {...props} icon="account-circle" color={glassColors.greenMedium} />}
+                right={() => (
+                  <Button
+                    mode="outlined"
+                    onPress={handleLogout}
+                    icon="logout"
+                    compact
+                    style={{ borderColor: "#ccc" }}
+                  >
+                    Esci
+                  </Button>
+                )}
               />
-              <Button
-                mode="outlined"
-                onPress={handleLogout}
-                style={styles.logoutButton}
-                icon="logout"
-              >
-                Esci
-              </Button>
             </View>
           ) : (
             <View style={styles.createSection}>
@@ -231,62 +234,77 @@ export default function SettingsScreen() {
         </List.Section>
       </View>
 
-      {/* Notifications */}
+      {/* ── 2. Supermercati Preferiti ── */}
       <View style={styles.section}>
         <List.Section>
-          <List.Subheader style={styles.listSubheader}>Notifiche</List.Subheader>
-          <List.Item
-            title="Notifiche Push"
-            description="Ricevi avvisi quando i tuoi prodotti sono in offerta"
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
-            left={(props) => <List.Icon {...props} icon="bell" />}
-            right={() => (
-              <Switch
-                value={pushEnabled}
-                onValueChange={handleEnablePush}
-                disabled={!isLoggedIn}
-              />
-            )}
-          />
-          <List.Item
-            title="Telegram Bot"
-            description="Cerca @SpesaSmartBot su Telegram"
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
-            left={(props) => <List.Icon {...props} icon="send" />}
-          />
-          <List.Item
-            title="Riepilogo settimanale"
-            description={
-              userProfile?.notification_mode === "digest"
-                ? "Attivo: ricevi un riepilogo ogni lunedi'"
-                : "Disattivo: ricevi notifiche immediate"
-            }
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
-            left={(props) => <List.Icon {...props} icon="calendar-week" />}
-            right={() => (
-              <Switch
-                value={userProfile?.notification_mode === "digest"}
-                onValueChange={(v) =>
-                  notificationModeMutation.mutate(v ? "digest" : "instant")
-                }
-                disabled={!isLoggedIn || notificationModeMutation.isPending}
-              />
-            )}
-          />
+          <List.Subheader style={styles.listSubheader}>Supermercati</List.Subheader>
+          <Text variant="bodySmall" style={styles.sectionDescription}>
+            Seleziona le catene che frequenti per offerte personalizzate.
+          </Text>
+          <NearbyStoresSelector isLoggedIn={isLoggedIn} />
         </List.Section>
       </View>
 
-      {/* Marche Preferite */}
+      {/* ── 3. Notifiche ── */}
+      {isLoggedIn && (
+        <View style={styles.section}>
+          <List.Section>
+            <List.Subheader style={styles.listSubheader}>Notifiche</List.Subheader>
+            <List.Item
+              title="Notifiche Push"
+              description="Avvisi per prodotti in offerta"
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDescription}
+              left={(props) => <List.Icon {...props} icon="bell-outline" />}
+              right={() => (
+                <Switch
+                  value={pushEnabled}
+                  onValueChange={handleEnablePush}
+                />
+              )}
+            />
+            <List.Item
+              title="Riepilogo settimanale"
+              description={
+                userProfile?.notification_mode === "digest"
+                  ? "Riepilogo ogni lunedi'"
+                  : "Notifiche immediate"
+              }
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDescription}
+              left={(props) => <List.Icon {...props} icon="calendar-week" />}
+              right={() => (
+                <Switch
+                  value={userProfile?.notification_mode === "digest"}
+                  onValueChange={(v) =>
+                    notificationModeMutation.mutate(v ? "digest" : "instant")
+                  }
+                  disabled={notificationModeMutation.isPending}
+                />
+              )}
+            />
+            <List.Item
+              title="Telegram Bot"
+              description="@SpesaSmartBot"
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDescription}
+              left={(props) => <List.Icon {...props} icon="send" />}
+            />
+          </List.Section>
+        </View>
+      )}
+
+      {/* ── 4. Marche Preferite ── */}
       {isLoggedIn && (
         <View style={styles.section}>
           <List.Section>
             <List.Subheader style={styles.listSubheader}>Marche Preferite</List.Subheader>
+            <Text variant="bodySmall" style={styles.sectionDescription}>
+              Ricevi notifiche quando le tue marche vanno in offerta.
+            </Text>
             <View style={styles.brandInputRow}>
               <TextInput
-                label="Aggiungi marca"
+                label="Cerca marca..."
                 value={brandInput}
                 onChangeText={setBrandInput}
                 mode="outlined"
@@ -300,11 +318,10 @@ export default function SettingsScreen() {
                 compact
                 style={styles.brandAddButton}
               >
-                Aggiungi
+                +
               </Button>
             </View>
 
-            {/* Autocomplete suggestions */}
             {brandInput.length >= 2 && brandSuggestions && brandSuggestions.length > 0 && (
               <View style={styles.suggestionsRow}>
                 {brandSuggestions.map((b) => (
@@ -320,91 +337,86 @@ export default function SettingsScreen() {
               </View>
             )}
 
-            {/* Saved brands list */}
             {userBrands && userBrands.length > 0 ? (
-              userBrands.map((ub) => (
-                <List.Item
-                  key={ub.id}
-                  title={ub.brand_name}
-                  description={ub.category || undefined}
-                  titleStyle={styles.listTitle}
-                  descriptionStyle={styles.listDescription}
-                  left={(props) => <List.Icon {...props} icon="tag-heart" />}
-                  right={() => (
-                    <Button
-                      mode="text"
-                      compact
-                      onPress={() => removeBrandMutation.mutate(ub.id)}
-                      textColor="#D32F2F"
-                      icon="close"
-                    >
-                      {""}
-                    </Button>
-                  )}
-                />
-              ))
+              <View style={styles.brandChipsRow}>
+                {userBrands.map((ub) => (
+                  <Chip
+                    key={ub.id}
+                    onClose={() => removeBrandMutation.mutate(ub.id)}
+                    style={styles.brandChip}
+                    icon="tag-heart"
+                    compact
+                  >
+                    {ub.brand_name}
+                  </Chip>
+                ))}
+              </View>
             ) : (
               <Text variant="bodySmall" style={styles.brandEmptyText}>
-                Nessuna marca salvata. Aggiungi le tue marche preferite per ricevere notifiche.
+                Nessuna marca salvata.
               </Text>
             )}
           </List.Section>
         </View>
       )}
 
-      {/* Account Supermercato (Purchase History) */}
+      {/* ── 5. Strumenti (collapsible) ── */}
       {isLoggedIn && (
         <View style={styles.section}>
           <List.Section>
-            <List.Subheader style={styles.listSubheader}>Account Supermercato</List.Subheader>
-            <Text variant="bodySmall" style={styles.brandEmptyText}>
-              Collega il tuo account per scaricare lo storico ordini e ricevere suggerimenti personalizzati.
-            </Text>
-            <SupermarketAccountsSection />
-            <Button
-              mode="outlined"
-              icon="history"
-              onPress={() => router.push("/purchases")}
-              style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 12 }}
+            <List.Accordion
+              title="Storico e Scontrini"
+              description="Account supermercato, carica scontrini"
+              titleStyle={styles.accordionTitle}
+              descriptionStyle={styles.accordionDescription}
+              left={(props) => <List.Icon {...props} icon="receipt" />}
+              style={styles.accordion}
             >
-              Storico Acquisti
-            </Button>
+              <View style={styles.accordionContent}>
+                <SupermarketAccountsSection />
+                <Button
+                  mode="outlined"
+                  icon="history"
+                  onPress={() => router.push("/purchases")}
+                  style={styles.accordionButton}
+                >
+                  Storico Acquisti
+                </Button>
+              </View>
+            </List.Accordion>
+
+            <List.Accordion
+              title="Carica Scontrini"
+              description="Foto, PDF o importazione automatica"
+              titleStyle={styles.accordionTitle}
+              descriptionStyle={styles.accordionDescription}
+              left={(props) => <List.Icon {...props} icon="camera" />}
+              style={styles.accordion}
+            >
+              <View style={styles.accordionContent}>
+                <ReceiptUploadSection />
+                {Platform.OS === "web" && <EsselungaBookmarkletSection />}
+              </View>
+            </List.Accordion>
           </List.Section>
         </View>
       )}
 
-      {/* Supermercati (Geolocation + Chains) */}
-      <View style={styles.section}>
-        <List.Section>
-          <List.Subheader style={styles.listSubheader}>I Tuoi Supermercati</List.Subheader>
-          <NearbyStoresSelector isLoggedIn={isLoggedIn} />
-          {isLoggedIn && <ReceiptUploadSection />}
-          {isLoggedIn && Platform.OS === "web" && <EsselungaBookmarkletSection />}
-        </List.Section>
-      </View>
-
-      {/* App info */}
+      {/* ── 6. Info ── */}
       <View style={styles.section}>
         <List.Section>
           <List.Subheader style={styles.listSubheader}>Info</List.Subheader>
           <List.Item
-            title="Versione"
-            description="1.0.0"
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
-            left={(props) => <List.Icon {...props} icon="information" />}
-          />
-          <List.Item
-            title="SpesaSmart"
+            title="SpesaSmart v1.0.0"
             description="Confronto prezzi supermercati - Monza e Brianza"
             titleStyle={styles.listTitle}
             descriptionStyle={styles.listDescription}
-            left={(props) => <List.Icon {...props} icon="cart" />}
+            left={(props) => <List.Icon {...props} icon="information-outline" />}
           />
         </List.Section>
         {Platform.OS === "web" && (
           <Button
-            mode="outlined"
+            mode="text"
             icon="refresh"
             onPress={async () => {
               if ("serviceWorker" in navigator) {
@@ -416,6 +428,7 @@ export default function SettingsScreen() {
               window.location.reload();
             }}
             style={styles.reloadButton}
+            labelStyle={{ fontSize: 12 }}
           >
             Ricarica App
           </Button>
@@ -1682,59 +1695,42 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
 
   return (
     <View>
-      {/* Geolocation button */}
+      {/* Chain toggles */}
+      {CHAIN_OPTIONS.map((chain) => {
+        const nearby = nearbyData?.find((nc) => nc.chain_slug === chain.slug);
+        return (
+          <List.Item
+            key={chain.slug}
+            title={chain.label}
+            description={nearby ? `${nearby.store_count} negozi vicini` : undefined}
+            titleStyle={{ color: "#1a1a1a" }}
+            descriptionStyle={{ color: "#888", fontSize: 12 }}
+            left={(props) => <List.Icon {...props} icon="store" />}
+            right={() => (
+              <Switch
+                value={selectedSet.has(chain.slug)}
+                onValueChange={() => toggleChain(chain.slug)}
+                disabled={!isLoggedIn}
+              />
+            )}
+          />
+        );
+      })}
+
+      {/* Geolocation */}
       <View style={styles.geoRow}>
         <Button
-          mode="contained"
+          mode={userLat ? "outlined" : "contained"}
           icon="crosshairs-gps"
           onPress={handleGeolocate}
           loading={locating}
           disabled={locating}
-          style={styles.geoButton}
-          labelStyle={{ fontWeight: "600" }}
+          style={userLat ? styles.geoButtonOutlined : styles.geoButton}
+          compact
         >
-          Usa la mia posizione
+          {userLat ? "Aggiorna posizione" : "Trova supermercati vicini"}
         </Button>
-        {userLat && userLon && (
-          <Text style={styles.geoCoords}>
-            {Number(userLat).toFixed(4)}, {Number(userLon).toFixed(4)}
-          </Text>
-        )}
       </View>
-
-      {/* Nearby chains results */}
-      {nearbyData && nearbyData.length > 0 && (
-        <View style={styles.nearbyInfo}>
-          <Text style={styles.nearbyLabel}>
-            {nearbyData.length} catene trovate entro 20km
-          </Text>
-          {nearbyData.map((nc) => (
-            <Text key={nc.chain_slug} style={styles.nearbyDetail}>
-              {nc.chain_name}: {nc.store_count} negozi (min. {nc.min_distance_km}km)
-            </Text>
-          ))}
-        </View>
-      )}
-
-      {/* Chain toggles */}
-      <Text variant="bodySmall" style={styles.chainHint}>
-        Seleziona le catene. Se nessuna selezionata, le mostra tutte.
-      </Text>
-      {CHAIN_OPTIONS.map((chain) => (
-        <List.Item
-          key={chain.slug}
-          title={chain.label}
-          titleStyle={{ color: "#1a1a1a" }}
-          left={(props) => <List.Icon {...props} icon="store" />}
-          right={() => (
-            <Switch
-              value={selectedSet.has(chain.slug)}
-              onValueChange={() => toggleChain(chain.slug)}
-              disabled={!isLoggedIn}
-            />
-          )}
-        />
-      ))}
     </View>
   );
 }
@@ -1750,27 +1746,30 @@ const styles = StyleSheet.create({
   listSubheader: { color: glassColors.greenDark, fontWeight: "700", fontSize: 14 },
   listTitle: { color: "#1a1a1a" },
   listDescription: { color: "#555" },
+  sectionDescription: { color: "#888", paddingHorizontal: 16, paddingBottom: 8, fontSize: 13 },
   createSection: { paddingHorizontal: 16, paddingBottom: 16 },
   createText: { color: "#555", marginBottom: 12 },
   errorText: { color: "#D32F2F", marginBottom: 8 },
   input: { marginBottom: 12 },
   buttonRow: { flexDirection: "row", gap: 12 },
   authButton: { flex: 1 },
-  loggedInSection: { paddingBottom: 8 },
-  logoutButton: { marginHorizontal: 16, marginBottom: 8 },
+  loggedInSection: { paddingBottom: 4 },
   reloadButton: { marginHorizontal: 16, marginBottom: 12 },
   brandInputRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, gap: 8, marginBottom: 4 },
   brandInput: { flex: 1 },
   brandAddButton: { marginTop: 6 },
   suggestionsRow: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, gap: 6, marginBottom: 8, marginTop: 4 },
   suggestionChip: { marginBottom: 2 },
-  brandEmptyText: { color: "#666", paddingHorizontal: 16, paddingBottom: 12 },
-  chainHint: { color: "#666", paddingHorizontal: 16, paddingBottom: 4 },
-  geoRow: { paddingHorizontal: 16, paddingBottom: 8, gap: 6 },
+  brandChipsRow: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, gap: 6, paddingBottom: 12, marginTop: 4 },
+  brandChip: { marginBottom: 2 },
+  brandEmptyText: { color: "#888", paddingHorizontal: 16, paddingBottom: 12, fontStyle: "italic" },
+  accordion: { paddingLeft: 0 },
+  accordionTitle: { color: "#1a1a1a", fontWeight: "600" },
+  accordionDescription: { color: "#888", fontSize: 12 },
+  accordionContent: { paddingBottom: 8 },
+  accordionButton: { marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
+  geoRow: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
   geoButton: { borderRadius: 12, backgroundColor: glassColors.greenMedium },
-  geoCoords: { fontSize: 11, color: glassColors.textMuted, marginTop: 4 },
-  nearbyInfo: { paddingHorizontal: 16, paddingBottom: 8 },
-  nearbyLabel: { fontSize: 13, fontWeight: "600", color: glassColors.greenDark, marginBottom: 4 },
-  nearbyDetail: { fontSize: 12, color: glassColors.textSecondary, marginBottom: 2 },
+  geoButtonOutlined: { borderRadius: 12 },
   bottomPadding: { height: 96 },
 });
