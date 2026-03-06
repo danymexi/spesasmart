@@ -576,9 +576,36 @@ async def get_catalog_grouped(
         # Representative product = first in group (alphabetical)
         representative = group[0]
         # Merge offers from all products in the group
+        group_ids = {p.id for p in group}
         merged_offers: list[Offer] = []
         for p in group:
             merged_offers.extend(offers_by_product.get(p.id, []))
+
+        # If no offers found in the group, look for offers from similar products
+        # (aligns list view with detail/best-price view which uses _find_similar_ids)
+        if not merged_offers:
+            similar_ids = await _find_similar_ids(representative, db)
+            extra_ids = [sid for sid in similar_ids if sid not in group_ids]
+            if extra_ids:
+                extra_where = [
+                    Offer.product_id.in_(extra_ids),
+                    Offer.valid_from <= today,
+                    Offer.valid_to >= today,
+                ]
+                if chain:
+                    extra_where.append(
+                        Offer.chain_id.in_(
+                            select(Chain.id).where(Chain.slug.in_(chain_slugs))
+                        )
+                    )
+                extra_result = await db.execute(
+                    select(Offer)
+                    .options(joinedload(Offer.chain))
+                    .where(*extra_where)
+                    .order_by(Offer.offer_price.asc())
+                )
+                merged_offers = list(extra_result.unique().scalars().all())
+
         # Sort merged offers by price
         merged_offers.sort(key=lambda o: (o.offer_price, o.price_per_unit or 0))
         # Use best indicator from the group
