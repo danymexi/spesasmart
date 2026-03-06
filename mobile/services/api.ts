@@ -787,15 +787,70 @@ export async function registerPushToken(
   console.log(`Registering push token: ${token}`);
 }
 
-// ── Shopping List ────────────────────────────────────────────────────────────
+// ── Shopping Lists (multiple lists) ──────────────────────────────────────────
 
-export async function getShoppingList(): Promise<ShoppingListItem[]> {
-  const res = await apiClient.get<ShoppingListItem[]>("/users/me/shopping-list");
+export interface ShoppingListInfo {
+  id: string;
+  name: string;
+  emoji: string;
+  is_archived: boolean;
+  item_count: number;
+  unchecked_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getShoppingLists(includeArchived = false): Promise<ShoppingListInfo[]> {
+  const res = await apiClient.get<ShoppingListInfo[]>("/lists", {
+    params: { include_archived: includeArchived },
+  });
   return res.data;
 }
 
-export async function getShoppingListCount(): Promise<number> {
-  const res = await apiClient.get<{ count: number }>("/users/me/shopping-list/count");
+export async function createShoppingList(params: {
+  name?: string;
+  emoji?: string;
+}): Promise<ShoppingListInfo> {
+  const res = await apiClient.post<ShoppingListInfo>("/lists", params);
+  return res.data;
+}
+
+export async function updateShoppingList(
+  listId: string,
+  params: { name?: string; emoji?: string; is_archived?: boolean }
+): Promise<ShoppingListInfo> {
+  const res = await apiClient.put<ShoppingListInfo>(`/lists/${listId}`, params);
+  return res.data;
+}
+
+export async function deleteShoppingList(listId: string): Promise<void> {
+  await apiClient.delete(`/lists/${listId}`);
+}
+
+export async function duplicateShoppingList(
+  listId: string,
+  name?: string
+): Promise<ShoppingListInfo> {
+  const res = await apiClient.post<ShoppingListInfo>(
+    `/lists/${listId}/duplicate`,
+    name ? { name } : {}
+  );
+  return res.data;
+}
+
+// ── Shopping List Items ─────────────────────────────────────────────────────
+
+export async function getShoppingList(listId?: string): Promise<ShoppingListItem[]> {
+  const res = await apiClient.get<ShoppingListItem[]>("/users/me/shopping-list", {
+    params: listId ? { list_id: listId } : undefined,
+  });
+  return res.data;
+}
+
+export async function getShoppingListCount(listId?: string): Promise<number> {
+  const res = await apiClient.get<{ count: number }>("/users/me/shopping-list/count", {
+    params: listId ? { list_id: listId } : undefined,
+  });
   return res.data.count;
 }
 
@@ -807,6 +862,7 @@ export async function addToShoppingList(params: {
   unit?: string;
   offer_id?: string;
   notes?: string;
+  list_id?: string;
 }): Promise<ShoppingListItem> {
   const res = await apiClient.post<ShoppingListItem>("/users/me/shopping-list", params);
   return res.data;
@@ -823,8 +879,10 @@ export async function removeShoppingItem(itemId: string): Promise<void> {
   await apiClient.delete(`/users/me/shopping-list/${itemId}`);
 }
 
-export async function clearCheckedItems(): Promise<void> {
-  await apiClient.delete("/users/me/shopping-list/checked");
+export async function clearCheckedItems(listId?: string): Promise<void> {
+  await apiClient.delete("/users/me/shopping-list/checked", {
+    params: listId ? { list_id: listId } : undefined,
+  });
 }
 
 export async function updateLinkedProducts(itemId: string, productIds: string[]): Promise<ShoppingListItem> {
@@ -875,19 +933,25 @@ export async function updatePreferredChains(chains: string[]): Promise<void> {
 
 // ── Trip Optimizer ───────────────────────────────────────────────────────────
 
-export async function optimizeTrip(): Promise<TripOptimizationResult> {
-  const res = await apiClient.get<TripOptimizationResult>("/users/me/shopping-list/optimize");
+export async function optimizeTrip(listId?: string): Promise<TripOptimizationResult> {
+  const res = await apiClient.get<TripOptimizationResult>("/users/me/shopping-list/optimize", {
+    params: listId ? { list_id: listId } : undefined,
+  });
   return res.data;
 }
 
 // ── Shopping List Compare ───────────────────────────────────────────────────
 
 export async function getShoppingListCompare(
-  chainSlugs?: string
+  chainSlugs?: string,
+  listId?: string,
 ): Promise<ShoppingListCompareResponse> {
+  const params: Record<string, string> = {};
+  if (chainSlugs) params.chain_slugs = chainSlugs;
+  if (listId) params.list_id = listId;
   const res = await apiClient.get<ShoppingListCompareResponse>(
     "/users/me/shopping-list/compare",
-    { params: chainSlugs ? { chain_slugs: chainSlugs } : undefined }
+    { params: Object.keys(params).length > 0 ? params : undefined }
   );
   return res.data;
 }
@@ -895,11 +959,14 @@ export async function getShoppingListCompare(
 // ── Shopping List Suggestions ───────────────────────────────────────────────
 
 export async function getShoppingListSuggestions(
-  limit: number = 10
+  limit: number = 10,
+  listId?: string,
 ): Promise<ShoppingListSuggestionsResponse> {
+  const params: Record<string, string | number> = { limit };
+  if (listId) params.list_id = listId;
   const res = await apiClient.get<ShoppingListSuggestionsResponse>(
     "/users/me/shopping-list/suggestions",
-    { params: { limit } }
+    { params }
   );
   return res.data;
 }

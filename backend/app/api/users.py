@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Chain, Offer, Product, ShoppingListItem, ShoppingListItemProduct, UserBrand, UserProfile, UserStore, UserWatchlist
+from app.models import Chain, Offer, Product, ShoppingList, ShoppingListItem, ShoppingListItemProduct, UserBrand, UserProfile, UserStore, UserWatchlist
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -128,6 +128,7 @@ class ShoppingListAddRequest(BaseModel):
     unit: str | None = None
     offer_id: uuid.UUID | None = None
     notes: str | None = None
+    list_id: uuid.UUID | None = None
 
 
 class LinkedProductDetail(BaseModel):
@@ -661,12 +662,55 @@ async def get_brand_deals(
 
 # --- Shopping List ---
 
+async def _resolve_list_id(
+    user_id: uuid.UUID, list_id: uuid.UUID | None, db: AsyncSession
+) -> uuid.UUID | None:
+    """Resolve the list_id for shopping list operations.
+
+    If list_id is provided, validate it belongs to the user.
+    If not provided, return the user's first (default) list, or None
+    for backward compatibility with items that have no list_id.
+    """
+    if list_id:
+        sl = await db.get(ShoppingList, list_id)
+        if not sl or sl.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Lista non trovata")
+        return list_id
+    return None
+
+
+async def _get_or_create_default_list(
+    user_id: uuid.UUID, db: AsyncSession
+) -> uuid.UUID:
+    """Get the user's default list, creating one if needed."""
+    result = await db.execute(
+        select(ShoppingList)
+        .where(ShoppingList.user_id == user_id, ShoppingList.is_archived.is_(False))
+        .order_by(ShoppingList.created_at)
+        .limit(1)
+    )
+    sl = result.scalar_one_or_none()
+    if sl:
+        return sl.id
+    # Create default list
+    new_list = ShoppingList(user_id=user_id, name="La mia lista", emoji="🛒")
+    db.add(new_list)
+    await db.flush()
+    return new_list.id
+
+
 @router.get("/me/shopping-list", response_model=list[ShoppingListItemResponse])
 async def get_shopping_list(
+    list_id: uuid.UUID | None = Query(None, description="Filter by list ID"),
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the user's shopping list with product/offer details."""
+    filters = [ShoppingListItem.user_id == user.id]
+    if list_id:
+        await _resolve_list_id(user.id, list_id, db)
+        filters.append(ShoppingListItem.list_id == list_id)
+
     result = await db.execute(
         select(ShoppingListItem)
         .options(
@@ -674,7 +718,7 @@ async def get_shopping_list(
             joinedload(ShoppingListItem.offer).joinedload(Offer.chain),
             joinedload(ShoppingListItem.linked_products).joinedload(ShoppingListItemProduct.product),
         )
-        .where(ShoppingListItem.user_id == user.id)
+        .where(*filters)
         .order_by(ShoppingListItem.checked, ShoppingListItem.created_at.desc())
     )
     items = result.unique().scalars().all()
@@ -706,17 +750,23 @@ async def get_shopping_list(
 
 @router.get("/me/shopping-list/count")
 async def get_shopping_list_count(
+    list_id: uuid.UUID | None = Query(None, description="Filter by list ID"),
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the count of unchecked items in the shopping list."""
     from sqlalchemy import func as sql_func
 
+    filters = [
+        ShoppingListItem.user_id == user.id,
+        ShoppingListItem.checked.is_(False),
+    ]
+    if list_id:
+        await _resolve_list_id(user.id, list_id, db)
+        filters.append(ShoppingListItem.list_id == list_id)
+
     result = await db.execute(
-        select(sql_func.count(ShoppingListItem.id)).where(
-            ShoppingListItem.user_id == user.id,
-            ShoppingListItem.checked.is_(False),
-        )
+        select(sql_func.count(ShoppingListItem.id)).where(*filters)
     )
     count = result.scalar() or 0
     return {"count": count}
@@ -731,6 +781,14 @@ async def add_to_shopping_list(
     """Add an item to the shopping list."""
     if not data.product_id and not data.product_ids and not data.custom_name:
         raise HTTPException(status_code=400, detail="Either product_id, product_ids, or custom_name is required")
+
+    # Resolve list_id: use provided one or auto-create default
+    resolved_list_id = None
+    if data.list_id:
+        await _resolve_list_id(user.id, data.list_id, db)
+        resolved_list_id = data.list_id
+    else:
+        resolved_list_id = await _get_or_create_default_list(user.id, db)
 
     product_name = None
     linked_product_ids: list[uuid.UUID] = []
@@ -752,6 +810,7 @@ async def add_to_shopping_list(
         # Create item without product_id (linked via junction table)
         item = ShoppingListItem(
             user_id=user.id,
+            list_id=resolved_list_id,
             product_id=None,
             custom_name=data.custom_name or product_name,
             quantity=data.quantity,
@@ -785,6 +844,7 @@ async def add_to_shopping_list(
 
         item = ShoppingListItem(
             user_id=user.id,
+            list_id=resolved_list_id,
             product_id=data.product_id,
             custom_name=data.custom_name,
             quantity=data.quantity,
@@ -850,17 +910,23 @@ async def toggle_shopping_item(
 
 @router.delete("/me/shopping-list/checked", status_code=204)
 async def clear_checked_items(
+    list_id: uuid.UUID | None = Query(None, description="Filter by list ID"),
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove all checked items from the shopping list."""
     from sqlalchemy import delete as sql_delete
 
+    filters = [
+        ShoppingListItem.user_id == user.id,
+        ShoppingListItem.checked.is_(True),
+    ]
+    if list_id:
+        await _resolve_list_id(user.id, list_id, db)
+        filters.append(ShoppingListItem.list_id == list_id)
+
     await db.execute(
-        sql_delete(ShoppingListItem).where(
-            ShoppingListItem.user_id == user.id,
-            ShoppingListItem.checked.is_(True),
-        )
+        sql_delete(ShoppingListItem).where(*filters)
     )
 
 
@@ -990,14 +1056,18 @@ class TripOptimizationResponse(BaseModel):
 
 @router.get("/me/shopping-list/optimize", response_model=TripOptimizationResponse)
 async def optimize_shopping_trip(
+    list_id: uuid.UUID | None = Query(None, description="Optimize a specific list"),
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Analyse the shopping list and suggest optimal purchasing strategies."""
     from app.services.trip_optimizer import TripOptimizer
 
+    if list_id:
+        await _resolve_list_id(user.id, list_id, db)
+
     optimizer = TripOptimizer()
-    result = await optimizer.optimize(user.id, db)
+    result = await optimizer.optimize(user.id, db, list_id=list_id)
 
     def _convert_trip(trip) -> StoreTripResponse:
         return StoreTripResponse(
@@ -1067,6 +1137,7 @@ class ShoppingListCompareResponse(BaseModel):
 @router.get("/me/shopping-list/compare", response_model=ShoppingListCompareResponse)
 async def compare_shopping_list(
     chain_slugs: str | None = None,
+    list_id: uuid.UUID | None = Query(None, description="Compare a specific list"),
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1079,22 +1150,29 @@ async def compare_shopping_list(
 
     today = date.today()
 
+    if list_id:
+        await _resolve_list_id(user.id, list_id, db)
+
     # Parse chain filter
     filter_chain_slugs: set[str] | None = None
     if chain_slugs:
         filter_chain_slugs = {s.strip() for s in chain_slugs.split(",")}
 
     # Fetch unchecked shopping list items
+    item_filters = [
+        ShoppingListItem.user_id == user.id,
+        ShoppingListItem.checked.is_(False),
+    ]
+    if list_id:
+        item_filters.append(ShoppingListItem.list_id == list_id)
+
     sl_result = await db.execute(
         select(ShoppingListItem)
         .options(
             joinedload(ShoppingListItem.product),
             joinedload(ShoppingListItem.linked_products),
         )
-        .where(
-            ShoppingListItem.user_id == user.id,
-            ShoppingListItem.checked.is_(False),
-        )
+        .where(*item_filters)
     )
     items = sl_result.unique().scalars().all()
 
@@ -1323,6 +1401,7 @@ class ShoppingListSuggestionsResponse(BaseModel):
 @router.get("/me/shopping-list/suggestions", response_model=ShoppingListSuggestionsResponse)
 async def get_shopping_list_suggestions(
     limit: int = 10,
+    list_id: uuid.UUID | None = Query(None, description="Suggest for a specific list"),
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1333,14 +1412,21 @@ async def get_shopping_list_suggestions(
     """
     today = date.today()
 
+    if list_id:
+        await _resolve_list_id(user.id, list_id, db)
+
     # Fetch shopping list product IDs and categories
+    item_filters = [
+        ShoppingListItem.user_id == user.id,
+        ShoppingListItem.checked.is_(False),
+    ]
+    if list_id:
+        item_filters.append(ShoppingListItem.list_id == list_id)
+
     sl_result = await db.execute(
         select(ShoppingListItem)
         .options(joinedload(ShoppingListItem.product))
-        .where(
-            ShoppingListItem.user_id == user.id,
-            ShoppingListItem.checked.is_(False),
-        )
+        .where(*item_filters)
     )
     sl_items = sl_result.unique().scalars().all()
 

@@ -31,6 +31,7 @@ class UserProfile(Base):
     preferred_chains: Mapped[str | None] = mapped_column(String(200), nullable=True)
     lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
     lon: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
+    search_radius_km: Mapped[int] = mapped_column(Integer, default=20, server_default="20")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -40,6 +41,7 @@ class UserProfile(Base):
     brands = relationship("UserBrand", back_populates="user", cascade="all, delete-orphan")
     web_push_subscriptions = relationship("WebPushSubscription", back_populates="user", cascade="all, delete-orphan")
     shopping_list = relationship("ShoppingListItem", back_populates="user", cascade="all, delete-orphan")
+    shopping_lists = relationship("ShoppingList", back_populates="user", cascade="all, delete-orphan")
     supermarket_credentials = relationship("SupermarketCredential", back_populates="user", cascade="all, delete-orphan")
     purchase_orders = relationship("PurchaseOrder", back_populates="user", cascade="all, delete-orphan")
 
@@ -130,6 +132,29 @@ class WebPushSubscription(Base):
     user = relationship("UserProfile", back_populates="web_push_subscriptions")
 
 
+class ShoppingList(Base):
+    __tablename__ = "shopping_lists"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False, default="La mia lista")
+    emoji: Mapped[str] = mapped_column(String(10), default="🛒")
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user = relationship("UserProfile", back_populates="shopping_lists")
+    items = relationship("ShoppingListItem", back_populates="shopping_list", cascade="all, delete-orphan")
+
+
 class ShoppingListItem(Base):
     __tablename__ = "shopping_list_items"
 
@@ -138,6 +163,9 @@ class ShoppingListItem(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="CASCADE")
+    )
+    list_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("shopping_lists.id", ondelete="CASCADE"), nullable=True
     )
     product_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL"), nullable=True
@@ -155,6 +183,7 @@ class ShoppingListItem(Base):
     )
 
     user = relationship("UserProfile", back_populates="shopping_list")
+    shopping_list = relationship("ShoppingList", back_populates="items")
     product = relationship("Product")
     offer = relationship("Offer")
     linked_products = relationship("ShoppingListItemProduct", back_populates="item", cascade="all, delete-orphan")

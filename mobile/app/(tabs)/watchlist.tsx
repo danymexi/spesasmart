@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Button, IconButton, SegmentedButtons, Text, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { getWatchlist, removeFromWatchlist, addToShoppingList } from "../../services/api";
+import { getWatchlist, removeFromWatchlist, addToShoppingList, getShoppingLists } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import PriceIndicator from "../../components/PriceIndicator";
 import ShoppingList from "../../components/ShoppingList";
+import ListSelector from "../../components/ListSelector";
 import { glassCard, glassColors, alertBadgeGlass } from "../../styles/glassStyles";
 
 type TabValue = "watchlist" | "shopping";
@@ -16,6 +17,20 @@ export default function WatchlistScreen() {
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabValue>("watchlist");
+  const [selectedListId, setSelectedListId] = useState<string | undefined>(undefined);
+
+  // Auto-select first list when lists load
+  const { data: lists } = useQuery({
+    queryKey: ["shoppingLists"],
+    queryFn: () => getShoppingLists(),
+    enabled: isLoggedIn && activeTab === "shopping",
+  });
+
+  useEffect(() => {
+    if (lists && lists.length > 0 && !selectedListId) {
+      setSelectedListId(lists[0].id);
+    }
+  }, [lists, selectedListId]);
 
   const {
     data: items,
@@ -74,7 +89,13 @@ export default function WatchlistScreen() {
       </View>
 
       {activeTab === "shopping" ? (
-        <ShoppingList />
+        <View style={{ flex: 1 }}>
+          <ListSelector
+            selectedListId={selectedListId}
+            onSelectList={setSelectedListId}
+          />
+          <ShoppingList listId={selectedListId} />
+        </View>
       ) : (
         <FlatList
           data={items}

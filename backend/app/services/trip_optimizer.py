@@ -215,18 +215,24 @@ class TripOptimizer:
         self,
         user_id: uuid.UUID,
         session: AsyncSession,
+        *,
+        list_id: uuid.UUID | None = None,
     ) -> TripOptimizationResult:
         """Analyse the user's shopping list and return optimisation results."""
         today = date.today()
 
         # 1. Fetch ALL unchecked shopping list items
+        filters = [
+            ShoppingListItem.user_id == user_id,
+            ShoppingListItem.checked.is_(False),
+        ]
+        if list_id:
+            filters.append(ShoppingListItem.list_id == list_id)
+
         sl_result = await session.execute(
             select(ShoppingListItem)
             .options(joinedload(ShoppingListItem.product))
-            .where(
-                ShoppingListItem.user_id == user_id,
-                ShoppingListItem.checked.is_(False),
-            )
+            .where(*filters)
         )
         items = sl_result.unique().scalars().all()
 

@@ -9,14 +9,15 @@ import { glassCard, glassColors } from "../styles/glassStyles";
 interface Props {
   visible: boolean;
   onDismiss: () => void;
+  listId?: string;
 }
 
-export default function TripOptimizer({ visible, onDismiss }: Props) {
+export default function TripOptimizer({ visible, onDismiss, listId }: Props) {
   const [tab, setTab] = useState<string>("single");
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["tripOptimize"],
-    queryFn: optimizeTrip,
+    queryKey: ["tripOptimize", listId],
+    queryFn: () => optimizeTrip(listId),
     enabled: visible,
   });
 

@@ -24,6 +24,7 @@ import {
   clearCheckedItems,
   updateLinkedProducts,
   smartSearch,
+  optimizeTrip,
   type ShoppingListItem,
   type CompareItemInfo,
   type ChainPriceInfo,
@@ -43,7 +44,11 @@ const INVALIDATE_KEYS = [
   "shoppingListSuggestions",
 ];
 
-export default function ShoppingList() {
+interface ShoppingListProps {
+  listId?: string;
+}
+
+export default function ShoppingList({ listId }: ShoppingListProps) {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const nearbyChains = useAppStore((s) => s.nearbyChains);
@@ -91,8 +96,8 @@ export default function ShoppingList() {
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ["shoppingList"],
-    queryFn: getShoppingList,
+    queryKey: ["shoppingList", listId],
+    queryFn: () => getShoppingList(listId),
   });
 
   const hasUnchecked = (items || []).some((i) => !i.checked);
@@ -101,17 +106,18 @@ export default function ShoppingList() {
     data: compareData,
     isLoading: loadingCompare,
   } = useQuery({
-    queryKey: ["shoppingListCompare", nearbyChains.join(",")],
+    queryKey: ["shoppingListCompare", nearbyChains.join(","), listId],
     queryFn: () =>
       getShoppingListCompare(
-        nearbyChains.length > 0 ? nearbyChains.join(",") : undefined
+        nearbyChains.length > 0 ? nearbyChains.join(",") : undefined,
+        listId,
       ),
     enabled: hasUnchecked,
   });
 
   const { data: suggestionsData } = useQuery({
-    queryKey: ["shoppingListSuggestions"],
-    queryFn: () => getShoppingListSuggestions(),
+    queryKey: ["shoppingListSuggestions", listId],
+    queryFn: () => getShoppingListSuggestions(10, listId),
     enabled: (items || []).length > 0,
   });
 
@@ -145,7 +151,7 @@ export default function ShoppingList() {
   });
 
   const clearMutation = useMutation({
-    mutationFn: clearCheckedItems,
+    mutationFn: () => clearCheckedItems(listId),
     onSuccess: invalidateAll,
   });
 
@@ -184,11 +190,11 @@ export default function ShoppingList() {
   const handleAddCustom = () => {
     const name = customInput.trim();
     if (!name) return;
-    addMutation.mutate({ custom_name: name });
+    addMutation.mutate({ custom_name: name, list_id: listId });
   };
 
   const handleAddSuggestion = (productId: string) => {
-    addMutation.mutate({ product_id: productId });
+    addMutation.mutate({ product_id: productId, list_id: listId });
   };
 
   const toggleSuggestionSelection = useCallback((result: SmartSearchResult) => {
@@ -209,6 +215,7 @@ export default function ShoppingList() {
     addMutation.mutate({
       product_ids: ids,
       custom_name: customInput.trim() || undefined,
+      list_id: listId,
     });
   };
 
@@ -530,6 +537,7 @@ export default function ShoppingList() {
       <TripOptimizer
         visible={showOptimizer}
         onDismiss={() => setShowOptimizer(false)}
+        listId={listId}
       />
 
       {/* Linked products detail modal */}

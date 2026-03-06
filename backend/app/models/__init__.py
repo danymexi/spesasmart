@@ -12,6 +12,7 @@ from app.models.purchase import (
 )
 from app.models.store import Store
 from app.models.user import (
+    ShoppingList,
     ShoppingListItem,
     ShoppingListItemProduct,
     UserBrand,
@@ -30,6 +31,7 @@ __all__ = [
     "PurchaseItem",
     "PurchaseOrder",
     "PurchaseSyncLog",
+    "ShoppingList",
     "ShoppingListItem",
     "ShoppingListItemProduct",
     "Store",
