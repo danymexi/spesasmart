@@ -440,6 +440,8 @@ const SUPERMARKET_CHAINS = [
 
 function SupermarketAccountsSection() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const isNative = Platform.OS !== "web";
   const [showInstructions, setShowInstructions] = useState<string | null>(null);
 
   const { data: accounts } = useQuery({
@@ -501,9 +503,22 @@ function SupermarketAccountsSection() {
               </Text>
             )}
             {(acc.session_status === "expired" || !acc.is_valid) && (
-              <Text style={smStyles.accountHint}>
-                Riesegui il login manuale dal Mac per ricollegare.
-              </Text>
+              isNative ? (
+                <Button
+                  mode="text"
+                  compact
+                  icon="refresh"
+                  onPress={() => router.push(`/supermarket-login/${acc.chain_slug}` as any)}
+                  style={{ alignSelf: "flex-start", marginTop: 2 }}
+                  labelStyle={{ fontSize: 12 }}
+                >
+                  Ricollega
+                </Button>
+              ) : (
+                <Text style={smStyles.accountHint}>
+                  Riesegui il login manuale dal Mac per ricollegare.
+                </Text>
+              )
             )}
           </View>
           <View style={{ flexDirection: "row", gap: 4 }}>
@@ -536,7 +551,13 @@ function SupermarketAccountsSection() {
             {SUPERMARKET_CHAINS.filter((c) => !connectedSlugs.has(c.slug)).map((c) => (
               <Chip
                 key={c.slug}
-                onPress={() => setShowInstructions(showInstructions === c.slug ? null : c.slug)}
+                onPress={() => {
+                  if (isNative) {
+                    router.push(`/supermarket-login/${c.slug}` as any);
+                  } else {
+                    setShowInstructions(showInstructions === c.slug ? null : c.slug);
+                  }
+                }}
                 icon="link-plus"
                 compact
               >

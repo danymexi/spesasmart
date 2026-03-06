@@ -93,6 +93,10 @@ export default function RootLayout() {
               name="purchases"
               options={{ title: "Storico Acquisti" }}
             />
+            <Stack.Screen
+              name="supermarket-login/[chain]"
+              options={{ title: "Login Supermercato", presentation: "modal", headerShown: false }}
+            />
           </Stack>
         </QueryClientProvider>
       </PaperProvider>
