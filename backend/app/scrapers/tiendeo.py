@@ -11,7 +11,8 @@ Product data is embedded in the ``__NEXT_DATA__`` JSON blob:
 
 No Playwright needed — plain httpx + BeautifulSoup.
 
-Supported chains: esselunga, lidl, coop, iperal.
+Supported chains: esselunga, lidl, coop, iperal, carrefour, conad, eurospin,
+                  aldi, md-discount, penny, pam.
 """
 
 from __future__ import annotations
@@ -42,6 +43,13 @@ TIENDEO_CHAINS: dict[str, str] = {
     "lidl": "lidl",
     "coop": "coop",
     "iperal": "iperal",
+    "carrefour": "carrefour",
+    "conad": "conad",
+    "eurospin": "eurospin",
+    "aldi": "aldi",
+    "md-discount": "md",
+    "penny": "penny-market",
+    "pam": "pam-panorama",
 }
 
 # Headers that mimic an Italian browser

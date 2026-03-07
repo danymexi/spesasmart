@@ -23,6 +23,13 @@ TARGET_STORES: dict[str, str] = {
     "iperal": "Iperal Lesmo",
     "lidl": "Lidl Biassono",
     "coop": "Coop Monza",
+    "carrefour": "Carrefour Monza",
+    "conad": "Conad Monza",
+    "eurospin": "Eurospin Biassono",
+    "aldi": "Aldi Monza",
+    "md-discount": "MD Discount Monza",
+    "penny": "Penny Market Monza",
+    "pam": "PAM Monza",
 }
 
 
@@ -158,8 +165,30 @@ async def sync_catalog():
     except Exception:
         logger.exception("Esselunga Online catalog sync failed.")
 
+    # --- Carrefour Online (sitemap-based, ~1100 products) ---
+    try:
+        from app.scrapers.carrefour_online import CarrefourOnlineScraper
+
+        carrefour_online = CarrefourOnlineScraper()
+        count = await carrefour_online.scrape()
+        total += count
+        logger.info("Carrefour Online catalog: %d products.", count)
+    except Exception:
+        logger.exception("Carrefour Online catalog sync failed.")
+
+    # --- Penny Online (sitemap + SSR, ~600 products) ---
+    try:
+        from app.scrapers.penny_online import PennyOnlineScraper
+
+        penny_online = PennyOnlineScraper()
+        count = await penny_online.scrape()
+        total += count
+        logger.info("Penny Online catalog: %d products.", count)
+    except Exception:
+        logger.exception("Penny Online catalog sync failed.")
+
     # --- Tiendeo catalogs (all chains) ---
-    for slug in ["esselunga", "lidl", "coop", "iperal"]:
+    for slug in TARGET_STORES:
         try:
             store_id = await _resolve_store_id(slug)
             scraper = CatalogScraper(slug, store_id=store_id)
@@ -270,7 +299,7 @@ async def backfill_product_images():
 
 async def scrape_all_chains():
     """Scrape all chains sequentially."""
-    for slug in ["esselunga", "lidl", "coop", "iperal"]:
+    for slug in TARGET_STORES:
         await scrape_chain(slug)
 
 
@@ -395,10 +424,80 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Weekly notification digest: Monday 8:00 AM
+    # Carrefour: Monday and Thursday at 8:00
+    scheduler.add_job(
+        scrape_chain,
+        CronTrigger(day_of_week="mon,thu", hour=8, minute=0, timezone=TZ),
+        args=["carrefour"],
+        id="scrape_carrefour",
+        name="Scrape Carrefour flyers",
+        replace_existing=True,
+    )
+
+    # Conad: every Monday at 8:30
+    scheduler.add_job(
+        scrape_chain,
+        CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=TZ),
+        args=["conad"],
+        id="scrape_conad",
+        name="Scrape Conad flyers",
+        replace_existing=True,
+    )
+
+    # Eurospin: every Monday at 9:00
+    scheduler.add_job(
+        scrape_chain,
+        CronTrigger(day_of_week="mon", hour=9, minute=0, timezone=TZ),
+        args=["eurospin"],
+        id="scrape_eurospin",
+        name="Scrape Eurospin flyers",
+        replace_existing=True,
+    )
+
+    # Aldi: every Monday at 9:30
+    scheduler.add_job(
+        scrape_chain,
+        CronTrigger(day_of_week="mon", hour=9, minute=30, timezone=TZ),
+        args=["aldi"],
+        id="scrape_aldi",
+        name="Scrape Aldi flyers",
+        replace_existing=True,
+    )
+
+    # MD Discount: every Monday at 10:00
+    scheduler.add_job(
+        scrape_chain,
+        CronTrigger(day_of_week="mon", hour=10, minute=0, timezone=TZ),
+        args=["md-discount"],
+        id="scrape_md_discount",
+        name="Scrape MD Discount flyers",
+        replace_existing=True,
+    )
+
+    # Penny Market: Monday and Thursday at 10:30
+    scheduler.add_job(
+        scrape_chain,
+        CronTrigger(day_of_week="mon,thu", hour=10, minute=30, timezone=TZ),
+        args=["penny"],
+        id="scrape_penny",
+        name="Scrape Penny Market flyers",
+        replace_existing=True,
+    )
+
+    # PAM Panorama: every Monday at 11:00
+    scheduler.add_job(
+        scrape_chain,
+        CronTrigger(day_of_week="mon", hour=11, minute=0, timezone=TZ),
+        args=["pam"],
+        id="scrape_pam",
+        name="Scrape PAM Panorama flyers",
+        replace_existing=True,
+    )
+
+    # Weekly notification digest: Monday 12:00 (after all scraping)
     scheduler.add_job(
         send_weekly_digest,
-        CronTrigger(day_of_week="mon", hour=8, minute=0, timezone=TZ),
+        CronTrigger(day_of_week="mon", hour=12, minute=0, timezone=TZ),
         id="weekly_digest",
         name="Weekly notification digest",
         replace_existing=True,

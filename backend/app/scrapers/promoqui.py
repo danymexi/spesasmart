@@ -4,7 +4,8 @@ This scraper serves as an alternative data source when direct chain scraping
 (Gemini OCR) is unavailable. PromoQui aggregates flyer offers from Italian
 supermarkets in structured HTML format.
 
-Supported chains: esselunga, coop, iperal, lidl
+Supported chains: esselunga, coop, iperal, lidl, carrefour, conad, eurospin,
+                  aldi, md-discount, penny, pam
 """
 
 from __future__ import annotations
@@ -31,6 +32,13 @@ PROMOQUI_CHAINS = {
     "coop": "coop",
     "iperal": "iperal",
     "lidl": "lidl",
+    "carrefour": "carrefour",
+    "conad": "conad",
+    "eurospin": "eurospin",
+    "aldi": "aldi",
+    "md-discount": "md-discount",
+    "penny": "penny-market",
+    "pam": "pam",
 }
 
 

@@ -10,7 +10,11 @@ router = APIRouter(prefix="/scraping", tags=["scraping"])
 
 logger = logging.getLogger(__name__)
 
-VALID_CHAINS = {"lidl", "esselunga", "coop", "iperal"}
+VALID_CHAINS = {
+    "lidl", "esselunga", "coop", "iperal",
+    "carrefour", "conad", "eurospin", "aldi",
+    "md-discount", "penny", "pam",
+}
 
 
 class ScrapeResponse(BaseModel):
@@ -236,6 +240,50 @@ async def trigger_esselunga_online_sync():
         )
     except Exception as exc:
         logger.exception("Esselunga Online catalog sync failed.")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/catalog-sync/carrefour-online", response_model=ScrapeResult)
+async def trigger_carrefour_online_sync():
+    """Trigger Carrefour Online catalog sync and wait for it to finish.
+
+    Scrapes the Carrefour Italy product catalog via sitemap + page parsing.
+    """
+    try:
+        from app.scrapers.carrefour_online import CarrefourOnlineScraper
+
+        scraper = CarrefourOnlineScraper()
+        count = await scraper.scrape()
+        return ScrapeResult(
+            status="completed",
+            chain="carrefour",
+            products_found=count,
+            message=f"Carrefour Online catalog sync complete: {count} products processed.",
+        )
+    except Exception as exc:
+        logger.exception("Carrefour Online catalog sync failed.")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/catalog-sync/penny-online", response_model=ScrapeResult)
+async def trigger_penny_online_sync():
+    """Trigger Penny Market Online catalog sync and wait for it to finish.
+
+    Scrapes the Penny Market Italy product catalog via sitemap + SSR page parsing.
+    """
+    try:
+        from app.scrapers.penny_online import PennyOnlineScraper
+
+        scraper = PennyOnlineScraper()
+        count = await scraper.scrape()
+        return ScrapeResult(
+            status="completed",
+            chain="penny",
+            products_found=count,
+            message=f"Penny Online catalog sync complete: {count} products processed.",
+        )
+    except Exception as exc:
+        logger.exception("Penny Online catalog sync failed.")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

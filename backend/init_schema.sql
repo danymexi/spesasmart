@@ -119,7 +119,14 @@ INSERT INTO chains (name, slug, website_url) VALUES
     ('Esselunga', 'esselunga', 'https://www.esselunga.it'),
     ('Lidl', 'lidl', 'https://www.lidl.it'),
     ('Coop', 'coop', 'https://www.e-coop.it'),
-    ('Iperal', 'iperal', 'https://www.iperal.it')
+    ('Iperal', 'iperal', 'https://www.iperal.it'),
+    ('Carrefour', 'carrefour', 'https://www.carrefour.it'),
+    ('Conad', 'conad', 'https://www.conad.it'),
+    ('Eurospin', 'eurospin', 'https://www.eurospin.it'),
+    ('Aldi', 'aldi', 'https://www.aldi.it'),
+    ('MD Discount', 'md-discount', 'https://www.mdspa.it'),
+    ('Penny Market', 'penny', 'https://www.penny.it'),
+    ('PAM Panorama', 'pam', 'https://www.pampanorama.it')
 ON CONFLICT (slug) DO NOTHING;
 
 -- Dati iniziali: Negozi Monza e Brianza
@@ -141,4 +148,23 @@ INSERT INTO stores (chain_id, name, address, city, province, zip_code) VALUES
     ((SELECT id FROM chains WHERE slug = 'lidl'), 'Lidl Lissone', 'Via Carducci 50', 'Lissone', 'MB', '20851'),
     ((SELECT id FROM chains WHERE slug = 'coop'), 'Coop Seregno', 'Via Stefano da Seregno 44', 'Seregno', 'MB', '20831'),
     ((SELECT id FROM chains WHERE slug = 'iperal'), 'Iperal Seregno', 'Via Milano 5', 'Seregno', 'MB', '20831'),
-    ((SELECT id FROM chains WHERE slug = 'iperal'), 'Iperal Meda', 'Via Indipendenza 20', 'Meda', 'MB', '20821');
+    ((SELECT id FROM chains WHERE slug = 'iperal'), 'Iperal Meda', 'Via Indipendenza 20', 'Meda', 'MB', '20821'),
+    -- Carrefour
+    ((SELECT id FROM chains WHERE slug = 'carrefour'), 'Carrefour Monza', 'Via Lecco 2', 'Monza', 'MB', '20900'),
+    ((SELECT id FROM chains WHERE slug = 'carrefour'), 'Carrefour Lissone', 'Via Matteotti 65', 'Lissone', 'MB', '20851'),
+    -- Conad
+    ((SELECT id FROM chains WHERE slug = 'conad'), 'Conad Monza', 'Via Borgazzi 65', 'Monza', 'MB', '20900'),
+    ((SELECT id FROM chains WHERE slug = 'conad'), 'Conad Desio', 'Via Milano 80', 'Desio', 'MB', '20832'),
+    -- Eurospin
+    ((SELECT id FROM chains WHERE slug = 'eurospin'), 'Eurospin Biassono', 'Via Milano 20', 'Biassono', 'MB', '20853'),
+    ((SELECT id FROM chains WHERE slug = 'eurospin'), 'Eurospin Lissone', 'Via Bottego 5', 'Lissone', 'MB', '20851'),
+    -- Aldi
+    ((SELECT id FROM chains WHERE slug = 'aldi'), 'Aldi Monza', 'Viale Lombardia 50', 'Monza', 'MB', '20900'),
+    -- MD Discount
+    ((SELECT id FROM chains WHERE slug = 'md-discount'), 'MD Discount Monza', 'Via Borgazzi 90', 'Monza', 'MB', '20900'),
+    ((SELECT id FROM chains WHERE slug = 'md-discount'), 'MD Desio', 'Via Gramsci 15', 'Desio', 'MB', '20832'),
+    -- Penny Market
+    ((SELECT id FROM chains WHERE slug = 'penny'), 'Penny Market Monza', 'Via Lecco 60', 'Monza', 'MB', '20900'),
+    ((SELECT id FROM chains WHERE slug = 'penny'), 'Penny Lissone', 'Via San Carlo 10', 'Lissone', 'MB', '20851'),
+    -- PAM Panorama
+    ((SELECT id FROM chains WHERE slug = 'pam'), 'PAM Monza', 'Via Libertà 30', 'Monza', 'MB', '20900');
