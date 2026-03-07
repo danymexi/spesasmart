@@ -30,6 +30,10 @@ COPY backend/ .
 # Copy pre-built Expo web assets (built on dev machine, rsynced to server)
 COPY mobile/dist/ /app/dist
 
+# Fix: Expo bundles use import.meta which breaks in non-module <script> tags.
+# Replace all occurrences with a safe fallback so the bundle loads correctly.
+RUN for f in /app/dist/_expo/static/js/web/*.js; do sed -i 's/import\.meta/\(\{\}\)/g' "$f"; done
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
