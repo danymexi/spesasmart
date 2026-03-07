@@ -28,7 +28,7 @@ const SORT_OPTIONS = [
   { key: "price_per_unit", label: "Prezzo/unita'" },
 ] as const;
 
-const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
+const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal", "Carrefour", "Conad", "Eurospin", "Aldi", "MD Discount", "Penny Market", "PAM Panorama"];
 
 export default function CatalogScreen() {
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);

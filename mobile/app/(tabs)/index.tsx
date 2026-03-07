@@ -23,7 +23,7 @@ import { useAppStore } from "../../stores/useAppStore";
 import { glassCard, glassColors, glassChip, glassPanel, glassSearchbar } from "../../styles/glassStyles";
 import { useGlassTheme } from "../../styles/useGlassTheme";
 
-const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
+const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal", "Carrefour", "Conad", "Eurospin", "Aldi", "MD Discount", "Penny Market", "PAM Panorama"];
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();

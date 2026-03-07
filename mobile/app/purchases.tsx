@@ -46,6 +46,13 @@ const CHAIN_OPTIONS = [
   { slug: "esselunga", label: "Esselunga" },
   { slug: "coop", label: "Coop" },
   { slug: "lidl", label: "Lidl" },
+  { slug: "carrefour", label: "Carrefour" },
+  { slug: "conad", label: "Conad" },
+  { slug: "eurospin", label: "Eurospin" },
+  { slug: "aldi", label: "Aldi" },
+  { slug: "md-discount", label: "MD Discount" },
+  { slug: "penny", label: "Penny Market" },
+  { slug: "pam", label: "PAM Panorama" },
 ];
 
 export default function PurchasesScreen() {

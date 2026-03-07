@@ -23,6 +23,13 @@ const CHAIN_COLORS: Record<string, string> = {
   Lidl: "#0039A6",
   Coop: "#E53935",
   Iperal: "#1565C0",
+  Carrefour: "#004E9A",
+  Conad: "#E31E24",
+  Eurospin: "#1A4D8F",
+  Aldi: "#00205B",
+  "MD Discount": "#E5007D",
+  "Penny Market": "#CD1719",
+  "PAM Panorama": "#E4002B",
 };
 
 export default function FlyersScreen() {
