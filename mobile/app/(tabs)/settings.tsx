@@ -1742,6 +1742,13 @@ const CHAIN_OPTIONS = [
   { slug: "lidl", label: "Lidl" },
   { slug: "coop", label: "Coop" },
   { slug: "iperal", label: "Iperal" },
+  { slug: "carrefour", label: "Carrefour" },
+  { slug: "conad", label: "Conad" },
+  { slug: "eurospin", label: "Eurospin" },
+  { slug: "aldi", label: "Aldi" },
+  { slug: "md-discount", label: "MD Discount" },
+  { slug: "penny", label: "Penny Market" },
+  { slug: "pam", label: "PAM Panorama" },
 ];
 
 function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
