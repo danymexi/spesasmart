@@ -119,7 +119,15 @@ INSERT INTO chains (name, slug, website_url) VALUES
     ('Esselunga', 'esselunga', 'https://www.esselunga.it'),
     ('Lidl', 'lidl', 'https://www.lidl.it'),
     ('Coop', 'coop', 'https://www.e-coop.it'),
-    ('Iperal', 'iperal', 'https://www.iperal.it')
+    ('Iperal', 'iperal', 'https://www.iperal.it'),
+    ('Conad', 'conad', 'https://www.conad.it'),
+    ('Carrefour', 'carrefour', 'https://www.carrefour.it'),
+    ('Eurospin', 'eurospin', 'https://www.eurospin.it'),
+    ('MD', 'md', 'https://www.mdspa.it'),
+    ('Penny Market', 'penny', 'https://www.pennymarket.it'),
+    ('Aldi', 'aldi', 'https://www.aldi.it'),
+    ('Bennet', 'bennet', 'https://www.bennet.com'),
+    ('Pam', 'pam', 'https://www.pam.it')
 ON CONFLICT (slug) DO NOTHING;
 
 -- Dati iniziali: Negozi Monza e Brianza

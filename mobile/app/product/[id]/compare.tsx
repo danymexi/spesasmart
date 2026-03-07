@@ -12,6 +12,14 @@ const CHAIN_COLORS: Record<string, string> = {
   lidl: "#0050AA",
   coop: "#E07000",
   iperal: "#009639",
+  conad: "#D4A017",
+  carrefour: "#004E9A",
+  eurospin: "#1B5E20",
+  md: "#FF6F00",
+  penny: "#CC0000",
+  aldi: "#00529B",
+  bennet: "#E91E63",
+  pam: "#8BC34A",
 };
 
 export default function CompareScreen() {

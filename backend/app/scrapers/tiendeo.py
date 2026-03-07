@@ -42,6 +42,14 @@ TIENDEO_CHAINS: dict[str, str] = {
     "lidl": "lidl",
     "coop": "coop",
     "iperal": "iperal",
+    "conad": "conad",
+    "carrefour": "carrefour",
+    "eurospin": "eurospin",
+    "md": "md-discount",
+    "penny": "penny-market",
+    "aldi": "aldi",
+    "bennet": "bennet",
+    "pam": "pam",
 }
 
 # Headers that mimic an Italian browser

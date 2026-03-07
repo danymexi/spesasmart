@@ -21,7 +21,7 @@ import HomeSpesaSummary from "../../components/HomeSpesaSummary";
 import { useAppStore } from "../../stores/useAppStore";
 import { glassCard, glassColors, glassChip, glassPanel, glassSearchbar } from "../../styles/glassStyles";
 
-const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
+const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal", "Conad", "Carrefour", "Eurospin", "MD", "Penny Market", "Aldi", "Bennet", "Pam"];
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();

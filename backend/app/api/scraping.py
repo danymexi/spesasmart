@@ -10,7 +10,7 @@ router = APIRouter(prefix="/scraping", tags=["scraping"])
 
 logger = logging.getLogger(__name__)
 
-VALID_CHAINS = {"lidl", "esselunga", "coop", "iperal"}
+VALID_CHAINS = {"lidl", "esselunga", "coop", "iperal", "conad", "carrefour", "eurospin", "md", "penny", "aldi", "bennet", "pam"}
 
 
 class ScrapeResponse(BaseModel):

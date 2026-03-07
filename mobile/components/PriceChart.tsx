@@ -24,6 +24,14 @@ const CHAIN_COLORS: Record<string, string> = {
   Lidl: "#0050AA",
   Coop: "#E07000",
   Iperal: "#009639",
+  Conad: "#D4A017",
+  Carrefour: "#004E9A",
+  Eurospin: "#1B5E20",
+  MD: "#FF6F00",
+  "Penny Market": "#CC0000",
+  Aldi: "#00529B",
+  Bennet: "#E91E63",
+  Pam: "#8BC34A",
 };
 
 const SCREEN_WIDTH = Dimensions.get("window").width;

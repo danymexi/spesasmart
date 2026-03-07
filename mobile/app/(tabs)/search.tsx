@@ -30,7 +30,7 @@ const SORT_OPTIONS = [
   { key: "price_per_unit", label: "Prezzo/unita'" },
 ] as const;
 
-const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
+const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal", "Conad", "Carrefour", "Eurospin", "MD", "Penny Market", "Aldi", "Bennet", "Pam"];
 
 const CATEGORY_ICONS: Record<string, string> = {
   "Bevande": "bottle-soda-classic",

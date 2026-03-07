@@ -453,6 +453,14 @@ const RECEIPT_CHAINS = [
   { slug: "esselunga", label: "Esselunga" },
   { slug: "coop", label: "Coop" },
   { slug: "lidl", label: "Lidl" },
+  { slug: "conad", label: "Conad" },
+  { slug: "carrefour", label: "Carrefour" },
+  { slug: "eurospin", label: "Eurospin" },
+  { slug: "md", label: "MD" },
+  { slug: "penny", label: "Penny Market" },
+  { slug: "aldi", label: "Aldi" },
+  { slug: "bennet", label: "Bennet" },
+  { slug: "pam", label: "Pam" },
 ];
 
 interface SelectedFile {
@@ -1622,6 +1630,14 @@ const CHAIN_OPTIONS = [
   { slug: "lidl", label: "Lidl" },
   { slug: "coop", label: "Coop" },
   { slug: "iperal", label: "Iperal" },
+  { slug: "conad", label: "Conad" },
+  { slug: "carrefour", label: "Carrefour" },
+  { slug: "eurospin", label: "Eurospin" },
+  { slug: "md", label: "MD" },
+  { slug: "penny", label: "Penny Market" },
+  { slug: "aldi", label: "Aldi" },
+  { slug: "bennet", label: "Bennet" },
+  { slug: "pam", label: "Pam" },
 ];
 
 const RADIUS_OPTIONS = [5, 10, 20, 30, 50];
