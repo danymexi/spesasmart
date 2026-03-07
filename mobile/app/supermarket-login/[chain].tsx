@@ -67,7 +67,7 @@ export default function SupermarketLoginScreen() {
     await new Promise((r) => setTimeout(r, 800));
 
     try {
-      // 1. Extract cookies from all relevant domains
+      // 1. Extract cookies from all relevant domains (including httpOnly)
       const allCookies: any[] = [];
       for (const domain of config.cookieDomains) {
         const url = `https://${domain.replace(/^\./, "")}`;

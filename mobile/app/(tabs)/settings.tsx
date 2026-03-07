@@ -12,7 +12,7 @@ function showAlert(title: string, message: string) {
   }
 }
 import { useAppStore } from "../../stores/useAppStore";
-import { registerUser, loginUser, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains, getNearbyStores, updateUserLocation, getSupermarketAccounts, removeSupermarketAccount, triggerPurchaseSync, startRemoteLogin, sendRemoteAction, getRemoteStatus, cancelRemoteLogin, fetchRemoteScreenshot, uploadReceipt } from "../../services/api";
+import { registerUser, loginUser, claimGuestAccount, googleAuth, getUserBrands, addUserBrand, removeUserBrand, getBrands, updateUserProfile, getMe, getPreferredChains, updatePreferredChains, getNearbyStores, updateUserLocation, getSupermarketAccounts, removeSupermarketAccount, triggerPurchaseSync, startRemoteLogin, sendRemoteAction, getRemoteStatus, cancelRemoteLogin, fetchRemoteScreenshot, uploadReceipt } from "../../services/api";
 import type { NearbyChainInfo, SupermarketAccount, ReceiptItem, ReceiptUploadResponse } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors, glassCard } from "../../styles/glassStyles";
@@ -20,7 +20,7 @@ import { glassPanel, glassColors, glassCard } from "../../styles/glassStyles";
 export default function SettingsScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { isLoggedIn, userEmail, setAuth, logout } = useAppStore();
+  const { isLoggedIn, isGuest, userEmail, setAuth, logout, themeMode, setThemeMode } = useAppStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,6 +31,27 @@ export default function SettingsScreen() {
   const [snackVisible, setSnackVisible] = useState(false);
 
   const queryClient = useQueryClient();
+
+  // Initialize Google Sign-In on web
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    const handleGoogleCredential = async (response: any) => {
+      try {
+        const res = await googleAuth(response.credential);
+        setAuth(res.access_token, res.user.id, res.user.email ?? "");
+        showAlert("Accesso con Google", "Hai effettuato l'accesso con Google.");
+      } catch {
+        setError("Errore durante l'accesso con Google.");
+      }
+    };
+    // If GSI script is loaded, initialize
+    if ((window as any).google?.accounts) {
+      (window as any).google.accounts.id.initialize({
+        client_id: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || "",
+        callback: handleGoogleCredential,
+      });
+    }
+  }, [setAuth]);
 
   // Fetch user profile for notification_mode
   const { data: userProfile } = useQuery({
@@ -104,11 +125,19 @@ export default function SettingsScreen() {
     setError(null);
     setLoading(true);
     try {
-      const res = await registerUser(email, password);
+      // If guest, claim the existing account; otherwise create new
+      const res = isGuest
+        ? await claimGuestAccount(email, password)
+        : await registerUser(email, password);
       setAuth(res.access_token, res.user.id, res.user.email!);
       setEmail("");
       setPassword("");
-      showAlert("Registrazione completata", "Il tuo account è stato creato.");
+      showAlert(
+        isGuest ? "Account creato" : "Registrazione completata",
+        isGuest
+          ? "I tuoi dati sono stati salvati. Ora puoi accedere da qualsiasi dispositivo."
+          : "Il tuo account è stato creato.",
+      );
     } catch (err: any) {
       if (err.response?.status === 409) {
         setError("Email già registrata. Prova ad accedere.");
@@ -161,7 +190,7 @@ export default function SettingsScreen() {
       <View style={styles.section}>
         <List.Section>
           <List.Subheader style={styles.listSubheader}>Profilo</List.Subheader>
-          {isLoggedIn ? (
+          {isLoggedIn && !isGuest ? (
             <View style={styles.loggedInSection}>
               <List.Item
                 title="Email"
@@ -181,14 +210,51 @@ export default function SettingsScreen() {
             </View>
           ) : (
             <View style={styles.createSection}>
+              {isGuest && (
+                <View style={styles.guestBanner}>
+                  <Text variant="titleSmall" style={styles.guestBannerTitle}>
+                    Stai usando un account ospite
+                  </Text>
+                  <Text variant="bodySmall" style={styles.guestBannerText}>
+                    Registrati per salvare i tuoi dati e accedere da altri dispositivi.
+                  </Text>
+                </View>
+              )}
               <Text variant="bodyMedium" style={styles.createText}>
-                Accedi o registrati per salvare la tua lista e ricevere notifiche.
+                {isGuest
+                  ? "Crea il tuo account per non perdere le tue liste e preferenze."
+                  : "Accedi o registrati per salvare la tua lista e ricevere notifiche."}
               </Text>
               {error && (
                 <Text variant="bodySmall" style={styles.errorText}>
                   {error}
                 </Text>
               )}
+              <Button
+                mode="outlined"
+                icon="google"
+                onPress={async () => {
+                  setError(null);
+                  setLoading(true);
+                  try {
+                    // Web-based Google Sign-In via popup
+                    if (Platform.OS === "web" && typeof window !== "undefined" && (window as any).google?.accounts) {
+                      // GSI library loaded — prompt
+                      (window as any).google.accounts.id.prompt();
+                    } else {
+                      setError("Google Sign-In non disponibile. Configura il Google Client ID.");
+                    }
+                  } catch {
+                    setError("Errore con Google Sign-In.");
+                  }
+                  setLoading(false);
+                }}
+                loading={loading}
+                style={styles.googleButton}
+              >
+                Accedi con Google
+              </Button>
+              <Text variant="labelSmall" style={styles.orDivider}>oppure</Text>
               <TextInput
                 label="Email"
                 value={email}
@@ -207,27 +273,53 @@ export default function SettingsScreen() {
                 style={styles.input}
               />
               <View style={styles.buttonRow}>
+                {!isGuest && (
+                  <Button
+                    mode="contained"
+                    onPress={handleLogin}
+                    loading={loading}
+                    disabled={!email || !password || loading}
+                    style={styles.authButton}
+                  >
+                    Accedi
+                  </Button>
+                )}
                 <Button
-                  mode="contained"
-                  onPress={handleLogin}
-                  loading={loading}
-                  disabled={!email || !password || loading}
-                  style={styles.authButton}
-                >
-                  Accedi
-                </Button>
-                <Button
-                  mode="outlined"
+                  mode={isGuest ? "contained" : "outlined"}
                   onPress={handleRegister}
                   loading={loading}
                   disabled={!email || !password || loading}
                   style={styles.authButton}
                 >
-                  Registrati
+                  {isGuest ? "Crea Account" : "Registrati"}
                 </Button>
               </View>
             </View>
           )}
+        </List.Section>
+      </View>
+
+      {/* Theme */}
+      <View style={styles.section}>
+        <List.Section>
+          <List.Subheader style={styles.listSubheader}>Aspetto</List.Subheader>
+          <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 12 }}>
+            {(["system", "light", "dark"] as const).map((mode) => {
+              const labels = { system: "Sistema", light: "Chiaro", dark: "Scuro" };
+              const icons = { system: "cellphone", light: "white-balance-sunny", dark: "weather-night" };
+              return (
+                <Chip
+                  key={mode}
+                  icon={icons[mode]}
+                  selected={themeMode === mode}
+                  onPress={() => setThemeMode(mode)}
+                  style={{ flex: 1 }}
+                >
+                  {labels[mode]}
+                </Chip>
+              );
+            })}
+          </View>
         </List.Section>
       </View>
 
@@ -421,6 +513,23 @@ export default function SettingsScreen() {
           </Button>
         )}
       </View>
+
+      {/* Admin link (only for admin users) */}
+      {userProfile?.is_admin && (
+        <View style={styles.section}>
+          <List.Section>
+            <List.Subheader style={styles.listSubheader}>Amministrazione</List.Subheader>
+            <List.Item
+              title="Admin Panel"
+              description="Scraping, statistiche, prodotti"
+              titleStyle={styles.listTitle}
+              descriptionStyle={styles.listDescription}
+              left={(props) => <List.Icon {...props} icon="shield-crown" />}
+              onPress={() => router.push("/admin")}
+            />
+          </List.Section>
+        </View>
+      )}
 
       <View style={styles.bottomPadding} />
 
@@ -836,20 +945,19 @@ const receiptStyles = StyleSheet.create({
   fileName: { fontSize: 13, color: "#333", flex: 1 },
 });
 
-function EsselungaBookmarkletSection() {
-  const [copied, setCopied] = useState(false);
+function useBookmarkletCode() {
   const { accessToken } = useAppStore();
 
   const apiBase = typeof window !== "undefined" && window.location.hostname !== "localhost"
     ? window.location.origin + "/api/v1"
     : "http://localhost:8000/api/v1";
 
-  // Build bookmarklet JS
-  const bookmarkletCode = `javascript:void(function(){` +
+  // Build bookmarklet — only single quotes inside to avoid HTML attribute issues
+  return `javascript:void(function(){` +
     `var T='${accessToken || ""}';` +
     `var API='${apiBase}';` +
     `var el=document.querySelector('[ng-controller]');` +
-    `if(!el){alert('Pagina scontrini Esselunga non trovata. Apri la pagina "I tuoi scontrini" su esselunga.it');return}` +
+    `if(!el){alert('Apri la pagina I tuoi scontrini su esselunga.it');return}` +
     `var sc=angular.element(el).scope();` +
     `if(!sc||!sc.ctrl){alert('Scope AngularJS non trovato.');return}` +
     `var mv=sc.ctrl.shoppingMovements;` +
@@ -881,8 +989,9 @@ function EsselungaBookmarkletSection() {
     `var imported=0,skipped=0,errors=0,i=0;` +
     `function addLog(m,c){var d=document.createElement('div');d.style.color=c||'#aaa';d.textContent=m;lg.appendChild(d);lg.scrollTop=lg.scrollHeight}` +
     `function done(){` +
-      `st.textContent='Completato! '+imported+' importati, '+skipped+' gia\\' presenti'+(errors?' , '+errors+' errori':'');` +
+      `st.textContent='Completato! '+imported+' importati, '+skipped+' gia presenti'+(errors?', '+errors+' errori':'');` +
       `st.style.color='#2E7D32';` +
+      `pb.style.width='100%';` +
       `var btn=document.createElement('button');` +
       `btn.textContent='Chiudi';` +
       `btn.style.cssText='margin-top:16px;padding:8px 24px;background:#2E7D32;color:#fff;border:none;border-radius:4px;font-size:14px;cursor:pointer';` +
@@ -911,7 +1020,7 @@ function EsselungaBookmarkletSection() {
         `x2.onload=function(){` +
           `if(x2.status===200){` +
             `var r=JSON.parse(x2.responseText);` +
-            `if(r.skipped){skipped++;addLog('#'+m.id+' - gia\\' presente','#FFD200')}` +
+            `if(r.skipped){skipped++;addLog('#'+m.id+' - gia presente','#FFD200')}` +
             `else{imported++;addLog('#'+m.id+' - importato ('+r.items_count+' prodotti)','#81C784')}` +
           `}else{errors++;addLog('#'+m.id+' - errore upload','#e57373')}` +
           `i++;next()` +
@@ -924,6 +1033,26 @@ function EsselungaBookmarkletSection() {
     `}` +
     `next()` +
   `}())`;
+}
+
+function EsselungaBookmarkletSection() {
+  const [copied, setCopied] = useState(false);
+  const { accessToken } = useAppStore();
+  const linkRef = useRef<HTMLSpanElement>(null);
+  const bookmarkletCode = useBookmarkletCode();
+
+  // Create the <a> element via DOM to avoid HTML escaping issues with javascript: href
+  useEffect(() => {
+    const container = linkRef.current;
+    if (!container || !accessToken) return;
+    container.innerHTML = "";
+    const a = document.createElement("a");
+    a.href = bookmarkletCode;
+    a.textContent = "Importa Scontrini Esselunga";
+    a.title = "Trascina nella barra dei segnalibri";
+    a.style.cssText = "display:inline-block;padding:8px 16px;background:#2E7D32;color:#fff;border-radius:4px;text-decoration:none;font-weight:600;font-size:13px;cursor:grab;font-family:system-ui,sans-serif;user-select:none";
+    container.appendChild(a);
+  }, [bookmarkletCode, accessToken]);
 
   const handleCopy = async () => {
     try {
@@ -931,9 +1060,10 @@ function EsselungaBookmarkletSection() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback
       const ta = document.createElement("textarea");
       ta.value = bookmarkletCode;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
       document.body.appendChild(ta);
       ta.select();
       document.execCommand("copy");
@@ -967,11 +1097,7 @@ function EsselungaBookmarkletSection() {
       </View>
 
       <View style={bookmarkletStyles.linkRow}>
-        <span
-          dangerouslySetInnerHTML={{
-            __html: `<a href="${bookmarkletCode.replace(/"/g, '&quot;')}" style="display:inline-block;padding:8px 16px;background:#2E7D32;color:#fff;border-radius:4px;text-decoration:none;font-weight:600;font-size:13px;cursor:grab;font-family:system-ui,sans-serif" title="Trascina nella barra dei segnalibri">Importa Scontrini Esselunga</a>`,
-          }}
-        />
+        <span ref={linkRef as any} />
         <Button
           mode="outlined"
           icon={copied ? "check" : "content-copy"}
@@ -1751,6 +1877,16 @@ const styles = StyleSheet.create({
   listTitle: { color: "#1a1a1a" },
   listDescription: { color: "#555" },
   createSection: { paddingHorizontal: 16, paddingBottom: 16 },
+  guestBanner: {
+    backgroundColor: "rgba(245,127,23,0.08)",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  guestBannerTitle: { color: "#E65100", fontWeight: "600", marginBottom: 4 },
+  guestBannerText: { color: "#E65100" },
+  googleButton: { marginBottom: 8 },
+  orDivider: { textAlign: "center", color: "#999", marginBottom: 8 },
   createText: { color: "#555", marginBottom: 12 },
   errorText: { color: "#D32F2F", marginBottom: 8 },
   input: { marginBottom: 12 },

@@ -14,8 +14,16 @@ from app.main import app
 from app.models import Chain, Flyer, Offer, Product, Store, UserProfile
 
 
-# Use SQLite for tests (in-memory)
-TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
+# Use PostgreSQL test database when DATABASE_URL is set (Docker),
+# otherwise fall back to SQLite (local dev without PG).
+import os
+
+_db_url = os.environ.get("DATABASE_URL", "")
+if _db_url and "postgresql" in _db_url:
+    # Point to the test database instead of the production one
+    TEST_DATABASE_URL = _db_url.rsplit("/", 1)[0] + "/spesasmart_test"
+else:
+    TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 test_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

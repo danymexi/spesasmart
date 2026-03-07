@@ -33,6 +33,8 @@ import {
 import { glassCard, glassColors } from "../styles/glassStyles";
 import { useAppStore } from "../stores/useAppStore";
 import ChainTotalsSummary from "./ChainTotalsSummary";
+import ImportListModal from "./ImportListModal";
+import { Skeleton } from "./Skeleton";
 import SuggestionsSection from "./SuggestionsSection";
 import TripOptimizer from "./TripOptimizer";
 
@@ -41,14 +43,20 @@ const INVALIDATE_KEYS = [
   "shoppingListCount",
   "shoppingListCompare",
   "shoppingListSuggestions",
+  "shoppingLists",
 ];
 
-export default function ShoppingList() {
+interface ShoppingListProps {
+  listId?: string;
+}
+
+export default function ShoppingList({ listId }: ShoppingListProps) {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const nearbyChains = useAppStore((s) => s.nearbyChains);
   const [customInput, setCustomInput] = useState("");
   const [showOptimizer, setShowOptimizer] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [suggestions, setSuggestions] = useState<SmartSearchResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
@@ -91,8 +99,8 @@ export default function ShoppingList() {
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ["shoppingList"],
-    queryFn: getShoppingList,
+    queryKey: ["shoppingList", listId],
+    queryFn: () => getShoppingList(listId),
   });
 
   const hasUnchecked = (items || []).some((i) => !i.checked);
@@ -124,7 +132,8 @@ export default function ShoppingList() {
   };
 
   const addMutation = useMutation({
-    mutationFn: addToShoppingList,
+    mutationFn: (params: Parameters<typeof addToShoppingList>[0]) =>
+      addToShoppingList({ ...params, list_id: listId }),
     onSuccess: () => {
       invalidateAll();
       setCustomInput("");
@@ -145,7 +154,7 @@ export default function ShoppingList() {
   });
 
   const clearMutation = useMutation({
-    mutationFn: clearCheckedItems,
+    mutationFn: () => clearCheckedItems(listId),
     onSuccess: invalidateAll,
   });
 
@@ -453,6 +462,14 @@ export default function ShoppingList() {
             <Text variant="bodyMedium" style={styles.emptyText}>
               Aggiungi prodotti dal catalogo o scrivi un articolo qui sopra.
             </Text>
+            <Button
+              mode="outlined"
+              icon="text-box-plus-outline"
+              onPress={() => setShowImport(true)}
+              style={{ marginTop: 16 }}
+            >
+              Importa da testo
+            </Button>
           </View>
         )}
 
@@ -470,7 +487,9 @@ export default function ShoppingList() {
           )}
 
         {hasUnchecked && loadingCompare && (
-          <ActivityIndicator style={{ marginVertical: 12 }} />
+          <View style={{ paddingHorizontal: 12, paddingVertical: 4 }}>
+            <Skeleton width="60%" height={12} />
+          </View>
         )}
 
         {/* Unchecked items */}
@@ -481,13 +500,31 @@ export default function ShoppingList() {
           <View style={styles.actionRow}>
             <Button
               mode="contained"
-              icon="map-marker-path"
-              onPress={() => setShowOptimizer(true)}
+              icon="cart-check"
+              onPress={() => router.push({ pathname: "/shopping-mode", params: { listId: listId ?? "" } })}
               style={styles.optimizeButton}
               labelStyle={styles.actionLabel}
               compact
             >
-              Ottimizza Spesa
+              Modalit\u00e0 Spesa
+            </Button>
+            <Button
+              mode="outlined"
+              icon="map-marker-path"
+              onPress={() => setShowOptimizer(true)}
+              labelStyle={styles.actionLabel}
+              compact
+            >
+              Ottimizza
+            </Button>
+            <Button
+              mode="outlined"
+              icon="text-box-plus-outline"
+              onPress={() => setShowImport(true)}
+              labelStyle={styles.actionLabel}
+              compact
+            >
+              Importa
             </Button>
             {checkedItems.length > 0 && (
               <Button
@@ -497,7 +534,7 @@ export default function ShoppingList() {
                 loading={clearMutation.isPending}
                 compact
               >
-                Svuota completati ({checkedItems.length})
+                Svuota ({checkedItems.length})
               </Button>
             )}
           </View>
@@ -530,7 +567,16 @@ export default function ShoppingList() {
       <TripOptimizer
         visible={showOptimizer}
         onDismiss={() => setShowOptimizer(false)}
+        listId={listId}
       />
+
+      {listId && (
+        <ImportListModal
+          visible={showImport}
+          onDismiss={() => setShowImport(false)}
+          listId={listId}
+        />
+      )}
 
       {/* Linked products detail modal */}
       <Portal>

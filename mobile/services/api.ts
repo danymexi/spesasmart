@@ -37,6 +37,9 @@ export interface Store {
   zip_code: string | null;
   lat: number | null;
   lon: number | null;
+  phone: string | null;
+  opening_hours: Record<string, string> | null;
+  website_url: string | null;
   chain_name: string | null;
 }
 
@@ -157,6 +160,8 @@ export interface UserProfile {
   push_token: string | null;
   preferred_zone: string;
   notification_mode: "instant" | "digest";
+  is_guest: boolean;
+  is_admin: boolean;
   created_at: string;
 }
 
@@ -200,11 +205,18 @@ export interface TripItem {
   search_term: string | null;
 }
 
+export interface MissingItem {
+  product_name: string;
+  search_term: string | null;
+}
+
 export interface StoreTrip {
   chain_name: string;
   items: TripItem[];
   total: number;
   items_covered: number;
+  coverage_pct: number;
+  distance_km: number | null;
 }
 
 export interface TripOptimizationResult {
@@ -216,6 +228,17 @@ export interface TripOptimizationResult {
   all_single_stores: StoreTrip[];
   items_total: number;
   items_not_covered: number;
+  missing_items: MissingItem[];
+  travel_cost: number;
+}
+
+export interface OptimizeParams {
+  list_id?: string;
+  max_stores?: number;
+  radius_km?: number;
+  travel_cost_per_store?: number;
+  user_lat?: number;
+  user_lon?: number;
 }
 
 export interface UserBrandItem {
@@ -298,6 +321,22 @@ export interface CategoryInfo {
   count: number;
 }
 
+export interface CategoryChild {
+  id: string;
+  name: string;
+  slug: string;
+  icon: string | null;
+}
+
+export interface CategoryTreeNode {
+  id: string;
+  name: string;
+  slug: string;
+  icon: string | null;
+  count: number;
+  children: CategoryChild[];
+}
+
 export interface AuthResponse {
   access_token: string;
   user: UserProfile;
@@ -325,6 +364,37 @@ export interface ShoppingListItem {
   linked_product_count: number;
   linked_products_details: LinkedProductDetail[];
   created_at: string;
+}
+
+// ── Shopping Lists (multiple lists) ─────────────────────────────────────────
+
+export interface ShoppingListMeta {
+  id: string;
+  name: string;
+  emoji: string | null;
+  color: string | null;
+  is_archived: boolean;
+  is_template: boolean;
+  sort_order: number;
+  item_count: number;
+  unchecked_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SharedListItem {
+  product_name: string | null;
+  custom_name: string | null;
+  quantity: number;
+  unit: string | null;
+  checked: boolean;
+}
+
+export interface SharedList {
+  name: string;
+  emoji: string | null;
+  color: string | null;
+  items: SharedListItem[];
 }
 
 export interface CompareOffer {
@@ -551,6 +621,21 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
   return res.data;
 }
 
+export async function createGuestUser(): Promise<AuthResponse> {
+  const res = await apiClient.post<AuthResponse>("/auth/guest");
+  return res.data;
+}
+
+export async function claimGuestAccount(email: string, password: string): Promise<AuthResponse> {
+  const res = await apiClient.post<AuthResponse>("/auth/claim", { email, password });
+  return res.data;
+}
+
+export async function googleAuth(idToken: string): Promise<AuthResponse> {
+  const res = await apiClient.post<AuthResponse>("/auth/google", { id_token: idToken });
+  return res.data;
+}
+
 export async function getMe(): Promise<UserProfile> {
   const res = await apiClient.get<UserProfile>("/auth/me");
   return res.data;
@@ -724,6 +809,11 @@ export async function getCategories(): Promise<CategoryInfo[]> {
   return res.data;
 }
 
+export async function getCategoriesTree(): Promise<CategoryTreeNode[]> {
+  const res = await apiClient.get<CategoryTreeNode[]>("/products/categories/tree");
+  return res.data;
+}
+
 export async function getWatchlistIds(): Promise<{ product_ids: string[] }> {
   const res = await apiClient.get<{ product_ids: string[] }>("/users/me/watchlist/ids");
   return res.data;
@@ -787,15 +877,103 @@ export async function registerPushToken(
   console.log(`Registering push token: ${token}`);
 }
 
-// ── Shopping List ────────────────────────────────────────────────────────────
+// ── Shopping Lists (multiple lists) ──────────────────────────────────────────
 
-export async function getShoppingList(): Promise<ShoppingListItem[]> {
-  const res = await apiClient.get<ShoppingListItem[]>("/users/me/shopping-list");
+export async function getShoppingLists(includeArchived = false): Promise<ShoppingListMeta[]> {
+  const res = await apiClient.get<ShoppingListMeta[]>("/users/me/lists", {
+    params: includeArchived ? { include_archived: true } : undefined,
+  });
   return res.data;
 }
 
-export async function getShoppingListCount(): Promise<number> {
-  const res = await apiClient.get<{ count: number }>("/users/me/shopping-list/count");
+export async function createShoppingList(data: {
+  name: string;
+  emoji?: string;
+  color?: string;
+}): Promise<ShoppingListMeta> {
+  const res = await apiClient.post<ShoppingListMeta>("/users/me/lists", data);
+  return res.data;
+}
+
+export async function updateShoppingList(
+  listId: string,
+  data: { name?: string; emoji?: string; color?: string; is_archived?: boolean; is_template?: boolean }
+): Promise<ShoppingListMeta> {
+  const res = await apiClient.patch<ShoppingListMeta>(`/users/me/lists/${listId}`, data);
+  return res.data;
+}
+
+export async function deleteShoppingList(listId: string): Promise<void> {
+  await apiClient.delete(`/users/me/lists/${listId}`);
+}
+
+export async function duplicateShoppingList(listId: string): Promise<ShoppingListMeta> {
+  const res = await apiClient.post<ShoppingListMeta>(`/users/me/lists/${listId}/duplicate`);
+  return res.data;
+}
+
+export async function reorderShoppingLists(listIds: string[]): Promise<void> {
+  await apiClient.put("/users/me/lists/reorder", { list_ids: listIds });
+}
+
+export async function shareShoppingList(
+  listId: string
+): Promise<{ share_url: string; token: string; expires_at: string }> {
+  const res = await apiClient.post<{ share_url: string; token: string; expires_at: string }>(
+    `/users/me/lists/${listId}/share`
+  );
+  return res.data;
+}
+
+export async function getSharedList(token: string): Promise<SharedList> {
+  const res = await apiClient.get<SharedList>(`/shared/${token}`);
+  return res.data;
+}
+
+export async function copySharedList(token: string): Promise<{ id: string; name: string }> {
+  const res = await apiClient.post<{ id: string; name: string }>(`/shared/${token}/copy`);
+  return res.data;
+}
+
+// ── List Import ──────────────────────────────────────────────────────────────
+
+export interface ImportedItem {
+  name: string;
+  quantity: number;
+  unit: string | null;
+  matched_product_id: string | null;
+  matched_product_name: string | null;
+}
+
+export interface ImportTextResponse {
+  imported: number;
+  items: ImportedItem[];
+}
+
+export async function importTextToList(
+  listId: string,
+  text: string
+): Promise<ImportTextResponse> {
+  const res = await apiClient.post<ImportTextResponse>(
+    `/users/me/lists/${listId}/import`,
+    { text }
+  );
+  return res.data;
+}
+
+// ── Shopping List Items ─────────────────────────────────────────────────────
+
+export async function getShoppingList(listId?: string): Promise<ShoppingListItem[]> {
+  const res = await apiClient.get<ShoppingListItem[]>("/users/me/shopping-list", {
+    params: listId ? { list_id: listId } : undefined,
+  });
+  return res.data;
+}
+
+export async function getShoppingListCount(listId?: string): Promise<number> {
+  const res = await apiClient.get<{ count: number }>("/users/me/shopping-list/count", {
+    params: listId ? { list_id: listId } : undefined,
+  });
   return res.data.count;
 }
 
@@ -807,6 +985,7 @@ export async function addToShoppingList(params: {
   unit?: string;
   offer_id?: string;
   notes?: string;
+  list_id?: string;
 }): Promise<ShoppingListItem> {
   const res = await apiClient.post<ShoppingListItem>("/users/me/shopping-list", params);
   return res.data;
@@ -823,8 +1002,10 @@ export async function removeShoppingItem(itemId: string): Promise<void> {
   await apiClient.delete(`/users/me/shopping-list/${itemId}`);
 }
 
-export async function clearCheckedItems(): Promise<void> {
-  await apiClient.delete("/users/me/shopping-list/checked");
+export async function clearCheckedItems(listId?: string): Promise<void> {
+  await apiClient.delete("/users/me/shopping-list/checked", {
+    params: listId ? { list_id: listId } : undefined,
+  });
 }
 
 export async function updateLinkedProducts(itemId: string, productIds: string[]): Promise<ShoppingListItem> {
@@ -833,6 +1014,10 @@ export async function updateLinkedProducts(itemId: string, productIds: string[])
     { product_ids: productIds }
   );
   return res.data;
+}
+
+export async function reorderShoppingItems(itemIds: string[]): Promise<void> {
+  await apiClient.put("/users/me/shopping-list/reorder", { item_ids: itemIds });
 }
 
 // ── Compare Prices ──────────────────────────────────────────────────────────
@@ -875,8 +1060,8 @@ export async function updatePreferredChains(chains: string[]): Promise<void> {
 
 // ── Trip Optimizer ───────────────────────────────────────────────────────────
 
-export async function optimizeTrip(): Promise<TripOptimizationResult> {
-  const res = await apiClient.get<TripOptimizationResult>("/users/me/shopping-list/optimize");
+export async function optimizeTrip(params?: OptimizeParams): Promise<TripOptimizationResult> {
+  const res = await apiClient.get<TripOptimizationResult>("/users/me/shopping-list/optimize", { params });
   return res.data;
 }
 
@@ -1139,6 +1324,73 @@ export async function updatePurchaseOrder(
 
 export async function getPurchaseHabits(): Promise<PurchaseHabit[]> {
   const res = await apiClient.get<PurchaseHabit[]>("/users/me/purchase-habits");
+  return res.data;
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+export interface AdminChainStatus {
+  chain_name: string;
+  chain_slug: string;
+  latest_offer_date: string | null;
+  active_offers: number;
+  total_products: number;
+  hours_since_update: number | null;
+}
+
+export interface AdminScrapingStatus {
+  chains: AdminChainStatus[];
+  total_offers: number;
+  total_products: number;
+}
+
+export interface AdminProductStats {
+  total_products: number;
+  products_with_images: number;
+  products_without_images: number;
+  products_by_category: Record<string, number>;
+  total_active_offers: number;
+  avg_discount_pct: number | null;
+}
+
+export interface AdminProduct {
+  id: string;
+  name: string;
+  brand: string | null;
+  category: string | null;
+  image_url: string | null;
+  created_at: string;
+}
+
+export async function getAdminScrapingStatus(): Promise<AdminScrapingStatus> {
+  const res = await apiClient.get<AdminScrapingStatus>("/admin/scraping/status");
+  return res.data;
+}
+
+export async function getAdminProductStats(): Promise<AdminProductStats> {
+  const res = await apiClient.get<AdminProductStats>("/admin/products/stats");
+  return res.data;
+}
+
+export async function getAdminProductsReview(limit = 50): Promise<AdminProduct[]> {
+  const res = await apiClient.get<AdminProduct[]>("/admin/products/review", { params: { limit } });
+  return res.data;
+}
+
+export async function adminEditProduct(
+  productId: string,
+  data: { name?: string; brand?: string; category?: string; image_url?: string }
+): Promise<AdminProduct> {
+  const res = await apiClient.patch<AdminProduct>(`/admin/products/${productId}`, data);
+  return res.data;
+}
+
+export async function adminTriggerScraping(
+  chainSlug: string
+): Promise<{ status: string; chain: string; message: string }> {
+  const res = await apiClient.post<{ status: string; chain: string; message: string }>(
+    `/admin/scraping/trigger/${chainSlug}`
+  );
   return res.data;
 }
 

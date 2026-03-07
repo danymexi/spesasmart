@@ -31,6 +31,8 @@ services:
       - .env.production
     environment:
       DATABASE_URL: postgresql+asyncpg://spesasmart:${POSTGRES_PASSWORD:-spesasmart_secret}@db:5432/spesasmart
+    volumes:
+      - receipts:/app/receipts
     ports:
       - "8000:8000"
     networks:
@@ -71,6 +73,7 @@ services:
 
 volumes:
   pgdata:
+  receipts:
 
 networks:
   spesasmart-net:

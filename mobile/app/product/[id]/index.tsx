@@ -9,6 +9,7 @@ import PriceChart from "../../../components/PriceChart";
 import PriceTrendChart from "../../../components/PriceTrendChart";
 import PriceIndicator from "../../../components/PriceIndicator";
 import ProductComparison from "../../../components/ProductComparison";
+import { SkeletonList } from "../../../components/Skeleton";
 import {
   glassCard,
   glassColors,
@@ -95,7 +96,7 @@ export default function ProductDetailScreen() {
   };
 
   if (loadingProduct) {
-    return <ActivityIndicator style={styles.loader} />;
+    return <SkeletonList count={4} />;
   }
 
   if (!product) {

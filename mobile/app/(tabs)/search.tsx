@@ -1,22 +1,20 @@
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, StyleSheet, TouchableOpacity, View } from "react-native";
+import { FlatList, StyleSheet, View } from "react-native";
 import { Searchbar, Chip, Text, ActivityIndicator, Snackbar } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   addToShoppingList,
   getCatalogGrouped,
-  getCategories,
   getWatchlistIds,
   addToWatchlist,
   removeFromWatchlist,
   type SmartSearchResult,
-  type CategoryInfo,
 } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import SmartCompareCard from "../../components/SmartCompareCard";
+import CategoryPicker from "../../components/CategoryPicker";
+import { SkeletonList } from "../../components/Skeleton";
 import {
-  glassCard,
   glassChip,
   glassColors,
   glassSearchbar,
@@ -31,53 +29,6 @@ const SORT_OPTIONS = [
 ] as const;
 
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
-
-const CATEGORY_ICONS: Record<string, string> = {
-  "Bevande": "bottle-soda-classic",
-  "Biscotti": "cookie",
-  "Carne": "food-steak",
-  "Cereali": "grain",
-  "Colazione": "coffee",
-  "Condimenti": "shaker",
-  "Conserve": "food-variant",
-  "Dolci": "cake-variant",
-  "Formaggi": "cheese",
-  "Frutta": "fruit-watermelon",
-  "Gastronomia": "food-turkey",
-  "Igiene": "hand-wash",
-  "Latticini": "cow",
-  "Pane": "bread-slice",
-  "Pasta": "pasta",
-  "Pesce": "fish",
-  "Pulizia": "spray-bottle",
-  "Salumi": "food-drumstick",
-  "Snack": "food-croissant",
-  "Surgelati": "snowflake",
-  "Verdura": "leaf",
-};
-
-function CategoryTile({
-  category,
-  onPress,
-}: {
-  category: CategoryInfo;
-  onPress: () => void;
-}) {
-  const iconName = CATEGORY_ICONS[category.name] || "tag-outline";
-  return (
-    <TouchableOpacity style={styles.catTile} onPress={onPress} activeOpacity={0.7}>
-      <MaterialCommunityIcons
-        name={iconName as any}
-        size={28}
-        color={glassColors.greenDark}
-      />
-      <Text style={styles.catTileName} numberOfLines={1}>
-        {category.name}
-      </Text>
-      <Text style={styles.catTileCount}>{category.count}</Text>
-    </TouchableOpacity>
-  );
-}
 
 export default function CatalogScreen() {
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
@@ -103,12 +54,6 @@ export default function CatalogScreen() {
       .filter((p) => p.name.toLowerCase().includes(q))
       .slice(0, 10);
   }, [query, catalogProducts]);
-
-  // Fetch categories dynamically
-  const { data: categories } = useQuery({
-    queryKey: ["categories"],
-    queryFn: getCategories,
-  });
 
   // Fetch grouped catalog products with infinite scroll
   const {
@@ -260,47 +205,17 @@ export default function CatalogScreen() {
         ))}
       </View>
 
-      {/* Category tiles (when not browsing) */}
-      {!isBrowsing && categories && categories.length > 0 ? (
-        <FlatList
-          data={categories}
-          keyExtractor={(item) => item.name}
-          numColumns={3}
-          renderItem={({ item }) => (
-            <CategoryTile
-              category={item}
-              onPress={() => setSelectedCategory(item.name)}
-            />
-          )}
-          contentContainerStyle={styles.catGrid}
-          ListHeaderComponent={
-            <Text style={styles.catGridTitle}>Categorie</Text>
-          }
+      {/* Category picker (tiles when idle, chips when browsing) */}
+      {!isBrowsing ? (
+        <CategoryPicker
+          selectedCategory={selectedCategory}
+          onSelectCategory={setSelectedCategory}
         />
       ) : (
         <>
-          {/* Category filter chips (when browsing) */}
-          <FlatList
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            data={categories ?? []}
-            keyExtractor={(item) => item.name}
-            renderItem={({ item }) => (
-              <Chip
-                selected={selectedCategory === item.name}
-                onPress={() =>
-                  setSelectedCategory(
-                    selectedCategory === item.name ? null : item.name
-                  )
-                }
-                style={styles.filterChip}
-                compact
-              >
-                {item.name} ({item.count})
-              </Chip>
-            )}
-            contentContainerStyle={styles.categoryRow}
-            style={{ flexGrow: 0 }}
+          <CategoryPicker
+            selectedCategory={selectedCategory}
+            onSelectCategory={setSelectedCategory}
           />
 
           {/* Results count */}
@@ -312,7 +227,7 @@ export default function CatalogScreen() {
 
           {/* Product list */}
           {isLoading ? (
-            <ActivityIndicator style={styles.loader} />
+            <SkeletonList count={5} />
           ) : (
             <FlatList
               data={results}
@@ -371,33 +286,4 @@ const styles = StyleSheet.create({
   emptyText: { textAlign: "center", marginTop: 40, color: "#555", paddingHorizontal: 20 },
   listContent: { paddingBottom: 96 },
   snackbar: { marginBottom: 80 },
-  // Category tiles grid
-  catGrid: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 96 },
-  catGridTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: glassColors.greenDark,
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
-  catTile: {
-    flex: 1,
-    margin: 4,
-    padding: 14,
-    alignItems: "center",
-    gap: 6,
-    ...glassCard,
-    minHeight: 90,
-    justifyContent: "center",
-  } as any,
-  catTileName: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: glassColors.textPrimary,
-    textAlign: "center",
-  },
-  catTileCount: {
-    fontSize: 10,
-    color: glassColors.textMuted,
-  },
 });

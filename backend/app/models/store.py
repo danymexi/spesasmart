@@ -3,7 +3,7 @@
 import uuid
 
 from sqlalchemy import ForeignKey, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -25,6 +25,9 @@ class Store(Base):
     zip_code: Mapped[str | None] = mapped_column(String(10))
     lat: Mapped[float | None] = mapped_column(Numeric(10, 7))
     lon: Mapped[float | None] = mapped_column(Numeric(10, 7))
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    opening_hours: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    website_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     chain = relationship("Chain", back_populates="stores")
     flyers = relationship("Flyer", back_populates="store")

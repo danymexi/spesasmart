@@ -23,12 +23,16 @@ interface AppState {
   accessToken: string | null;
   userEmail: string | null;
   isLoggedIn: boolean;
+  isGuest: boolean;
   userId: string;
 
   // User
   pushToken: string | null;
   notificationsEnabled: boolean;
   telegramEnabled: boolean;
+
+  // Theme
+  themeMode: "system" | "light" | "dark";
 
   // Filters
   selectedChains: number[];
@@ -44,6 +48,9 @@ interface AppState {
   catalogLoading: boolean;
   catalogLastFetched: number | null;
 
+  // Active shopping list
+  activeListId: string | null;
+
   // Geolocation
   userLat: number | null;
   userLon: number | null;
@@ -55,12 +62,15 @@ interface AppState {
   availableChains: Chain[];
 
   // Actions
-  setAuth: (token: string, userId: string, email: string) => void;
+  setAuth: (token: string, userId: string, email: string, isGuest?: boolean) => void;
+  setGuest: (token: string, userId: string) => void;
   logout: () => void;
   setUserId: (id: string) => void;
   setPushToken: (token: string | null) => void;
   setNotificationsEnabled: (enabled: boolean) => void;
   setTelegramEnabled: (enabled: boolean) => void;
+
+  setThemeMode: (mode: "system" | "light" | "dark") => void;
 
   toggleChain: (chainId: number) => void;
   setSelectedChains: (chainIds: number[]) => void;
@@ -80,6 +90,9 @@ interface AppState {
   // Catalog cache actions
   prefetchCatalog: () => Promise<void>;
 
+  // Shopping list actions
+  setActiveListId: (id: string | null) => void;
+
   // Geolocation actions
   setUserLocation: (lat: number, lon: number) => void;
   setNearbyChains: (chains: string[]) => void;
@@ -93,11 +106,14 @@ const initialState = {
   accessToken: null as string | null,
   userEmail: null as string | null,
   isLoggedIn: false,
+  isGuest: false,
   userId: "",
 
   pushToken: null as string | null,
   notificationsEnabled: true,
   telegramEnabled: false,
+
+  themeMode: "system" as "system" | "light" | "dark",
 
   selectedChains: [] as number[],
   selectedCategory: null as string | null,
@@ -109,6 +125,8 @@ const initialState = {
   catalogProducts: [] as CatalogPreloadItem[],
   catalogLoading: false,
   catalogLastFetched: null as number | null,
+
+  activeListId: null as string | null,
 
   userLat: null as number | null,
   userLon: null as number | null,
@@ -128,14 +146,18 @@ export const useAppStore = create<AppState>()(
 
       // ── Auth actions ──────────────────────────────────────────────────
 
-      setAuth: (token: string, userId: string, email: string) =>
-        set({ accessToken: token, userId, userEmail: email, isLoggedIn: true }),
+      setAuth: (token: string, userId: string, email: string, isGuest?: boolean) =>
+        set({ accessToken: token, userId, userEmail: email, isLoggedIn: true, isGuest: isGuest ?? false }),
+
+      setGuest: (token: string, userId: string) =>
+        set({ accessToken: token, userId, userEmail: null, isLoggedIn: true, isGuest: true }),
 
       logout: () =>
         set({
           accessToken: null,
           userEmail: null,
           isLoggedIn: false,
+          isGuest: false,
           userId: "",
           watchlistItems: [],
         }),
@@ -151,6 +173,11 @@ export const useAppStore = create<AppState>()(
 
       setTelegramEnabled: (enabled: boolean) =>
         set({ telegramEnabled: enabled }),
+
+      // ── Theme ────────────────────────────────────────────────────────────
+
+      setThemeMode: (mode: "system" | "light" | "dark") =>
+        set({ themeMode: mode }),
 
       // ── Filter actions ──────────────────────────────────────────────────
 
@@ -249,6 +276,10 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      // ── Shopping list ─────────────────────────────────────────────────
+
+      setActiveListId: (id: string | null) => set({ activeListId: id }),
+
       // ── Geolocation ───────────────────────────────────────────────────
 
       setUserLocation: (lat: number, lon: number) =>
@@ -268,14 +299,17 @@ export const useAppStore = create<AppState>()(
         accessToken: state.accessToken,
         userEmail: state.userEmail,
         isLoggedIn: state.isLoggedIn,
+        isGuest: state.isGuest,
         userId: state.userId,
         pushToken: state.pushToken,
         notificationsEnabled: state.notificationsEnabled,
         telegramEnabled: state.telegramEnabled,
+        themeMode: state.themeMode,
         selectedChains: state.selectedChains,
         preferredStores: state.preferredStores,
         preferredCategories: state.preferredCategories,
         watchlistItems: state.watchlistItems,
+        activeListId: state.activeListId,
         userLat: state.userLat,
         userLon: state.userLon,
         nearbyChains: state.nearbyChains,

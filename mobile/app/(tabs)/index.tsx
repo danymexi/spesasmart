@@ -18,13 +18,16 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import OfferCard from "../../components/OfferCard";
 import SmartCompareCard from "../../components/SmartCompareCard";
 import HomeSpesaSummary from "../../components/HomeSpesaSummary";
+import { SkeletonList } from "../../components/Skeleton";
 import { useAppStore } from "../../stores/useAppStore";
 import { glassCard, glassColors, glassChip, glassPanel, glassSearchbar } from "../../styles/glassStyles";
+import { useGlassTheme } from "../../styles/useGlassTheme";
 
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal"];
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const glass = useGlassTheme();
   const queryClient = useQueryClient();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const catalogProducts = useAppStore((s) => s.catalogProducts);
@@ -62,7 +65,7 @@ export default function HomeScreen() {
   // Shopping list count
   const { data: shoppingListCount } = useQuery({
     queryKey: ["shoppingListCount"],
-    queryFn: getShoppingListCount,
+    queryFn: () => getShoppingListCount(),
     enabled: isLoggedIn,
   });
   const hasShoppingList = isLoggedIn && (shoppingListCount ?? 0) > 0;
@@ -192,10 +195,10 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text variant="headlineMedium" style={styles.headerTitle}>
+          <Text variant="headlineMedium" style={[styles.headerTitle, { color: glass.colors.greenDark }]}>
             SpesaSmart
           </Text>
-          <Text variant="bodyMedium" style={styles.headerSubtitle}>
+          <Text variant="bodyMedium" style={[styles.headerSubtitle, { color: glass.colors.textSecondary }]}>
             La tua spesa intelligente
           </Text>
         </View>
@@ -232,7 +235,7 @@ export default function HomeScreen() {
         {isSearching ? (
           <View style={styles.searchResults}>
             {loadingSearch && localResults.length === 0 ? (
-              <ActivityIndicator style={{ marginTop: 20 }} />
+              <SkeletonList count={3} />
             ) : searchResults && searchResults.length > 0 ? (
               searchResults.map((result) => (
                 <SmartCompareCard
@@ -358,7 +361,7 @@ export default function HomeScreen() {
             </ScrollView>
 
             {/* Best offers */}
-            <Text variant="titleLarge" style={styles.sectionTitle}>
+            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.greenDark }]}>
               Migliori Offerte
             </Text>
             {filteredBest.length > 0 ? (
@@ -384,9 +387,9 @@ export default function HomeScreen() {
               <MaterialCommunityIcons
                 name="trending-down"
                 size={22}
-                color={glassColors.greenDark}
+                color={glass.colors.greenDark}
               />
-              <Text variant="titleLarge" style={styles.sectionTitleInline}>
+              <Text variant="titleLarge" style={[styles.sectionTitleInline, { color: glass.colors.greenDark }]}>
                 Minimi Storici
               </Text>
             </View>
@@ -409,7 +412,7 @@ export default function HomeScreen() {
             )}
 
             {/* All active offers */}
-            <Text variant="titleLarge" style={styles.sectionTitle}>
+            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.greenDark }]}>
               Offerte Attive
             </Text>
             {filteredActive.map((offer) => (

@@ -48,21 +48,16 @@ export const CHAIN_LOGIN_CONFIGS: Record<string, ChainLoginConfig> = {
   esselunga: {
     slug: "esselunga",
     label: "Esselunga",
-    loginUrl: "https://spesaonline.esselunga.it",
-    cookieDomains: ["spesaonline.esselunga.it", ".esselunga.it"],
+    loginUrl: "https://www.esselunga.it/area-utenti/ist35/myesselunga/shoppingMovements",
+    cookieDomains: ["www.esselunga.it", ".esselunga.it"],
     authCheckScript: `
-(async function() {
+(function() {
   try {
-    var r = await fetch("https://spesaonline.esselunga.it/commerce/resources/nav/supermercato", {
-      credentials: "include",
-      headers: { "Accept": "application/json" }
-    });
-    if (!r.ok) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: "AUTH_CHECK", authenticated: false }));
-      return;
-    }
-    var d = await r.json();
-    window.ReactNativeWebView.postMessage(JSON.stringify({ type: "AUTH_CHECK", authenticated: true }));
+    var href = window.location.href.toLowerCase();
+    var onAreaUtenti = href.indexOf("area-utenti") !== -1 || href.indexOf("myesselunga") !== -1;
+    var onLogin = href.indexOf("login") !== -1 || href.indexOf("signin") !== -1 || href.indexOf("accedi") !== -1;
+    var authenticated = onAreaUtenti && !onLogin;
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: "AUTH_CHECK", authenticated: authenticated }));
   } catch (e) {
     window.ReactNativeWebView.postMessage(JSON.stringify({ type: "AUTH_CHECK", authenticated: false }));
   }

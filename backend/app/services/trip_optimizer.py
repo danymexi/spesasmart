@@ -10,6 +10,7 @@ cheapest matching offer per chain.
 """
 
 import logging
+import math
 import re
 import uuid
 from collections import defaultdict
@@ -22,7 +23,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.models import Chain, Offer, Product, ShoppingListItem
+from app.models import Chain, Offer, Product, ShoppingListItem, Store
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,29 @@ def _names_match(norm_a: str, norm_b: str, threshold: float = 0.78) -> bool:
     return ratio >= threshold
 
 
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two points in km."""
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    )
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+@dataclass
+class OptimizationConfig:
+    max_stores: int = 3
+    radius_km: float = 15.0
+    travel_cost_per_store: Decimal = Decimal("2.00")
+    min_coverage_pct: float = 0.5
+    user_lat: float | None = None
+    user_lon: float | None = None
+    list_id: uuid.UUID | None = None
+
+
 @dataclass
 class TripItem:
     product_name: str
@@ -78,11 +102,19 @@ class TripItem:
 
 
 @dataclass
+class MissingItem:
+    product_name: str
+    search_term: str | None = None
+
+
+@dataclass
 class StoreTrip:
     chain_name: str
     items: list[TripItem] = field(default_factory=list)
     total: Decimal = Decimal("0")
     items_covered: int = 0
+    coverage_pct: float = 0.0
+    distance_km: float | None = None
 
 
 @dataclass
@@ -95,6 +127,8 @@ class TripOptimizationResult:
     all_single_stores: list[StoreTrip] = field(default_factory=list)
     items_total: int = 0
     items_not_covered: int = 0
+    missing_items: list[MissingItem] = field(default_factory=list)
+    travel_cost: Decimal = Decimal("0")
 
 
 class TripOptimizer:
@@ -211,22 +245,53 @@ class TripOptimizer:
 
         return price_matrix, labels
 
+    async def _get_chain_distances(
+        self,
+        session: AsyncSession,
+        user_lat: float,
+        user_lon: float,
+        radius_km: float,
+    ) -> dict[str, float]:
+        """For each chain, find distance to nearest store within radius."""
+        stores_result = await session.execute(
+            select(Store)
+            .options(joinedload(Store.chain))
+            .where(Store.lat.isnot(None), Store.lon.isnot(None))
+        )
+        stores = stores_result.unique().scalars().all()
+
+        chain_distances: dict[str, float] = {}
+        for store in stores:
+            d = _haversine_km(user_lat, user_lon, float(store.lat), float(store.lon))
+            if d <= radius_km:
+                chain_name = store.chain.name if store.chain else "Unknown"
+                if chain_name not in chain_distances or d < chain_distances[chain_name]:
+                    chain_distances[chain_name] = round(d, 1)
+        return chain_distances
+
     async def optimize(
         self,
         user_id: uuid.UUID,
         session: AsyncSession,
+        config: OptimizationConfig | None = None,
     ) -> TripOptimizationResult:
         """Analyse the user's shopping list and return optimisation results."""
+        if config is None:
+            config = OptimizationConfig()
         today = date.today()
 
-        # 1. Fetch ALL unchecked shopping list items
+        # 1. Fetch unchecked shopping list items (optionally filtered by list_id)
+        filters = [
+            ShoppingListItem.user_id == user_id,
+            ShoppingListItem.checked.is_(False),
+        ]
+        if config.list_id is not None:
+            filters.append(ShoppingListItem.list_id == config.list_id)
+
         sl_result = await session.execute(
             select(ShoppingListItem)
             .options(joinedload(ShoppingListItem.product))
-            .where(
-                ShoppingListItem.user_id == user_id,
-                ShoppingListItem.checked.is_(False),
-            )
+            .where(*filters)
         )
         items = sl_result.unique().scalars().all()
 
@@ -308,6 +373,18 @@ class TripOptimizer:
         for chain_prices in custom_pm.values():
             all_chains.update(chain_prices.keys())
 
+        # Location-based filtering: get chain distances if user position given
+        chain_distances: dict[str, float] = {}
+        if config.user_lat is not None and config.user_lon is not None:
+            chain_distances = await self._get_chain_distances(
+                session, config.user_lat, config.user_lon, config.radius_km,
+            )
+            # Filter chains to only those within radius
+            if chain_distances:
+                all_chains = all_chains & set(chain_distances.keys())
+
+        items_total = len(product_items) + len(custom_items)
+
         # 4. Single-store strategy: for each chain, sum what's available
         single_store_results: list[StoreTrip] = []
         for chain_name in sorted(all_chains):
@@ -341,6 +418,8 @@ class TripOptimizer:
                     trip.total += item_total
 
             trip.items_covered = len(trip.items)
+            trip.coverage_pct = round(trip.items_covered / items_total, 2) if items_total > 0 else 0.0
+            trip.distance_km = chain_distances.get(chain_name)
             if trip.items:
                 single_store_results.append(trip)
 
@@ -348,14 +427,39 @@ class TripOptimizer:
         single_store_results.sort(key=lambda t: (-len(t.items), t.total))
         single_store_best = single_store_results[0] if single_store_results else None
 
-        # 5. Multi-store strategy: for each item, pick the cheapest chain
+        # 5. Build missing items list
+        covered_product_ids: set[uuid.UUID] = set()
+        covered_custom_ids: set[uuid.UUID] = set()
+        for pid in product_ids:
+            if price_matrix.get(pid):
+                # Check if any chain in all_chains has this product
+                if any(ch in price_matrix[pid] for ch in all_chains):
+                    covered_product_ids.add(pid)
+        for item in custom_items:
+            if any(ch in custom_pm.get(item.id, {}) for ch in all_chains):
+                covered_custom_ids.add(item.id)
+
+        missing_items: list[MissingItem] = []
+        for item in product_items:
+            if item.product_id not in covered_product_ids:
+                missing_items.append(MissingItem(
+                    product_name=product_names.get(item.product_id, "Unknown"),
+                ))
+        for item in custom_items:
+            if item.id not in covered_custom_ids:
+                missing_items.append(MissingItem(
+                    product_name=item.custom_name or "Unknown",
+                    search_term=item.custom_name,
+                ))
+
+        # 6. Multi-store strategy: for each item, pick the cheapest chain
         multi_store_map: dict[str, StoreTrip] = {}
         multi_total = Decimal("0")
 
         # Product-linked items
         for item in product_items:
             pid = item.product_id
-            chain_prices = price_matrix.get(pid, {})
+            chain_prices = {ch: v for ch, v in price_matrix.get(pid, {}).items() if ch in all_chains}
             if not chain_prices:
                 continue
             best_chain, (best_price, _) = min(
@@ -374,7 +478,7 @@ class TripOptimizer:
 
         # Custom-name items
         for item in custom_items:
-            chain_prices = custom_pm.get(item.id, {})
+            chain_prices = {ch: v for ch, v in custom_pm.get(item.id, {}).items() if ch in all_chains}
             if not chain_prices:
                 continue
             best_chain, (best_price, _) = min(
@@ -393,17 +497,31 @@ class TripOptimizer:
             multi_store_map[best_chain].total += item_total
             multi_total += item_total
 
+        # Enforce max_stores: keep top N stores by savings contribution
+        if len(multi_store_map) > config.max_stores:
+            sorted_stores = sorted(multi_store_map.values(), key=lambda t: -t.total)
+            kept = sorted_stores[: config.max_stores]
+            kept_names = {t.chain_name for t in kept}
+            dropped_total = sum(t.total for t in sorted_stores[config.max_stores :])
+            multi_store_map = {t.chain_name: t for t in kept}
+            multi_total -= dropped_total
+
+        # Add distance and coverage to multi-store trips
+        for trip in multi_store_map.values():
+            trip.items_covered = len(trip.items)
+            trip.coverage_pct = round(trip.items_covered / items_total, 2) if items_total > 0 else 0.0
+            trip.distance_km = chain_distances.get(trip.chain_name)
+
         multi_store_plan = sorted(multi_store_map.values(), key=lambda t: t.chain_name)
+
+        # Calculate travel cost
+        num_stores = len(multi_store_plan)
+        travel_cost = config.travel_cost_per_store * num_stores
 
         single_total = single_store_best.total if single_store_best else Decimal("0")
         savings = single_total - multi_total if single_total > multi_total else Decimal("0")
 
-        items_total = len(product_items) + len(custom_items)
-        items_with_offers = (
-            sum(1 for pid in product_ids if price_matrix.get(pid))
-            + sum(1 for item in custom_items if custom_pm.get(item.id))
-        )
-        items_not_covered = items_total - items_with_offers
+        items_not_covered = len(missing_items)
 
         return TripOptimizationResult(
             single_store_best=single_store_best,
@@ -414,4 +532,6 @@ class TripOptimizer:
             all_single_stores=single_store_results,
             items_total=items_total,
             items_not_covered=items_not_covered,
+            missing_items=missing_items,
+            travel_cost=travel_cost,
         )

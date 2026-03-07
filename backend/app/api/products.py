@@ -1,5 +1,6 @@
 """API routes for products."""
 
+import logging
 import re
 import uuid
 from collections import defaultdict
@@ -9,16 +10,55 @@ from difflib import SequenceMatcher
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from sqlalchemy import or_
 
 from app.database import get_db
-from app.models import Chain, Offer, Product
+from app.models import Category, Chain, Offer, Product
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/products", tags=["products"])
+
+# Italian grocery synonym map for common misspellings and aliases
+_ITALIAN_SYNONYMS: dict[str, str] = {
+    "parmigano": "parmigiano",
+    "parmigiana": "parmigiano",
+    "parmesano": "parmigiano",
+    "gorgonzola": "gorgonzola",
+    "mozzarela": "mozzarella",
+    "mozarella": "mozzarella",
+    "prosciuto": "prosciutto",
+    "yoghurt": "yogurt",
+    "jogurt": "yogurt",
+    "yougurt": "yogurt",
+    "cioccolata": "cioccolato",
+    "ciocolato": "cioccolato",
+    "olio evo": "olio extravergine",
+    "olio ev": "olio extravergine",
+    "pomodorini": "pomodori",
+    "insalatina": "insalata",
+    "riso": "riso",
+    "brocoli": "broccoli",
+    "farina oo": "farina 00",
+    "acqua nat": "acqua naturale",
+    "acqua friz": "acqua frizzante",
+    "tonno olio": "tonno olio",
+    "prosciutto cotto": "prosciutto cotto",
+    "prosciutto crudo": "prosciutto crudo",
+}
+
+
+def _expand_synonyms(q: str) -> str:
+    """Expand known Italian grocery synonyms/misspellings in query."""
+    q_lower = q.lower().strip()
+    for typo, correct in _ITALIAN_SYNONYMS.items():
+        if typo in q_lower:
+            q_lower = q_lower.replace(typo, correct)
+    return q_lower
 
 
 def _build_search_filter(q: str):
@@ -27,12 +67,40 @@ def _build_search_filter(q: str):
     "latte valtellina" → name+brand must contain both "latte" AND "valtellina"
     (each word can be in either field).
     """
-    words = q.strip().split()
+    expanded = _expand_synonyms(q)
+    words = expanded.strip().split()
     conditions = []
     for word in words:
         pattern = f"%{word}%"
         conditions.append(or_(Product.name.ilike(pattern), Product.brand.ilike(pattern)))
     return conditions
+
+
+async def _fuzzy_search_products(
+    q: str,
+    db: AsyncSession,
+    limit: int = 20,
+    category: str | None = None,
+    min_similarity: float = 0.2,
+) -> list["Product"]:
+    """Fallback fuzzy search using pg_trgm similarity when ILIKE finds nothing."""
+    expanded = _expand_synonyms(q)
+
+    # Use similarity() function from pg_trgm
+    similarity_expr = func.similarity(Product.name, expanded)
+    brand_similarity = func.similarity(func.coalesce(Product.brand, ""), expanded)
+    combined_score = func.greatest(similarity_expr, brand_similarity)
+
+    query = (
+        select(Product, combined_score.label("score"))
+        .where(combined_score >= min_similarity)
+    )
+    if category:
+        query = query.where(Product.category.ilike(f"%{category}%"))
+    query = query.order_by(combined_score.desc()).limit(limit)
+
+    result = await db.execute(query)
+    return [row[0] for row in result.all()]
 
 
 class ProductResponse(BaseModel):
@@ -65,6 +133,22 @@ class CatalogProductResponse(BaseModel):
 class CategoryResponse(BaseModel):
     name: str
     count: int
+
+
+class CategoryChild(BaseModel):
+    id: str
+    name: str
+    slug: str
+    icon: str | None = None
+
+
+class CategoryTree(BaseModel):
+    id: str
+    name: str
+    slug: str
+    icon: str | None = None
+    count: int = 0
+    children: list[CategoryChild] = []
 
 
 class PriceHistoryPoint(BaseModel):
@@ -736,6 +820,48 @@ async def get_categories(
     return [CategoryResponse(name=name, count=count) for name, count in rows]
 
 
+@router.get("/categories/tree", response_model=list[CategoryTree])
+async def get_categories_tree(
+    db: AsyncSession = Depends(get_db),
+):
+    """Return hierarchical category tree with product counts."""
+    # Fetch all categories (parents + children)
+    cat_result = await db.execute(
+        select(Category).order_by(Category.sort_order)
+    )
+    all_cats = cat_result.scalars().all()
+
+    # Product counts per category name
+    count_result = await db.execute(
+        select(Product.category, func.count(Product.id))
+        .where(Product.category.isnot(None), Product.category != "")
+        .group_by(Product.category)
+    )
+    counts = dict(count_result.all())
+
+    # Build tree
+    parents = [c for c in all_cats if c.parent_id is None]
+    children_by_parent: dict[uuid.UUID, list[Category]] = defaultdict(list)
+    for c in all_cats:
+        if c.parent_id is not None:
+            children_by_parent[c.parent_id].append(c)
+
+    tree: list[CategoryTree] = []
+    for parent in parents:
+        tree.append(CategoryTree(
+            id=str(parent.id),
+            name=parent.name,
+            slug=parent.slug,
+            icon=parent.icon,
+            count=counts.get(parent.name, 0),
+            children=[
+                CategoryChild(id=str(ch.id), name=ch.name, slug=ch.slug, icon=ch.icon)
+                for ch in children_by_parent.get(parent.id, [])
+            ],
+        ))
+    return tree
+
+
 class SmartSearchOfferResponse(BaseModel):
     chain_name: str
     chain_slug: str
@@ -820,7 +946,7 @@ async def smart_search(
     from collections import defaultdict
     from app.services.price_analyzer import PriceAnalyzer
 
-    # Find matching products — direct matches only
+    # Find matching products — direct matches only (with synonym expansion)
     smart_query = select(Product)
     for cond in _build_search_filter(q):
         smart_query = smart_query.where(cond)
@@ -828,6 +954,10 @@ async def smart_search(
         smart_query.order_by(Product.name).limit(limit)
     )
     products = list(prod_result.scalars().all())
+
+    # Fallback to pg_trgm fuzzy search if no ILIKE results
+    if not products:
+        products = await _fuzzy_search_products(q, db, limit=limit)
 
     if not products:
         return []
@@ -910,14 +1040,20 @@ async def search_products(
     limit: int = Query(20, le=100),
     db: AsyncSession = Depends(get_db),
 ):
+    # Try ILIKE first (with synonym expansion)
+    expanded = _expand_synonyms(q)
     query = select(Product).where(
-        Product.name.ilike(f"%{q}%")
+        Product.name.ilike(f"%{expanded}%")
     )
     if category:
         query = query.where(Product.category.ilike(f"%{category}%"))
     query = query.limit(limit)
     result = await db.execute(query)
-    products = result.scalars().all()
+    products = list(result.scalars().all())
+
+    # Fallback to pg_trgm fuzzy search if no ILIKE results
+    if not products:
+        products = await _fuzzy_search_products(q, db, limit=limit, category=category)
 
     results = []
     today = date.today()

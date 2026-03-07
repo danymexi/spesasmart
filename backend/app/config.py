@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Google Cloud
     google_application_credentials: str = ""
     google_project_id: str = ""
+    google_client_id: str = ""
 
     # Gemini AI
     gemini_api_key: str = ""

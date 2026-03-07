@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api import auth, chains, flyers, offers, products, purchases, scraping, stores, users
+from app.api import admin, auth, chains, flyers, offers, products, purchases, remote_login, scraping, shopping_lists, stores, users
 from app.api import web_push
 from app.config import get_settings
 from app.database import async_session
@@ -86,9 +86,13 @@ app.include_router(flyers.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")
 app.include_router(offers.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
+app.include_router(shopping_lists.router, prefix="/api/v1")
+app.include_router(shopping_lists.shared_router, prefix="/api/v1")
 app.include_router(scraping.router, prefix="/api/v1")
 app.include_router(purchases.router, prefix="/api/v1")
+app.include_router(remote_login.router, prefix="/api/v1")
 app.include_router(web_push.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 
 
 @app.get("/health")

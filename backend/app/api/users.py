@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Chain, Offer, Product, ShoppingListItem, ShoppingListItemProduct, UserBrand, UserProfile, UserStore, UserWatchlist
+from app.models import Chain, Offer, Product, ShoppingList, ShoppingListItem, ShoppingListItemProduct, UserBrand, UserProfile, UserStore, UserWatchlist
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -128,6 +128,7 @@ class ShoppingListAddRequest(BaseModel):
     unit: str | None = None
     offer_id: uuid.UUID | None = None
     notes: str | None = None
+    list_id: uuid.UUID | None = None
 
 
 class LinkedProductDetail(BaseModel):
@@ -663,10 +664,21 @@ async def get_brand_deals(
 
 @router.get("/me/shopping-list", response_model=list[ShoppingListItemResponse])
 async def get_shopping_list(
+    list_id: uuid.UUID | None = None,
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the user's shopping list with product/offer details."""
+    """Get the user's shopping list with product/offer details.
+
+    If ``list_id`` is omitted the items of the user's first (default) list
+    are returned for backward compatibility.
+    """
+    if list_id is None:
+        # Backward compat: find default list
+        from app.api.shopping_lists import _get_or_create_default_list
+        default = await _get_or_create_default_list(user, db)
+        list_id = default.id
+
     result = await db.execute(
         select(ShoppingListItem)
         .options(
@@ -674,8 +686,8 @@ async def get_shopping_list(
             joinedload(ShoppingListItem.offer).joinedload(Offer.chain),
             joinedload(ShoppingListItem.linked_products).joinedload(ShoppingListItemProduct.product),
         )
-        .where(ShoppingListItem.user_id == user.id)
-        .order_by(ShoppingListItem.checked, ShoppingListItem.created_at.desc())
+        .where(ShoppingListItem.user_id == user.id, ShoppingListItem.list_id == list_id)
+        .order_by(ShoppingListItem.checked, ShoppingListItem.sort_order, ShoppingListItem.created_at.desc())
     )
     items = result.unique().scalars().all()
 
@@ -706,17 +718,19 @@ async def get_shopping_list(
 
 @router.get("/me/shopping-list/count")
 async def get_shopping_list_count(
+    list_id: uuid.UUID | None = None,
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the count of unchecked items in the shopping list."""
     from sqlalchemy import func as sql_func
 
+    filters = [ShoppingListItem.user_id == user.id, ShoppingListItem.checked.is_(False)]
+    if list_id:
+        filters.append(ShoppingListItem.list_id == list_id)
+
     result = await db.execute(
-        select(sql_func.count(ShoppingListItem.id)).where(
-            ShoppingListItem.user_id == user.id,
-            ShoppingListItem.checked.is_(False),
-        )
+        select(sql_func.count(ShoppingListItem.id)).where(*filters)
     )
     count = result.scalar() or 0
     return {"count": count}
@@ -731,6 +745,13 @@ async def add_to_shopping_list(
     """Add an item to the shopping list."""
     if not data.product_id and not data.product_ids and not data.custom_name:
         raise HTTPException(status_code=400, detail="Either product_id, product_ids, or custom_name is required")
+
+    # Resolve list_id (backward compat: default list if omitted)
+    resolved_list_id = data.list_id
+    if resolved_list_id is None:
+        from app.api.shopping_lists import _get_or_create_default_list
+        default = await _get_or_create_default_list(user, db)
+        resolved_list_id = default.id
 
     product_name = None
     linked_product_ids: list[uuid.UUID] = []
@@ -752,6 +773,7 @@ async def add_to_shopping_list(
         # Create item without product_id (linked via junction table)
         item = ShoppingListItem(
             user_id=user.id,
+            list_id=resolved_list_id,
             product_id=None,
             custom_name=data.custom_name or product_name,
             quantity=data.quantity,
@@ -785,6 +807,7 @@ async def add_to_shopping_list(
 
         item = ShoppingListItem(
             user_id=user.id,
+            list_id=resolved_list_id,
             product_id=data.product_id,
             custom_name=data.custom_name,
             quantity=data.quantity,
@@ -850,17 +873,19 @@ async def toggle_shopping_item(
 
 @router.delete("/me/shopping-list/checked", status_code=204)
 async def clear_checked_items(
+    list_id: uuid.UUID | None = None,
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove all checked items from the shopping list."""
     from sqlalchemy import delete as sql_delete
 
+    filters = [ShoppingListItem.user_id == user.id, ShoppingListItem.checked.is_(True)]
+    if list_id:
+        filters.append(ShoppingListItem.list_id == list_id)
+
     await db.execute(
-        sql_delete(ShoppingListItem).where(
-            ShoppingListItem.user_id == user.id,
-            ShoppingListItem.checked.is_(True),
-        )
+        sql_delete(ShoppingListItem).where(*filters)
     )
 
 
@@ -970,11 +995,18 @@ class TripItemResponse(BaseModel):
     search_term: str | None = None
 
 
+class MissingItemResponse(BaseModel):
+    product_name: str
+    search_term: str | None = None
+
+
 class StoreTripResponse(BaseModel):
     chain_name: str
     items: list[TripItemResponse]
     total: Decimal
     items_covered: int = 0
+    coverage_pct: float = 0.0
+    distance_km: float | None = None
 
 
 class TripOptimizationResponse(BaseModel):
@@ -986,18 +1018,37 @@ class TripOptimizationResponse(BaseModel):
     all_single_stores: list[StoreTripResponse] = []
     items_total: int = 0
     items_not_covered: int = 0
+    missing_items: list[MissingItemResponse] = []
+    travel_cost: Decimal = Decimal("0")
 
 
 @router.get("/me/shopping-list/optimize", response_model=TripOptimizationResponse)
 async def optimize_shopping_trip(
     user: UserProfile = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    list_id: uuid.UUID | None = None,
+    max_stores: int = 3,
+    radius_km: float = 15.0,
+    travel_cost_per_store: Decimal = Decimal("2.00"),
+    min_coverage_pct: float = 0.5,
+    user_lat: float | None = None,
+    user_lon: float | None = None,
 ):
     """Analyse the shopping list and suggest optimal purchasing strategies."""
-    from app.services.trip_optimizer import TripOptimizer
+    from app.services.trip_optimizer import OptimizationConfig, TripOptimizer
+
+    config = OptimizationConfig(
+        max_stores=max(1, min(max_stores, 5)),
+        radius_km=max(1.0, min(radius_km, 50.0)),
+        travel_cost_per_store=travel_cost_per_store,
+        min_coverage_pct=max(0.0, min(min_coverage_pct, 1.0)),
+        user_lat=user_lat,
+        user_lon=user_lon,
+        list_id=list_id,
+    )
 
     optimizer = TripOptimizer()
-    result = await optimizer.optimize(user.id, db)
+    result = await optimizer.optimize(user.id, db, config)
 
     def _convert_trip(trip) -> StoreTripResponse:
         return StoreTripResponse(
@@ -1013,6 +1064,8 @@ async def optimize_shopping_trip(
             ],
             total=trip.total,
             items_covered=trip.items_covered,
+            coverage_pct=trip.coverage_pct,
+            distance_km=trip.distance_km,
         )
 
     return TripOptimizationResponse(
@@ -1024,6 +1077,11 @@ async def optimize_shopping_trip(
         all_single_stores=[_convert_trip(t) for t in result.all_single_stores],
         items_total=result.items_total,
         items_not_covered=result.items_not_covered,
+        missing_items=[
+            MissingItemResponse(product_name=m.product_name, search_term=m.search_term)
+            for m in result.missing_items
+        ],
+        travel_cost=result.travel_cost,
     )
 
 

@@ -1,14 +1,15 @@
-import { useCallback, useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { PaperProvider, MD3DarkTheme, MD3LightTheme } from "react-native-paper";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { useColorScheme, View, ActivityIndicator } from "react-native";
+import { useColorScheme } from "react-native";
 import { useFonts } from "expo-font";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as SplashScreen from "expo-splash-screen";
 import { registerServiceWorker } from "../services/registerSW";
-import { glassColors, glassHeader, gradientBackground } from "../styles/glassStyles";
+import { createGuestUser } from "../services/api";
+import { getGlassStyles } from "../styles/glassStyles";
 import { useAppStore } from "../stores/useAppStore";
 
 SplashScreen.preventAutoHideAsync();
@@ -33,16 +34,28 @@ const lightTheme = {
 
 const darkTheme = {
   ...MD3DarkTheme,
+  roundness: 20,
   colors: {
     ...MD3DarkTheme.colors,
     primary: "#66BB6A",
     secondary: "#FFB74D",
+    surface: "rgba(30,30,30,0.72)",
+    background: "transparent",
   },
 };
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-  const theme = colorScheme === "dark" ? darkTheme : lightTheme;
+  const systemScheme = useColorScheme();
+  const themeMode = useAppStore((s) => s.themeMode);
+
+  const isDark = useMemo(() => {
+    if (themeMode === "dark") return true;
+    if (themeMode === "light") return false;
+    return systemScheme === "dark";
+  }, [themeMode, systemScheme]);
+
+  const paperTheme = isDark ? darkTheme : lightTheme;
+  const glass = useMemo(() => getGlassStyles(isDark), [isDark]);
 
   const [fontsLoaded] = useFonts({
     ...MaterialCommunityIcons.font,
@@ -50,6 +63,16 @@ export default function RootLayout() {
 
   useEffect(() => {
     registerServiceWorker();
+  }, []);
+
+  // Auto-create guest account on first load if not logged in
+  useEffect(() => {
+    const { isLoggedIn, setGuest } = useAppStore.getState();
+    if (!isLoggedIn) {
+      createGuestUser()
+        .then((res) => setGuest(res.access_token, res.user.id))
+        .catch(() => {}); // silently fail if offline
+    }
   }, []);
 
   // Prefetch catalog on app startup
@@ -69,15 +92,15 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <PaperProvider theme={theme}>
+      <PaperProvider theme={paperTheme}>
         <QueryClientProvider client={queryClient}>
           <Stack
             screenOptions={{
-              headerStyle: glassHeader as any,
-              headerTintColor: glassColors.greenDark,
-              headerTitleStyle: { fontWeight: "bold", color: glassColors.greenDark },
+              headerStyle: glass.header as any,
+              headerTintColor: glass.colors.greenDark,
+              headerTitleStyle: { fontWeight: "bold", color: glass.colors.greenDark },
               headerShadowVisible: false,
-              contentStyle: gradientBackground,
+              contentStyle: glass.background,
             }}
           >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -92,6 +115,14 @@ export default function RootLayout() {
             <Stack.Screen
               name="purchases"
               options={{ title: "Storico Acquisti" }}
+            />
+            <Stack.Screen
+              name="shopping-mode"
+              options={{ title: "Modalit\u00e0 Spesa", presentation: "fullScreenModal", headerShown: false }}
+            />
+            <Stack.Screen
+              name="admin"
+              options={{ title: "Admin Panel" }}
             />
             <Stack.Screen
               name="supermarket-login/[chain]"

@@ -15,6 +15,7 @@ from app.database import async_session
 from app.models.offer import Offer
 from app.models.product import Product
 from app.models.purchase import PurchaseItem, PurchaseOrder
+from app.models.user import UserWatchlist
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,15 @@ async def generate_smart_list(user_id: uuid.UUID) -> list[dict[str, Any]]:
     if not habits:
         return []
 
+    # Fetch watchlist product IDs for this user
+    watchlist_pids: set[str] = set()
+    async with async_session() as session:
+        wl_stmt = select(UserWatchlist.product_id).where(
+            UserWatchlist.user_id == user_id
+        )
+        wl_rows = (await session.execute(wl_stmt)).scalars().all()
+        watchlist_pids = {str(pid) for pid in wl_rows}
+
     today = date.today()
     suggestions = []
 
@@ -196,6 +206,7 @@ async def generate_smart_list(user_id: uuid.UUID) -> list[dict[str, Any]]:
             "best_current_price": best_price,
             "best_chain": best_chain,
             "savings_vs_avg": savings,
+            "in_watchlist": product_id in watchlist_pids,
         })
 
     # Sort by urgency (alta first), then by days_until_due

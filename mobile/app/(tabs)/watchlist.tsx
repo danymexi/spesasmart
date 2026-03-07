@@ -3,19 +3,38 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-nat
 import { Button, IconButton, SegmentedButtons, Text, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { getWatchlist, removeFromWatchlist, addToShoppingList } from "../../services/api";
+import {
+  getWatchlist,
+  removeFromWatchlist,
+  addToShoppingList,
+  createShoppingList,
+  deleteShoppingList,
+  duplicateShoppingList,
+  updateShoppingList,
+  shareShoppingList,
+  type ShoppingListMeta,
+} from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import PriceIndicator from "../../components/PriceIndicator";
 import ShoppingList from "../../components/ShoppingList";
+import ListPicker from "../../components/ListPicker";
+import ListSettingsModal from "../../components/ListSettingsModal";
+import ShareListModal from "../../components/ShareListModal";
 import { glassCard, glassColors, alertBadgeGlass } from "../../styles/glassStyles";
+import { useGlassTheme } from "../../styles/useGlassTheme";
 
 type TabValue = "watchlist" | "shopping";
 
 export default function WatchlistScreen() {
   const theme = useTheme();
+  const glass = useGlassTheme();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
+  const activeListId = useAppStore((s) => s.activeListId);
+  const setActiveListId = useAppStore((s) => s.setActiveListId);
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabValue>("watchlist");
+  const [showCreateList, setShowCreateList] = useState(false);
+  const [shareList, setShareList] = useState<ShoppingListMeta | null>(null);
 
   const {
     data: items,
@@ -35,28 +54,22 @@ export default function WatchlistScreen() {
 
   const addToListMutation = useMutation({
     mutationFn: ({ productId }: { productId: string }) =>
-      addToShoppingList({ product_id: productId }),
+      addToShoppingList({ product_id: productId, list_id: activeListId ?? undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
       queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingLists"] });
     },
   });
 
-  if (!isLoggedIn) {
-    return (
-      <View style={styles.centered}>
-        <Text variant="titleMedium" style={styles.emptyTitle}>
-          Accedi per usare la lista
-        </Text>
-        <Text variant="bodyMedium" style={styles.emptyText}>
-          Per salvare prodotti nella tua lista, accedi o registrati nelle Impostazioni.
-        </Text>
-        <Button mode="contained" onPress={() => router.push("/(tabs)/settings")}>
-          Vai alle Impostazioni
-        </Button>
-      </View>
-    );
-  }
+  const createListMutation = useMutation({
+    mutationFn: createShoppingList,
+    onSuccess: (newList) => {
+      queryClient.invalidateQueries({ queryKey: ["shoppingLists"] });
+      setActiveListId(newList.id);
+      setShowCreateList(false);
+    },
+  });
 
   return (
     <View style={styles.container}>
@@ -74,7 +87,19 @@ export default function WatchlistScreen() {
       </View>
 
       {activeTab === "shopping" ? (
-        <ShoppingList />
+        <View style={{ flex: 1 }}>
+          <ListPicker onCreateList={() => setShowCreateList(true)} />
+          <ShoppingList listId={activeListId ?? undefined} />
+          <ListSettingsModal
+            visible={showCreateList}
+            onDismiss={() => setShowCreateList(false)}
+            onSave={(data) => createListMutation.mutate({
+              name: data.name,
+              emoji: data.emoji ?? undefined,
+              color: data.color ?? undefined,
+            })}
+          />
+        </View>
       ) : (
         <FlatList
           data={items}
@@ -85,7 +110,7 @@ export default function WatchlistScreen() {
 
             return (
               <Pressable
-                style={styles.card}
+                style={[styles.card, glass.card, { padding: 12, marginHorizontal: 12, marginBottom: 8 }]}
                 onPress={() => router.push(`/product/${item.product_id}`)}
               >
                 <View style={styles.cardContent}>
@@ -93,17 +118,17 @@ export default function WatchlistScreen() {
                     <Text
                       variant="titleMedium"
                       numberOfLines={2}
-                      style={styles.productName}
+                      style={{ color: glass.colors.textPrimary, fontWeight: "600" }}
                     >
                       {item.product_name}
                     </Text>
                     {item.brand && (
-                      <Text variant="bodySmall" style={styles.brand}>
+                      <Text variant="bodySmall" style={{ color: glass.colors.textSecondary, marginTop: 2 }}>
                         {item.brand}
                       </Text>
                     )}
                     {item.target_price && (
-                      <Text variant="labelSmall" style={styles.targetPrice}>
+                      <Text variant="labelSmall" style={{ color: glass.colors.textMuted, marginTop: 4 }}>
                         Prezzo target: {"\u20AC"}{Number(item.target_price).toFixed(2)}
                       </Text>
                     )}
@@ -117,18 +142,18 @@ export default function WatchlistScreen() {
                         >
                           {"\u20AC"}{Number(item.best_current_price).toFixed(2)}
                         </Text>
-                        <Text variant="labelSmall" style={styles.chainText}>
+                        <Text variant="labelSmall" style={{ color: glass.colors.textSecondary, marginTop: 2 }}>
                           {item.best_chain}
                         </Text>
                         {item.target_price &&
                           Number(item.best_current_price) <= Number(item.target_price) && (
-                            <View style={styles.alertBadge}>
-                              <Text style={styles.alertText}>SOTTO TARGET</Text>
+                            <View style={[{ marginTop: 4 }, glass.alertBadge]}>
+                              <Text style={{ color: glass.colors.greenMedium, fontSize: 10, fontWeight: "bold" }}>SOTTO TARGET</Text>
                             </View>
                           )}
                       </>
                     ) : (
-                      <Text variant="bodySmall" style={{ color: "#999" }}>
+                      <Text variant="bodySmall" style={{ color: glass.colors.textMuted }}>
                         Nessuna offerta
                       </Text>
                     )}

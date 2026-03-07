@@ -314,6 +314,23 @@ class IperalOrderScraper(OrderScraperBase):
             category=raw.get("category") or raw.get("categoryDescription"),
         )
 
+    async def get_storage_state(self) -> dict | None:
+        """Extract cookies from httpx client and return as Playwright storageState format."""
+        if not self._client or not self._logged_in:
+            return None
+        cookies = []
+        for cookie in self._client.cookies.jar:
+            cookies.append({
+                "name": cookie.name,
+                "value": cookie.value,
+                "domain": cookie.domain,
+                "path": cookie.path,
+                "secure": cookie.secure,
+                "httpOnly": bool(cookie.has_nonstandard_attr("HttpOnly")),
+                "sameSite": "Lax",
+            })
+        return {"cookies": cookies, "origins": []}
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()

@@ -1,16 +1,18 @@
-"""Esselunga Spesa Online — order history scraper.
+"""Esselunga Area Utenti — receipt/shopping movements scraper.
 
-Uses Playwright to log in (session-based AngularJS SPA) and fetch order history
-via the internal REST API discovered during Fase 0.
+Scrapes in-store receipt data from www.esselunga.it/area-utenti (the Fidaty card
+area), NOT from spesaonline.esselunga.it.
 
-NOTE: The actual API endpoints need to be filled in after running
-discover_esselunga_auth.py.  The placeholders below are based on common
-patterns seen in the Esselunga e-commerce platform.
+The shoppingMovements page is an AngularJS SPA. After login, the receipt data
+is available in the Angular scope as `ctrl.shoppingMovements`. Each movement
+contains: id, descrizioneCommerciale, dataOperazione, importo, nomeFile.
+
+Individual item details are only available as PDFs — we store the summary
+(date, total, store) as orders, and can optionally download PDFs later.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import datetime
@@ -21,18 +23,81 @@ from app.scrapers.order_scraper_base import Order, OrderItem, OrderScraperBase
 
 logger = logging.getLogger(__name__)
 
-SITE_URL = "https://spesaonline.esselunga.it"
-BASE_URL = f"{SITE_URL}/commerce/resources"
+AREA_UTENTI_URL = "https://www.esselunga.it/area-utenti/ist35/myesselunga/shoppingMovements"
+
+# JS to extract receipt data from AngularJS scope
+EXTRACT_MOVEMENTS_JS = """
+() => {
+    try {
+        const el = document.getElementById("wrapper");
+        if (!el) return { error: "wrapper not found" };
+        const scope = angular.element(el).scope();
+        if (!scope || !scope.ctrl) return { error: "angular scope not found" };
+        const ctrl = scope.ctrl;
+
+        // Set max results high and trigger reload
+        ctrl.maxResults = 1000000000;
+
+        const movements = ctrl.shoppingMovements || [];
+        return {
+            ok: true,
+            currentCard: ctrl.currentCard || null,
+            count: movements.length,
+            movements: movements.map(m => ({
+                id: m.id || null,
+                descrizione: m.descrizioneCommerciale || m.descrizione || "",
+                data: m.dataOperazione || "",
+                importo: m.importo || null,
+                nomeFile: m.nomeFile || null,
+                tipo: m.tipoOperazione || m.tipo || "",
+            }))
+        };
+    } catch (e) {
+        return { error: e.message };
+    }
+}
+"""
+
+# JS to select "3 months" period and wait for data to load
+SET_PERIOD_JS = """
+async () => {
+    try {
+        const el = document.getElementById("wrapper");
+        if (!el) return { error: "wrapper not found" };
+        const scope = angular.element(el).scope();
+        if (!scope || !scope.ctrl) return { error: "angular scope not found" };
+        const ctrl = scope.ctrl;
+
+        // Set to 3 months (value "number:2" = ultimi 3 mesi)
+        const monthsBefore = document.getElementById("monthsBefore");
+        if (monthsBefore) {
+            monthsBefore.value = "number:2";
+            monthsBefore.dispatchEvent(new Event("change"));
+        }
+
+        // Set high max results
+        ctrl.maxResults = 1000000000;
+
+        // Wait for Angular to digest
+        await new Promise(r => setTimeout(r, 3000));
+
+        return { ok: true };
+    } catch (e) {
+        return { error: e.message };
+    }
+}
+"""
 
 
 class EsselungaOrderScraper(OrderScraperBase):
-    """Scrape order history from Esselunga Spesa Online."""
+    """Scrape receipt history from Esselunga Area Utenti."""
 
     chain_slug = "esselunga"
 
     def __init__(self) -> None:
         self._page = None
         self._browser = None
+        self._context = None
         self._playwright = None
         self._logged_in = False
 
@@ -42,55 +107,58 @@ class EsselungaOrderScraper(OrderScraperBase):
             from playwright.async_api import async_playwright
 
             self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(headless=True)
-            context = await self._browser.new_context(
+            self._browser = await self._playwright.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            )
+            self._context = await self._browser.new_context(
                 viewport={"width": 1280, "height": 720},
                 locale="it-IT",
                 timezone_id="Europe/Rome",
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
+                    "Chrome/120.0.0.0 Safari/537.36"
                 ),
             )
-            context.set_default_timeout(30000)
+            self._context.set_default_timeout(30000)
 
             # Load cookies from session
             cookies = session_data.get("cookies", [])
             if cookies:
-                await context.add_cookies(cookies)
+                await self._context.add_cookies(cookies)
 
-            self._page = await context.new_page()
+            # Load localStorage if present
+            origins = session_data.get("origins", [])
+            if origins:
+                await self._context.add_init_script(
+                    f"(() => {{ const data = {json.dumps(origins)}; "
+                    "data.forEach(o => o.localStorage.forEach(i => "
+                    "window.localStorage.setItem(i.name, i.value))); }})()"
+                )
 
-            # Navigate and verify session
-            logger.info("Esselunga: loading site with saved session...")
+            self._page = await self._context.new_page()
+
+            # Navigate to shoppingMovements
+            logger.info("Esselunga: loading area utenti with saved session...")
             try:
                 await self._page.goto(
-                    f"{SITE_URL}/commerce/nav/supermercato/store/home",
+                    AREA_UTENTI_URL,
                     wait_until="domcontentloaded",
-                    timeout=60000,
+                    timeout=30000,
                 )
             except Exception:
                 pass
-            await self._page.wait_for_timeout(3000)
+            await self._page.wait_for_timeout(5000)
 
-            # Verify session is valid
-            test = await self._page.evaluate(f"""async () => {{
-                try {{
-                    const resp = await fetch("{BASE_URL}/nav/supermercato", {{
-                        headers: {{ "Accept": "application/json" }},
-                        credentials: "include",
-                    }});
-                    return {{ ok: resp.ok, status: resp.status }};
-                }} catch (e) {{ return {{ error: e.message }}; }}
-            }}""")
-
-            if test and test.get("ok"):
+            # Check if we're on the right page (not redirected to login)
+            url = self._page.url
+            if "shoppingMovements" in url and "login" not in url.lower():
                 self._logged_in = True
-                logger.info("Esselunga: session login successful.")
+                logger.info("Esselunga: session login successful (on shoppingMovements page).")
                 return True
             else:
-                logger.warning("Esselunga: session expired or invalid: %s", test)
+                logger.warning("Esselunga: session expired — redirected to %s", url)
                 return False
 
         except Exception:
@@ -98,264 +166,109 @@ class EsselungaOrderScraper(OrderScraperBase):
             return False
 
     async def login(self, email: str, password: str) -> bool:
-        """Log in via Playwright — loads the SPA, fills credentials, submits."""
-        try:
-            from playwright.async_api import async_playwright
-
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(headless=True)
-            context = await self._browser.new_context(
-                viewport={"width": 1280, "height": 720},
-                locale="it-IT",
-                timezone_id="Europe/Rome",
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-            )
-            context.set_default_timeout(30000)
-            self._page = await context.new_page()
-
-            # Load login page
-            logger.info("Esselunga: loading login page...")
-            try:
-                await self._page.goto(
-                    f"{SITE_URL}/commerce/nav/supermercato/store/home",
-                    wait_until="domcontentloaded",
-                    timeout=60000,
-                )
-            except Exception:
-                pass
-            await self._page.wait_for_timeout(5000)
-
-            # Accept cookies if banner appears
-            try:
-                btn = self._page.locator("button:has-text('Accetta tutti')").first
-                if await btn.is_visible(timeout=3000):
-                    await btn.click()
-                    await self._page.wait_for_timeout(1000)
-            except Exception:
-                pass
-
-            # Click on "Accedi" / login button
-            try:
-                login_btn = self._page.locator("a:has-text('Accedi'), button:has-text('Accedi')").first
-                if await login_btn.is_visible(timeout=5000):
-                    await login_btn.click()
-                    await self._page.wait_for_timeout(3000)
-            except Exception:
-                pass
-
-            # Fill login form
-            # Esselunga uses various login forms — try common selectors
-            try:
-                await self._page.fill('input[type="email"], input[name="username"], input[id*="email"]', email, timeout=10000)
-                await self._page.fill('input[type="password"], input[name="password"]', password, timeout=5000)
-                await self._page.click('button[type="submit"], input[type="submit"]', timeout=5000)
-                await self._page.wait_for_timeout(5000)
-            except Exception as e:
-                logger.error("Esselunga: could not fill login form: %s", e)
-                return False
-
-            # Verify login by checking session
-            test = await self._page.evaluate(f"""async () => {{
-                try {{
-                    const resp = await fetch("{BASE_URL}/nav/supermercato", {{
-                        headers: {{ "Accept": "application/json" }},
-                        credentials: "include",
-                    }});
-                    return {{ ok: resp.ok, status: resp.status }};
-                }} catch (e) {{ return {{ error: e.message }}; }}
-            }}""")
-
-            if test and test.get("ok"):
-                self._logged_in = True
-                logger.info("Esselunga: login successful.")
-                return True
-            else:
-                logger.warning("Esselunga: login verification failed: %s", test)
-                return False
-
-        except Exception:
-            logger.exception("Esselunga: login failed.")
-            return False
+        """Log in via Playwright — not typically used since we use remote browser login."""
+        # The remote browser login handles authentication.
+        # This is kept as a stub for the interface.
+        logger.warning("Esselunga: email/password login not supported for area-utenti. Use remote browser login.")
+        return False
 
     async def fetch_orders(self, since: datetime | None = None) -> list[Order]:
-        """Fetch order history via the Esselunga API.
-
-        NOTE: The actual endpoint paths need to be discovered by running
-        discover_esselunga_auth.py first. These are placeholder patterns.
-        """
+        """Extract shopping movements from the AngularJS scope."""
         if not self._logged_in or not self._page:
             logger.error("Esselunga: not logged in.")
             return []
 
+        # Set period to 3 months
+        logger.info("Esselunga: setting period to 3 months...")
+        period_result = await self._page.evaluate(SET_PERIOD_JS)
+        if period_result and period_result.get("error"):
+            logger.warning("Esselunga: failed to set period: %s", period_result["error"])
+            # Continue anyway — default period might still have data
+
+        # Wait for data to load
+        await self._page.wait_for_timeout(3000)
+
+        # Extract movements from Angular scope
+        logger.info("Esselunga: extracting shopping movements from Angular scope...")
+        result = await self._page.evaluate(EXTRACT_MOVEMENTS_JS)
+
+        if not result or result.get("error"):
+            logger.error("Esselunga: failed to extract movements: %s", result)
+            return []
+
+        logger.info(
+            "Esselunga: found %d movements (card: %s)",
+            result.get("count", 0),
+            result.get("currentCard"),
+        )
+
+        movements = result.get("movements", [])
         orders: list[Order] = []
 
-        # Try known order history endpoints
-        # These will be updated after API discovery
-        order_endpoints = [
-            f"{BASE_URL}/order/list",
-            f"{BASE_URL}/order/history",
-            f"{BASE_URL}/user/orders",
-        ]
-
-        raw_orders = None
-        for endpoint in order_endpoints:
-            logger.info("Esselunga: trying order endpoint %s", endpoint)
-            result = await self._js_fetch_json(endpoint)
-            if result and not result.get("__error"):
-                raw_orders = result
-                logger.info("Esselunga: found orders at %s", endpoint)
-                break
-
-        if not raw_orders:
-            logger.warning("Esselunga: no order endpoint returned data.")
-            return []
-
-        # Parse orders — adapt based on actual API response structure
-        order_list = raw_orders if isinstance(raw_orders, list) else raw_orders.get("orders", raw_orders.get("data", []))
-        if not isinstance(order_list, list):
-            logger.warning("Esselunga: unexpected order response format: %s", type(order_list))
-            return []
-
-        for raw in order_list:
+        for m in movements:
             try:
-                order = self._parse_order(raw)
+                order = self._parse_movement(m)
                 if order and (since is None or order.order_date >= since):
                     orders.append(order)
             except Exception:
-                logger.exception("Esselunga: failed to parse order: %s", str(raw)[:200])
+                logger.exception("Esselunga: failed to parse movement: %s", str(m)[:200])
 
-        logger.info("Esselunga: fetched %d orders.", len(orders))
+        logger.info("Esselunga: returning %d orders (filtered by since=%s).", len(orders), since)
         return orders
 
-    def _parse_order(self, raw: dict[str, Any]) -> Order | None:
-        """Parse a raw order dict into an Order dataclass.
+    @staticmethod
+    def _parse_movement(raw: dict[str, Any]) -> Order | None:
+        """Parse a raw movement dict into an Order."""
+        movement_id = raw.get("id")
+        if not movement_id:
+            nome_file = raw.get("nomeFile")
+            if nome_file:
+                movement_id = nome_file
+            else:
+                return None
 
-        This is a best-effort parser — actual field names depend on the API.
-        """
-        order_id = str(
-            raw.get("orderId")
-            or raw.get("id")
-            or raw.get("orderNumber")
-            or ""
-        )
-        if not order_id:
-            return None
+        movement_id = str(movement_id)
 
-        # Parse date
-        date_str = raw.get("orderDate") or raw.get("date") or raw.get("createdAt") or ""
-        try:
-            order_date = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
+        # Parse date — format is typically "dd/MM/yyyy" or "yyyy-MM-dd"
+        date_str = raw.get("data", "")
+        order_date = None
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y %H:%M:%S"):
+            try:
+                order_date = datetime.strptime(str(date_str), fmt)
+                break
+            except (ValueError, TypeError):
+                continue
+        if order_date is None:
             order_date = datetime.now()
 
-        # Total
+        # Parse amount
         total = None
-        for key in ("totalAmount", "total", "grandTotal", "orderTotal"):
-            if key in raw and raw[key] is not None:
-                try:
-                    total = Decimal(str(raw[key]))
-                except (InvalidOperation, ValueError):
-                    pass
-                break
+        importo = raw.get("importo")
+        if importo is not None:
+            try:
+                # Italian format: "12,34" or "12.34"
+                total = Decimal(str(importo).replace(",", "."))
+            except (InvalidOperation, ValueError):
+                pass
 
-        # Items
-        items: list[OrderItem] = []
-        raw_items = raw.get("items") or raw.get("products") or raw.get("orderItems") or []
-        for ri in raw_items:
-            item = self._parse_item(ri)
-            if item:
-                items.append(item)
+        # Store name from descrizioneCommerciale
+        store_name = raw.get("descrizione", "").strip() or None
 
         return Order(
-            external_order_id=order_id,
+            external_order_id=movement_id,
             order_date=order_date,
             total_amount=total,
-            store_name=raw.get("storeName") or raw.get("store"),
-            status=raw.get("status") or raw.get("orderStatus"),
-            items=items,
+            store_name=store_name,
+            status="completed",
+            items=[],  # Items are only in the PDF — not available in the list
             raw_data=raw,
         )
 
-    @staticmethod
-    def _parse_item(raw: dict[str, Any]) -> OrderItem | None:
-        name = str(raw.get("description") or raw.get("name") or raw.get("productName") or "").strip()
-        if not name:
-            return None
-
-        qty = None
-        for key in ("quantity", "qty", "amount"):
-            if key in raw and raw[key] is not None:
-                try:
-                    qty = Decimal(str(raw[key]))
-                except (InvalidOperation, ValueError):
-                    pass
-                break
-
-        unit_price = None
-        for key in ("unitPrice", "price", "pricePerUnit"):
-            if key in raw and raw[key] is not None:
-                try:
-                    unit_price = Decimal(str(raw[key]))
-                except (InvalidOperation, ValueError):
-                    pass
-                break
-
-        total_price = None
-        for key in ("totalPrice", "lineTotal", "subtotal"):
-            if key in raw and raw[key] is not None:
-                try:
-                    total_price = Decimal(str(raw[key]))
-                except (InvalidOperation, ValueError):
-                    pass
-                break
-
-        return OrderItem(
-            external_name=name,
-            quantity=qty,
-            unit_price=unit_price,
-            total_price=total_price,
-            external_code=raw.get("code") or raw.get("sku"),
-            brand=raw.get("brand"),
-            category=raw.get("category"),
-        )
-
-    async def _js_fetch_json(self, url: str, body: dict | None = None) -> dict | None:
-        """Make an API call from within the Playwright page context."""
-        if body is not None:
-            body_json = json.dumps(body)
-            script = f"""async () => {{
-                try {{
-                    const resp = await fetch("{url}", {{
-                        method: "POST",
-                        headers: {{ "Accept": "application/json", "Content-Type": "application/json" }},
-                        credentials: "include",
-                        body: {json.dumps(body_json)},
-                    }});
-                    if (!resp.ok) return {{ __error: true, status: resp.status }};
-                    return await resp.json();
-                }} catch (e) {{ return {{ __error: true, message: e.message }}; }}
-            }}"""
-        else:
-            script = f"""async () => {{
-                try {{
-                    const resp = await fetch("{url}", {{
-                        headers: {{ "Accept": "application/json" }},
-                        credentials: "include",
-                    }});
-                    if (!resp.ok) return {{ __error: true, status: resp.status }};
-                    return await resp.json();
-                }} catch (e) {{ return {{ __error: true, message: e.message }}; }}
-            }}"""
-
-        result = await self._page.evaluate(script)
-        if result and result.get("__error"):
-            logger.debug("Esselunga API error for %s: %s", url, str(result)[:200])
-            return None
-        return result
+    async def get_storage_state(self) -> dict | None:
+        """Return Playwright storageState after a successful login."""
+        if self._context and self._logged_in:
+            return await self._context.storage_state()
+        return None
 
     async def close(self) -> None:
         if self._browser:

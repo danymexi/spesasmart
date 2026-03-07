@@ -38,6 +38,9 @@ class StoreResponse(BaseModel):
     zip_code: str | None
     lat: float | None
     lon: float | None
+    phone: str | None = None
+    opening_hours: dict | None = None
+    website_url: str | None = None
     chain_name: str | None = None
 
     model_config = {"from_attributes": True}
@@ -121,6 +124,9 @@ async def list_stores(
             zip_code=s.zip_code,
             lat=float(s.lat) if s.lat else None,
             lon=float(s.lon) if s.lon else None,
+            phone=s.phone,
+            opening_hours=s.opening_hours,
+            website_url=s.website_url,
             chain_name=s.chain.name if s.chain else None,
         )
         for s in stores
@@ -145,5 +151,8 @@ async def get_store(store_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         zip_code=store.zip_code,
         lat=float(store.lat) if store.lat else None,
         lon=float(store.lon) if store.lon else None,
+        phone=store.phone,
+        opening_hours=store.opening_hours,
+        website_url=store.website_url,
         chain_name=store.chain.name if store.chain else None,
     )

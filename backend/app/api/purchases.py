@@ -36,7 +36,12 @@ SUPPORTED_CHAINS = {"esselunga", "iperal"}
 RECEIPT_CHAINS = {"esselunga", "iperal", "coop", "lidl"}
 
 RECEIPTS_DIR = Path("/app/receipts")
-RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # In test/dev environments /app may not be writable
+    RECEIPTS_DIR = Path("/tmp/receipts")
+    RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────

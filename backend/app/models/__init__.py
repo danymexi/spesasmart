@@ -1,5 +1,6 @@
 """SQLAlchemy models."""
 
+from app.models.category import Category
 from app.models.chain import Chain
 from app.models.flyer import Flyer, FlyerPage
 from app.models.offer import Offer
@@ -10,6 +11,7 @@ from app.models.purchase import (
     PurchaseSyncLog,
     SupermarketCredential,
 )
+from app.models.shopping_list import ShoppingList
 from app.models.store import Store
 from app.models.user import (
     ShoppingListItem,
@@ -22,6 +24,7 @@ from app.models.user import (
 )
 
 __all__ = [
+    "Category",
     "Chain",
     "Flyer",
     "FlyerPage",
@@ -30,6 +33,7 @@ __all__ = [
     "PurchaseItem",
     "PurchaseOrder",
     "PurchaseSyncLog",
+    "ShoppingList",
     "ShoppingListItem",
     "ShoppingListItemProduct",
     "Store",
