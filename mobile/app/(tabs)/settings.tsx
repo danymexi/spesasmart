@@ -1760,6 +1760,9 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
 
   const [locating, setLocating] = useState(false);
   const [nearbyData, setNearbyData] = useState<NearbyChainInfo[] | null>(null);
+  const [radiusKm, setRadiusKm] = useState(20);
+
+  const RADIUS_OPTIONS = [5, 10, 20, 50] as const;
 
   // Preferred chains query (server-side)
   const { data: preferredChains } = useQuery({
@@ -1804,7 +1807,7 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
       setUserLocation(latitude, longitude);
 
       // Fetch nearby stores
-      const result = await getNearbyStores(latitude, longitude, 20);
+      const result = await getNearbyStores(latitude, longitude, radiusKm);
       setNearbyData(result.chains);
 
       // Auto-select all nearby chains
@@ -1818,6 +1821,23 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
       showAlert("Posizione", "Impossibile ottenere la posizione. Controlla i permessi.");
     }
     setLocating(false);
+  };
+
+  const handleRadiusChange = async (km: number) => {
+    setRadiusKm(km);
+    if (userLat && userLon) {
+      try {
+        const result = await getNearbyStores(Number(userLat), Number(userLon), km);
+        setNearbyData(result.chains);
+        const slugs = result.chain_slugs;
+        setNearbyChains(slugs);
+        if (isLoggedIn) {
+          chainMutation.mutate(slugs);
+        }
+      } catch {
+        // keep existing data
+      }
+    }
   };
 
   return (
@@ -1842,11 +1862,33 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
         )}
       </View>
 
+      {/* Radius selector */}
+      <View style={styles.radiusRow}>
+        {RADIUS_OPTIONS.map((km) => (
+          <Chip
+            key={km}
+            selected={radiusKm === km}
+            onPress={() => handleRadiusChange(km)}
+            style={[
+              styles.radiusChip,
+              radiusKm === km && styles.radiusChipSelected,
+            ]}
+            textStyle={[
+              styles.radiusChipText,
+              radiusKm === km && styles.radiusChipTextSelected,
+            ]}
+            showSelectedCheck={false}
+          >
+            {km} km
+          </Chip>
+        ))}
+      </View>
+
       {/* Nearby chains results */}
       {nearbyData && nearbyData.length > 0 && (
         <View style={styles.nearbyInfo}>
           <Text style={styles.nearbyLabel}>
-            {nearbyData.length} catene trovate entro 20km
+            {nearbyData.length} catene trovate entro {radiusKm}km
           </Text>
           {nearbyData.map((nc) => (
             <Text key={nc.chain_slug} style={styles.nearbyDetail}>
@@ -1919,6 +1961,11 @@ const styles = StyleSheet.create({
   geoRow: { paddingHorizontal: 16, paddingBottom: 8, gap: 6 },
   geoButton: { borderRadius: 12, backgroundColor: glassColors.greenMedium },
   geoCoords: { fontSize: 11, color: glassColors.textMuted, marginTop: 4 },
+  radiusRow: { flexDirection: "row", paddingHorizontal: 16, paddingBottom: 8, gap: 8 },
+  radiusChip: { backgroundColor: "rgba(255,255,255,0.7)", borderWidth: 1, borderColor: "#ddd" },
+  radiusChipSelected: { backgroundColor: glassColors.greenMedium, borderColor: glassColors.greenMedium },
+  radiusChipText: { color: "#555", fontSize: 13 },
+  radiusChipTextSelected: { color: "#fff", fontWeight: "600" },
   nearbyInfo: { paddingHorizontal: 16, paddingBottom: 8 },
   nearbyLabel: { fontSize: 13, fontWeight: "600", color: glassColors.greenDark, marginBottom: 4 },
   nearbyDetail: { fontSize: 12, color: glassColors.textSecondary, marginBottom: 2 },
