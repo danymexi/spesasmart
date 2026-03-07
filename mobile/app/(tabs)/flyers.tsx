@@ -1,4 +1,4 @@
-import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Text, useTheme, Chip } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -60,9 +60,9 @@ export default function FlyersScreen() {
             <View
               style={styles.card}
             >
-              <View
+              <Pressable
                 style={styles.cardInner}
-                onTouchEnd={() => router.push(`/flyer/${item.id}`)}
+                onPress={() => router.push(`/flyer/${item.id}`)}
               >
                 <View style={[styles.chainBanner, { backgroundColor: `${chainColor}20` }]}>
                   <Text variant="titleMedium" style={[styles.chainName, { color: chainColor }]}>
@@ -106,7 +106,7 @@ export default function FlyersScreen() {
                     </Text>
                   </View>
                 </View>
-              </View>
+              </Pressable>
             </View>
           );
         }}

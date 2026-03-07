@@ -324,7 +324,7 @@ async def update_preferred_chains(
     db: AsyncSession = Depends(get_db),
 ):
     """Set the user's preferred chain slugs."""
-    valid_slugs = {"esselunga", "lidl", "coop", "iperal"}
+    valid_slugs = {"esselunga", "lidl", "coop", "iperal", "carrefour", "conad", "eurospin", "aldi", "md", "penny", "pam"}
     filtered = [c for c in data.chains if c in valid_slugs]
     user.preferred_chains = ",".join(filtered) if filtered else None
     await db.flush()

@@ -488,7 +488,7 @@ export default function SettingsScreen() {
           />
           <List.Item
             title="SpesaSmart"
-            description="Confronto prezzi supermercati - Monza e Brianza"
+            description="Confronto prezzi supermercati"
             titleStyle={styles.listTitle}
             descriptionStyle={styles.listDescription}
             left={(props) => <List.Icon {...props} icon="cart" />}

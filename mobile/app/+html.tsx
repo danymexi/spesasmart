@@ -19,7 +19,7 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="apple-mobile-web-app-title" content="SpesaSmart" />
         <meta
           name="description"
-          content="Confronto prezzi supermercati - Monza e Brianza"
+          content="Confronto prezzi supermercati"
         />
 
         {/* PWA manifest */}

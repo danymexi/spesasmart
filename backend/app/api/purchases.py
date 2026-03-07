@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/users/me", tags=["purchases"])
 
 SUPPORTED_CHAINS = {"esselunga", "iperal"}
-RECEIPT_CHAINS = {"esselunga", "iperal", "coop", "lidl"}
+RECEIPT_CHAINS = {"esselunga", "iperal", "coop", "lidl", "carrefour", "conad", "eurospin", "aldi", "md", "penny", "pam"}
 
 RECEIPTS_DIR = Path("/app/receipts")
 try:
