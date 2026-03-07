@@ -241,7 +241,7 @@ export default function SettingsScreen() {
           <Text variant="bodySmall" style={styles.sectionDescription}>
             Seleziona le catene che frequenti per offerte personalizzate.
           </Text>
-          <NearbyStoresSelector isLoggedIn={isLoggedIn} />
+          <NearbyStoresSelector isLoggedIn={isLoggedIn} userProfile={userProfile} />
         </List.Section>
       </View>
 
@@ -1624,7 +1624,9 @@ const CHAIN_OPTIONS = [
   { slug: "iperal", label: "Iperal" },
 ];
 
-function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
+const RADIUS_OPTIONS = [5, 10, 20, 30, 50];
+
+function NearbyStoresSelector({ isLoggedIn, userProfile }: { isLoggedIn: boolean; userProfile?: { search_radius_km?: number } | null }) {
   const queryClient = useQueryClient();
   const {
     userLat, userLon, nearbyChains,
@@ -1633,6 +1635,7 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
 
   const [locating, setLocating] = useState(false);
   const [nearbyData, setNearbyData] = useState<NearbyChainInfo[] | null>(null);
+  const currentRadius = userProfile?.search_radius_km ?? 20;
 
   // Preferred chains query (server-side)
   const { data: preferredChains } = useQuery({
@@ -1646,6 +1649,17 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["preferredChains"] });
       queryClient.invalidateQueries({ queryKey: ["shoppingListCompare"] });
+    },
+  });
+
+  const radiusMutation = useMutation({
+    mutationFn: (km: number) => updateUserProfile({ search_radius_km: km }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["userProfile"] });
+      // Re-fetch nearby stores with new radius if location is set
+      if (userLat && userLon) {
+        refreshNearbyStores(userLat, userLon);
+      }
     },
   });
 
@@ -1663,6 +1677,17 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
     setNearbyChains(arr);
   };
 
+  const refreshNearbyStores = async (lat: number, lon: number, radius?: number) => {
+    const r = radius ?? currentRadius;
+    const result = await getNearbyStores(lat, lon, r);
+    setNearbyData(result.chains);
+    const slugs = result.chain_slugs;
+    setNearbyChains(slugs);
+    if (isLoggedIn) {
+      chainMutation.mutate(slugs);
+    }
+  };
+
   const handleGeolocate = async () => {
     setLocating(true);
     try {
@@ -1676,15 +1701,9 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
       const { latitude, longitude } = position.coords;
       setUserLocation(latitude, longitude);
 
-      // Fetch nearby stores
-      const result = await getNearbyStores(latitude, longitude, 20);
-      setNearbyData(result.chains);
+      await refreshNearbyStores(latitude, longitude);
 
-      // Auto-select all nearby chains
-      const slugs = result.chain_slugs;
-      setNearbyChains(slugs);
       if (isLoggedIn) {
-        chainMutation.mutate(slugs);
         updateUserLocation(latitude, longitude).catch(() => {});
       }
     } catch (err: any) {
@@ -1716,6 +1735,30 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
           />
         );
       })}
+
+      {/* Search radius */}
+      <View style={styles.radiusSection}>
+        <Text style={styles.radiusLabel}>Raggio di ricerca: {currentRadius} km</Text>
+        <View style={styles.radiusChipsRow}>
+          {RADIUS_OPTIONS.map((km) => (
+            <Chip
+              key={km}
+              selected={currentRadius === km}
+              onPress={() => {
+                if (isLoggedIn && km !== currentRadius) {
+                  radiusMutation.mutate(km);
+                }
+              }}
+              disabled={!isLoggedIn}
+              style={[styles.radiusChip, currentRadius === km && styles.radiusChipSelected]}
+              textStyle={currentRadius === km ? styles.radiusChipTextSelected : undefined}
+              compact
+            >
+              {km} km
+            </Chip>
+          ))}
+        </View>
+      </View>
 
       {/* Geolocation */}
       <View style={styles.geoRow}>
@@ -1768,7 +1811,13 @@ const styles = StyleSheet.create({
   accordionDescription: { color: "#888", fontSize: 12 },
   accordionContent: { paddingBottom: 8 },
   accordionButton: { marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
-  geoRow: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
+  radiusSection: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+  radiusLabel: { color: "#555", fontSize: 13, marginBottom: 6, fontWeight: "500" },
+  radiusChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  radiusChip: { marginBottom: 2 },
+  radiusChipSelected: { backgroundColor: glassColors.greenMedium },
+  radiusChipTextSelected: { color: "#fff" },
+  geoRow: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
   geoButton: { borderRadius: 12, backgroundColor: glassColors.greenMedium },
   geoButtonOutlined: { borderRadius: 12 },
   bottomPadding: { height: 96 },

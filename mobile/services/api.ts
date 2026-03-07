@@ -157,6 +157,7 @@ export interface UserProfile {
   push_token: string | null;
   preferred_zone: string;
   notification_mode: "instant" | "digest";
+  search_radius_km: number;
   created_at: string;
 }
 
@@ -906,6 +907,7 @@ export async function updateUserProfile(data: {
   notification_mode?: string;
   telegram_chat_id?: number;
   push_token?: string;
+  search_radius_km?: number;
 }): Promise<UserProfile> {
   const res = await apiClient.patch<UserProfile>("/users/me", data);
   return res.data;

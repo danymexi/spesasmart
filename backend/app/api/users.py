@@ -27,6 +27,7 @@ class UserResponse(BaseModel):
     push_token: str | None
     preferred_zone: str
     notification_mode: str = "instant"
+    search_radius_km: int = 20
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -37,6 +38,7 @@ class UserUpdateRequest(BaseModel):
     push_token: str | None = None
     preferred_zone: str | None = None
     notification_mode: str | None = None
+    search_radius_km: int | None = None
 
 
 class WatchlistAddRequest(BaseModel):
@@ -173,6 +175,10 @@ async def update_me(
         if data.notification_mode not in ("instant", "digest"):
             raise HTTPException(status_code=400, detail="notification_mode must be 'instant' or 'digest'")
         user.notification_mode = data.notification_mode
+    if data.search_radius_km is not None:
+        if not (1 <= data.search_radius_km <= 100):
+            raise HTTPException(status_code=400, detail="search_radius_km must be between 1 and 100")
+        user.search_radius_km = data.search_radius_km
 
     await db.flush()
     await db.refresh(user)
