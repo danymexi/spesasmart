@@ -66,10 +66,21 @@ async def get_nearby_stores(
     radius_km: float = Query(default=20, le=50),
     db: AsyncSession = Depends(get_db),
 ):
-    """Find stores within radius, grouped by chain."""
+    """Find stores within radius, grouped by chain.
+
+    Uses a bounding-box pre-filter on lat/lon to reduce candidates from
+    ~8,000 to ~50-200 before applying exact haversine distance.
+    """
+    # Bounding-box pre-filter: 1 degree lat ≈ 111 km
+    lat_delta = radius_km / 111.0
+    lon_delta = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.5))
+
     result = await db.execute(
         select(Store).options(joinedload(Store.chain)).where(
-            Store.lat.isnot(None), Store.lon.isnot(None)
+            Store.lat.isnot(None),
+            Store.lon.isnot(None),
+            Store.lat.between(lat - lat_delta, lat + lat_delta),
+            Store.lon.between(lon - lon_delta, lon + lon_delta),
         )
     )
     stores = result.unique().scalars().all()
