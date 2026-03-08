@@ -11,7 +11,7 @@ import {
   type SmartSearchResult,
 } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
-import SmartCompareCard from "../../components/SmartCompareCard";
+import ExpandableCatalogCard from "../../components/ExpandableCatalogCard";
 import CategoryPicker from "../../components/CategoryPicker";
 import { SkeletonList } from "../../components/Skeleton";
 import {
@@ -19,6 +19,7 @@ import {
   glassColors,
   glassSearchbar,
 } from "../../styles/glassStyles";
+import { useGlassTheme } from "../../styles/useGlassTheme";
 
 const PAGE_SIZE = 50;
 
@@ -31,6 +32,7 @@ const SORT_OPTIONS = [
 const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal", "Carrefour", "Conad", "Eurospin", "Aldi", "MD Discount", "Penny Market", "PAM Panorama"];
 
 export default function CatalogScreen() {
+  const glass = useGlassTheme();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const catalogProducts = useAppStore((s) => s.catalogProducts);
   const queryClient = useQueryClient();
@@ -81,7 +83,21 @@ export default function CatalogScreen() {
     enabled: isBrowsing,
   });
 
-  const results = catalogPages?.pages.flat() ?? [];
+  const rawResults = catalogPages?.pages.flat() ?? [];
+
+  // Insert a separator between active and inactive products
+  type ListItem = SmartSearchResult | { _separator: true };
+  const results: ListItem[] = useMemo(() => {
+    const firstNoOffer = rawResults.findIndex(
+      (r) => r.has_active_offers === false
+    );
+    if (firstNoOffer <= 0) return rawResults;
+    return [
+      ...rawResults.slice(0, firstNoOffer),
+      { _separator: true as const },
+      ...rawResults.slice(firstNoOffer),
+    ];
+  }, [rawResults]);
 
   // Fetch watchlist IDs for highlighting
   const { data: watchlistData } = useQuery({
@@ -97,7 +113,7 @@ export default function CatalogScreen() {
     onSuccess: (_data, productId) => {
       queryClient.invalidateQueries({ queryKey: ["watchlistIds"] });
       queryClient.invalidateQueries({ queryKey: ["watchlist"] });
-      const item = results.find((r) => r.product.id === productId);
+      const item = rawResults.find((r) => r.product.id === productId);
       setSnackbar({
         visible: true,
         message: `"${item?.product.name ?? "Prodotto"}" aggiunto alla lista`,
@@ -111,7 +127,7 @@ export default function CatalogScreen() {
     onSuccess: (_data, productId) => {
       queryClient.invalidateQueries({ queryKey: ["watchlistIds"] });
       queryClient.invalidateQueries({ queryKey: ["watchlist"] });
-      const item = results.find((r) => r.product.id === productId);
+      const item = rawResults.find((r) => r.product.id === productId);
       setSnackbar({
         visible: true,
         message: `"${item?.product.name ?? "Prodotto"}" rimosso dalla lista`,
@@ -127,7 +143,7 @@ export default function CatalogScreen() {
       queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
       queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
       queryClient.invalidateQueries({ queryKey: ["shoppingListCompare"] });
-      const item = results.find((r) => r.product.id === productId);
+      const item = rawResults.find((r) => r.product.id === productId);
       setSnackbar({
         visible: true,
         message: `"${item?.product.name ?? "Prodotto"}" aggiunto alla spesa`,
@@ -153,17 +169,30 @@ export default function CatalogScreen() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const renderItem = useCallback(
-    ({ item }: { item: SmartSearchResult }) => (
-      <SmartCompareCard
-        result={item}
-        isInWatchlist={isLoggedIn ? watchlistIds.has(item.product.id) : undefined}
-        onWatchlistToggle={isLoggedIn ? toggleWatchlist : undefined}
-        onAddToShoppingList={
-          isLoggedIn ? (id) => addToListMut.mutate(id) : undefined
-        }
-      />
-    ),
-    [watchlistIds, isLoggedIn, toggleWatchlist, addToListMut]
+    ({ item }: { item: ListItem }) => {
+      if ("_separator" in item) {
+        return (
+          <View style={styles.separator}>
+            <View style={[styles.separatorLine, { backgroundColor: glass.colors.divider }]} />
+            <Text style={[styles.separatorText, { color: glass.colors.textMuted }]}>
+              Prodotti senza offerte attive
+            </Text>
+            <View style={[styles.separatorLine, { backgroundColor: glass.colors.divider }]} />
+          </View>
+        );
+      }
+      return (
+        <ExpandableCatalogCard
+          result={item}
+          isInWatchlist={isLoggedIn ? watchlistIds.has(item.product.id) : undefined}
+          onWatchlistToggle={isLoggedIn ? toggleWatchlist : undefined}
+          onAddToShoppingList={
+            isLoggedIn ? (id) => addToListMut.mutate(id) : undefined
+          }
+        />
+      );
+    },
+    [watchlistIds, isLoggedIn, toggleWatchlist, addToListMut, glass.colors]
   );
 
   return (
@@ -172,7 +201,7 @@ export default function CatalogScreen() {
         placeholder="Cerca prodotti..."
         onChangeText={setQuery}
         value={query}
-        style={styles.searchbar}
+        style={[styles.searchbar, glass.searchbar]}
       />
 
       {/* Sort chips */}
@@ -182,7 +211,7 @@ export default function CatalogScreen() {
             key={opt.key}
             selected={selectedSort === opt.key}
             onPress={() => setSelectedSort(opt.key)}
-            style={[styles.filterChip, selectedSort === opt.key && styles.chipSelected]}
+            style={[styles.filterChip, glass.chip, selectedSort === opt.key && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }]]}
             compact
           >
             {opt.label}
@@ -197,7 +226,7 @@ export default function CatalogScreen() {
             key={ch}
             selected={selectedChain === ch}
             onPress={() => setSelectedChain(selectedChain === ch ? null : ch)}
-            style={[styles.filterChip, selectedChain === ch && styles.chipSelected]}
+            style={[styles.filterChip, glass.chip, selectedChain === ch && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }]]}
             compact
           >
             {ch}
@@ -219,9 +248,9 @@ export default function CatalogScreen() {
           />
 
           {/* Results count */}
-          {results.length > 0 && (
-            <Text variant="labelMedium" style={styles.resultCount}>
-              Prodotti ({results.length}{hasNextPage ? "+" : ""})
+          {rawResults.length > 0 && (
+            <Text variant="labelMedium" style={[styles.resultCount, { color: glass.colors.textSecondary }]}>
+              Prodotti ({rawResults.length}{hasNextPage ? "+" : ""})
             </Text>
           )}
 
@@ -231,7 +260,9 @@ export default function CatalogScreen() {
           ) : (
             <FlatList
               data={results}
-              keyExtractor={(item) => item.product.id}
+              keyExtractor={(item, index) =>
+                "_separator" in item ? `separator-${index}` : item.product.id
+              }
               renderItem={renderItem}
               onEndReached={loadMore}
               onEndReachedThreshold={0.5}
@@ -241,7 +272,7 @@ export default function CatalogScreen() {
                 ) : null
               }
               ListEmptyComponent={
-                <Text style={styles.emptyText}>
+                <Text style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
                   {query
                     ? `Nessun risultato per "${query}"`
                     : selectedCategory
@@ -286,4 +317,19 @@ const styles = StyleSheet.create({
   emptyText: { textAlign: "center", marginTop: 40, color: "#555", paddingHorizontal: 20 },
   listContent: { paddingBottom: 96 },
   snackbar: { marginBottom: 80 },
+  separator: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  separatorLine: {
+    flex: 1,
+    height: 1,
+  },
+  separatorText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
 });

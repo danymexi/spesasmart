@@ -584,6 +584,100 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
     return groups
 
 
+# Lightweight row type for pre-pagination grouping
+_ProductTuple = tuple[uuid.UUID, str, str | None, str | None, str | None]  # id, name, brand, category, barcode
+
+
+def _group_similar_product_ids(
+    rows: list[_ProductTuple],
+) -> list[list[uuid.UUID]]:
+    """Same logic as _group_similar_products but on lightweight (id, name, brand, category, barcode) tuples.
+
+    Returns groups of product IDs.
+    """
+    groups: list[list[uuid.UUID]] = []
+    used: set[int] = set()
+    normalized = [_normalize_product_name(r[1]) for r in rows]
+
+    # --- Phase A: Group by barcode (exact, fast) ---
+    barcode_map: dict[str, list[int]] = {}
+    for i, r in enumerate(rows):
+        bc = r[4]
+        if _is_valid_ean(bc):
+            barcode_map.setdefault(bc, []).append(i)
+
+    for bc, indices in barcode_map.items():
+        if len(indices) < 2:
+            continue
+        first = indices[0]
+        for idx in indices[1:]:
+            used.add(idx)
+
+    # --- Phase B: Fuzzy name matching ---
+    for i, r in enumerate(rows):
+        if i in used:
+            continue
+        group_ids = [r[0]]
+        used.add(i)
+        brand_i = (r[2] or "").lower().strip()
+        cat_i = (r[3] or "").strip()
+        bc_i = r[4] if _is_valid_ean(r[4]) else None
+
+        for j in range(i + 1, len(rows)):
+            if j in used:
+                continue
+            q = rows[j]
+            bc_j = q[4] if _is_valid_ean(q[4]) else None
+
+            # Barcode match — instant group
+            if bc_i and bc_j and bc_i == bc_j:
+                group_ids.append(q[0])
+                used.add(j)
+                continue
+
+            # Barcode conflict — never group
+            if bc_i and bc_j and bc_i != bc_j:
+                continue
+
+            brand_j = (q[2] or "").lower().strip()
+            cat_j = (q[3] or "").strip()
+            brands_differ = brand_i and brand_j and brand_i != brand_j
+
+            # Category guard
+            if (
+                cat_i and cat_j
+                and cat_i != cat_j
+                and cat_i != "Supermercato"
+                and cat_j != "Supermercato"
+            ):
+                continue
+
+            if not _names_match(normalized[i], normalized[j]):
+                continue
+
+            if brands_differ:
+                shorter, longer = sorted(
+                    [normalized[i], normalized[j]], key=len
+                )
+                word_count = len(shorter.split())
+                if word_count < 3:
+                    continue
+                ratio = SequenceMatcher(
+                    None, normalized[i], normalized[j]
+                ).ratio()
+                strong = (
+                    ratio >= 0.85
+                    or (len(shorter) >= 6 and shorter in longer)
+                )
+                if not strong:
+                    continue
+
+            group_ids.append(q[0])
+            used.add(j)
+        groups.append(group_ids)
+    return groups
+
+
 def _is_similar_product(
     prod_norm: str, prod_brand: str,
     candidate_norm: str, candidate_brand: str,
@@ -667,12 +761,22 @@ async def get_catalog_grouped(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """Browse catalog with offers grouped per product (fuzzy name matching)."""
+    """Browse catalog with offers grouped per product (pre-pagination grouping).
+
+    Groups ALL matching products first, then paginates on groups.
+    Products without active offers are returned last with last-known price info.
+    """
     today = date.today()
     from app.services.price_analyzer import PriceAnalyzer
 
-    # ── 1. Fetch products using same filters as /catalog ──
-    prod_query = select(Product)
+    chain_slugs: list[str] = []
+    if chain:
+        chain_slugs = [s.strip() for s in chain.split(",")]
+
+    # ── 1. Fetch ALL matching product tuples (lightweight) ──
+    prod_query = select(
+        Product.id, Product.name, Product.brand, Product.category, Product.barcode
+    )
     if category:
         prod_query = prod_query.where(Product.category.ilike(category))
     if brand:
@@ -681,9 +785,8 @@ async def get_catalog_grouped(
         for cond in _build_search_filter(q):
             prod_query = prod_query.where(cond)
 
-    # If chain filter, only products that have an active offer in that chain
-    if chain:
-        chain_slugs = [s.strip() for s in chain.split(",")]
+    # When chain filter is active, only include products with offers in that chain
+    if chain_slugs:
         chain_ids_sq = select(Chain.id).where(Chain.slug.in_(chain_slugs))
         has_offer_sq = (
             select(Offer.product_id)
@@ -696,27 +799,69 @@ async def get_catalog_grouped(
         )
         prod_query = prod_query.where(Product.id.in_(has_offer_sq))
 
-    prod_query = prod_query.order_by(Product.name).offset(offset).limit(limit)
+    prod_query = prod_query.order_by(Product.name)
     result = await db.execute(prod_query)
-    products = list(result.scalars().all())
+    all_rows: list[_ProductTuple] = [
+        (row.id, row.name, row.brand, row.category, row.barcode)
+        for row in result.all()
+    ]
 
-    if not products:
+    if not all_rows:
         return []
 
-    # ── 2. Group similar products by fuzzy name matching ──
-    groups = _group_similar_products(products)
+    # ── 2. Group similar products (pre-pagination) ──
+    id_groups = _group_similar_product_ids(all_rows)
 
-    # Collect all product IDs across all groups
-    all_product_ids = [p.id for p in products]
+    # ── 3. Determine which groups have active offers ──
+    all_ids = [r[0] for r in all_rows]
+    active_offer_pids_result = await db.execute(
+        select(Offer.product_id)
+        .where(
+            Offer.product_id.in_(all_ids),
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+        )
+        .distinct()
+    )
+    active_offer_pids: set[uuid.UUID] = set(active_offer_pids_result.scalars().all())
 
-    # ── 3. Fetch ALL active offers for these products in one query ──
+    groups_with_offers: list[list[uuid.UUID]] = []
+    groups_without_offers: list[list[uuid.UUID]] = []
+    for grp in id_groups:
+        if any(pid in active_offer_pids for pid in grp):
+            groups_with_offers.append(grp)
+        else:
+            groups_without_offers.append(grp)
+
+    # ── 4. Sort and paginate on groups ──
+    # Active-offer groups first, then inactive
+    sorted_groups = groups_with_offers + groups_without_offers
+    total_groups = len(sorted_groups)
+    page_groups = sorted_groups[offset : offset + limit]
+
+    if not page_groups:
+        return []
+
+    # ── 5. Hydrate only the page's products ──
+    page_ids: list[uuid.UUID] = []
+    for grp in page_groups:
+        page_ids.extend(grp)
+    page_id_set = set(page_ids)
+
+    products_result = await db.execute(
+        select(Product).where(Product.id.in_(page_ids))
+    )
+    products_by_id: dict[uuid.UUID, Product] = {
+        p.id: p for p in products_result.scalars().all()
+    }
+
+    # ── 6. Fetch active offers for page products ──
     offers_where = [
-        Offer.product_id.in_(all_product_ids),
+        Offer.product_id.in_(page_ids),
         Offer.valid_from <= today,
         Offer.valid_to >= today,
     ]
-    if chain:
-        chain_slugs = [s.strip() for s in chain.split(",")]
+    if chain_slugs:
         offers_where.append(
             Offer.chain_id.in_(select(Chain.id).where(Chain.slug.in_(chain_slugs)))
         )
@@ -737,8 +882,29 @@ async def get_catalog_grouped(
     for o in all_offers:
         offers_by_product[o.product_id].append(o)
 
-    # ── 4. Compute price indicators ──
-    ids_with_offers = [pid for pid in all_product_ids if pid in offers_by_product]
+    # ── 7. Fetch last-known price for products without active offers ──
+    no_offer_ids = [pid for pid in page_ids if pid not in active_offer_pids]
+    last_known: dict[uuid.UUID, tuple[Decimal, str, date]] = {}
+    if no_offer_ids:
+        # Get the most recent expired offer per product
+        from sqlalchemy import desc
+        last_offer_result = await db.execute(
+            select(Offer)
+            .options(joinedload(Offer.chain))
+            .where(Offer.product_id.in_(no_offer_ids))
+            .order_by(Offer.product_id, desc(Offer.valid_to))
+        )
+        last_offers = last_offer_result.unique().scalars().all()
+        for lo in last_offers:
+            if lo.product_id not in last_known:
+                last_known[lo.product_id] = (
+                    lo.offer_price,
+                    lo.chain.name if lo.chain else "Sconosciuto",
+                    lo.valid_to or lo.valid_from,
+                )
+
+    # ── 8. Compute price indicators ──
+    ids_with_offers = [pid for pid in page_ids if pid in offers_by_product]
     analyzer = PriceAnalyzer()
     indicators = (
         await analyzer.compute_indicators_batch(ids_with_offers, session=db)
@@ -746,47 +912,27 @@ async def get_catalog_grouped(
         else {}
     )
 
-    # ── 5. Build results – one SmartSearchResult per group ──
+    # ── 9. Build results – one SmartSearchResult per group ──
     results: list[SmartSearchResult] = []
-    for group in groups:
-        # Representative product = first in group (alphabetical)
-        representative = group[0]
-        # Merge offers from all products in the group
-        group_ids = {p.id for p in group}
-        merged_offers: list[Offer] = []
-        for p in group:
-            merged_offers.extend(offers_by_product.get(p.id, []))
+    for grp in page_groups:
+        # Representative product = first by name
+        group_products = [products_by_id[pid] for pid in grp if pid in products_by_id]
+        if not group_products:
+            continue
+        group_products.sort(key=lambda p: p.name)
+        representative = group_products[0]
 
-        # If no offers found in the group, look for offers from similar products
-        # (aligns list view with detail/best-price view which uses _find_similar_ids)
-        if not merged_offers:
-            similar_ids = await _find_similar_ids(representative, db)
-            extra_ids = [sid for sid in similar_ids if sid not in group_ids]
-            if extra_ids:
-                extra_where = [
-                    Offer.product_id.in_(extra_ids),
-                    Offer.valid_from <= today,
-                    Offer.valid_to >= today,
-                ]
-                if chain:
-                    extra_where.append(
-                        Offer.chain_id.in_(
-                            select(Chain.id).where(Chain.slug.in_(chain_slugs))
-                        )
-                    )
-                extra_result = await db.execute(
-                    select(Offer)
-                    .options(joinedload(Offer.chain))
-                    .where(*extra_where)
-                    .order_by(Offer.offer_price.asc())
-                )
-                merged_offers = list(extra_result.unique().scalars().all())
+        # Merge offers from all products in the group
+        merged_offers: list[Offer] = []
+        for p in group_products:
+            merged_offers.extend(offers_by_product.get(p.id, []))
 
         # Sort merged offers by price
         merged_offers.sort(key=lambda o: (o.offer_price, o.price_per_unit or 0))
+
         # Use best indicator from the group
         best_indicator = None
-        for p in group:
+        for p in group_products:
             ind = indicators.get(p.id)
             if ind == "top":
                 best_indicator = "top"
@@ -796,24 +942,47 @@ async def get_catalog_grouped(
 
         # Use image from any product in the group if representative lacks one
         if not representative.image_url:
-            for p in group:
+            for p in group_products:
                 if p.image_url:
                     representative.image_url = p.image_url
                     break
 
+        # Last-known price for groups without active offers
+        lk_price, lk_chain, lk_date = None, None, None
+        if not merged_offers:
+            for pid in grp:
+                if pid in last_known:
+                    lk_price, lk_chain, lk_date = last_known[pid]
+                    break
+
         results.append(
-            _build_smart_result(representative, merged_offers, best_indicator)
+            _build_smart_result(
+                representative, merged_offers, best_indicator,
+                last_known_price=lk_price,
+                last_known_chain=lk_chain,
+                last_seen_date=lk_date,
+            )
         )
 
-    # Sort results based on sort param
+    # Sort results based on sort param (within the active/inactive sections)
     if sort == "price":
-        results.sort(
+        # Keep active-first ordering, sort within each section
+        active = [r for r in results if r.has_active_offers]
+        inactive = [r for r in results if not r.has_active_offers]
+        active.sort(
             key=lambda r: min((o.offer_price for o in r.offers), default=Decimal("9999"))
         )
+        inactive.sort(
+            key=lambda r: r.last_known_price or Decimal("9999")
+        )
+        results = active + inactive
     elif sort == "price_per_unit":
-        results.sort(
+        active = [r for r in results if r.has_active_offers]
+        inactive = [r for r in results if not r.has_active_offers]
+        active.sort(
             key=lambda r: r.best_price_per_unit or Decimal("9999")
         )
+        results = active + inactive
 
     return results
 
@@ -919,6 +1088,10 @@ class SmartSearchResult(BaseModel):
     best_price_per_unit: Decimal | None = None
     unit_reference: str | None = None
     is_category_match: bool = False
+    has_active_offers: bool = True
+    last_known_price: Decimal | None = None
+    last_known_chain: str | None = None
+    last_seen_date: date | None = None
 
 
 FRESH_CATEGORIES = {
@@ -932,6 +1105,9 @@ def _build_smart_result(
     raw_offers: list[Offer],
     indicator: str | None,
     is_category_match: bool = False,
+    last_known_price: Decimal | None = None,
+    last_known_chain: str | None = None,
+    last_seen_date: date | None = None,
 ) -> SmartSearchResult:
     """Build a SmartSearchResult from a product and its offers."""
     seen_chains: set[uuid.UUID] = set()
@@ -966,6 +1142,10 @@ def _build_smart_result(
         best_price_per_unit=best_ppu,
         unit_reference=unit_ref,
         is_category_match=is_category_match,
+        has_active_offers=len(best_per_chain) > 0,
+        last_known_price=last_known_price,
+        last_known_chain=last_known_chain,
+        last_seen_date=last_seen_date,
     )
 
 

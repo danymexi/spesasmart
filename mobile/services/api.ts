@@ -196,6 +196,10 @@ export interface SmartSearchResult {
   best_price_per_unit: number | null;
   unit_reference: string | null;
   is_category_match: boolean;
+  has_active_offers: boolean;
+  last_known_price: number | null;
+  last_known_chain: string | null;
+  last_seen_date: string | null;
 }
 
 export interface TripItem {
