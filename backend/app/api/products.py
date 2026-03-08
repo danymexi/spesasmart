@@ -598,6 +598,8 @@ def _group_similar_product_ids(
     groups: list[list[uuid.UUID]] = []
     used: set[int] = set()
     normalized = [_normalize_product_name(r[1]) for r in rows]
+    # Pre-compute first words for quick rejection
+    first_words = [n.split()[0] if n else "" for n in normalized]
 
     # --- Phase A: Group by barcode (exact, fast) ---
     barcode_map: dict[str, list[int]] = {}
@@ -613,7 +615,10 @@ def _group_similar_product_ids(
         for idx in indices[1:]:
             used.add(idx)
 
-    # --- Phase B: Fuzzy name matching ---
+    # --- Phase B: Fuzzy name matching (limited to nearby neighbours) ---
+    # Products are sorted by name, so duplicates with similar names are adjacent.
+    # Limit the inner loop to WINDOW neighbours to avoid O(n²) on large catalogs.
+    WINDOW = 30
     for i, r in enumerate(rows):
         if i in used:
             continue
@@ -623,7 +628,7 @@ def _group_similar_product_ids(
         cat_i = (r[3] or "").strip()
         bc_i = r[4] if _is_valid_ean(r[4]) else None
 
-        for j in range(i + 1, len(rows)):
+        for j in range(i + 1, min(i + 1 + WINDOW, len(rows))):
             if j in used:
                 continue
             q = rows[j]
@@ -649,6 +654,13 @@ def _group_similar_product_ids(
                 and cat_i != cat_j
                 and cat_i != "Supermercato"
                 and cat_j != "Supermercato"
+            ):
+                continue
+
+            # Quick first-word rejection (avoid expensive SequenceMatcher)
+            if (
+                first_words[i] and first_words[j]
+                and first_words[i][:4] != first_words[j][:4]
             ):
                 continue
 
