@@ -1779,7 +1779,10 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
     },
   });
 
-  const selectedSet = new Set(preferredChains || []);
+  // Use server preferredChains if logged in, otherwise local nearbyChains
+  const selectedSet = new Set(
+    isLoggedIn && preferredChains ? preferredChains : nearbyChains
+  );
 
   const toggleChain = (slug: string) => {
     const next = new Set(selectedSet);
@@ -1789,8 +1792,10 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
       next.add(slug);
     }
     const arr = Array.from(next);
-    chainMutation.mutate(arr);
     setNearbyChains(arr);
+    if (isLoggedIn) {
+      chainMutation.mutate(arr);
+    }
   };
 
   const handleGeolocate = async () => {
@@ -1912,7 +1917,6 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
             <Switch
               value={selectedSet.has(chain.slug)}
               onValueChange={() => toggleChain(chain.slug)}
-              disabled={!isLoggedIn}
             />
           )}
         />
