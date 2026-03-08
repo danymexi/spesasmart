@@ -8,7 +8,7 @@ import { useFonts } from "expo-font";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as SplashScreen from "expo-splash-screen";
 import { registerServiceWorker } from "../services/registerSW";
-import { createGuestUser } from "../services/api";
+import { createGuestUser, getNearbyStores, updateUserLocation } from "../services/api";
 import { getGlassStyles } from "../styles/glassStyles";
 import { useAppStore } from "../stores/useAppStore";
 
@@ -78,6 +78,28 @@ export default function RootLayout() {
   // Prefetch catalog on app startup
   useEffect(() => {
     useAppStore.getState().prefetchCatalog();
+  }, []);
+
+  // Auto-detect location on app startup
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        const { setUserLocation, setNearbyChains, isLoggedIn } =
+          useAppStore.getState();
+        setUserLocation(latitude, longitude);
+        try {
+          const result = await getNearbyStores(latitude, longitude, 20);
+          setNearbyChains(result.chain_slugs);
+          if (isLoggedIn) {
+            updateUserLocation(latitude, longitude).catch(() => {});
+          }
+        } catch {}
+      },
+      () => {}, // silently fail if permission denied
+      { enableHighAccuracy: false, timeout: 10000 }
+    );
   }, []);
 
   useEffect(() => {
