@@ -19,6 +19,12 @@ from app.models import Product
 
 logger = logging.getLogger(__name__)
 
+
+def is_valid_ean(code: str | None) -> bool:
+    """Check if a string looks like a valid EAN-8 or EAN-13."""
+    return bool(code and code.isdigit() and len(code) in (8, 13))
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -1040,6 +1046,11 @@ class ProductMatcher:
         if new_unit and not product.unit:
             product.unit = new_unit
 
+        # Backfill barcode if the incoming data has a valid one and product lacks one
+        new_barcode = raw_data.get("barcode")
+        if is_valid_ean(new_barcode) and not product.barcode:
+            product.barcode = new_barcode
+
     # ------------------------------------------------------------------
     # Create-or-match entry point
     # ------------------------------------------------------------------
@@ -1078,6 +1089,8 @@ class ProductMatcher:
 
             # --- 1. Exact barcode look-up (fastest) ---
             barcode = raw_data.get("barcode")
+            if barcode and not is_valid_ean(barcode):
+                barcode = None  # discard non-EAN codes (e.g. Esselunga internal)
             if barcode:
                 stmt = select(Product).where(Product.barcode == barcode)
                 result = await session.execute(stmt)
@@ -1096,9 +1109,26 @@ class ProductMatcher:
                 name, brand, category=category, session=session
             )
             if matched is not None:
-                self._enrich_product(matched, raw_data, now)
-                await session.commit()
-                return matched
+                # Barcode conflict guard: if both have valid EANs but they differ,
+                # these are different products despite similar names
+                if (
+                    barcode
+                    and is_valid_ean(barcode)
+                    and matched.barcode
+                    and is_valid_ean(matched.barcode)
+                    and barcode != matched.barcode
+                ):
+                    logger.info(
+                        "Barcode conflict: incoming '%s' vs existing '%s' on product %s — creating new",
+                        barcode,
+                        matched.barcode,
+                        matched.id,
+                    )
+                    matched = None  # fall through to create new product
+                else:
+                    self._enrich_product(matched, raw_data, now)
+                    await session.commit()
+                    return matched
 
             # --- 3. Create new product ---
             canonical_brand = self.normalize_brand(brand)
@@ -1126,3 +1156,122 @@ class ProductMatcher:
         finally:
             if close_session:
                 await session.close()
+
+    # ------------------------------------------------------------------
+    # Batch barcode dedup
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def merge_barcode_duplicates(cls) -> int:
+        """Find products sharing the same valid barcode and merge them.
+
+        Keeps the product with the most offers as canonical.
+        Reassigns all offers from duplicates to the canonical product.
+        Deletes the duplicate product rows.
+        Returns the number of products merged (removed).
+        """
+        from sqlalchemy import delete, func, text, update
+
+        from app.models.offer import Offer
+        from app.models.user import UserWatchlist
+
+        merged = 0
+
+        async with async_session() as session:
+            # Find barcodes shared by multiple products
+            stmt = text(
+                "SELECT barcode, array_agg(id) AS ids "
+                "FROM products "
+                "WHERE barcode ~ '^[0-9]{8}$' OR barcode ~ '^[0-9]{13}$' "
+                "GROUP BY barcode "
+                "HAVING count(*) > 1"
+            )
+            result = await session.execute(stmt)
+            rows = result.fetchall()
+
+            for barcode_val, product_ids in rows:
+                # Count offers per product to pick canonical (most offers)
+                counts = {}
+                for pid in product_ids:
+                    cnt_result = await session.execute(
+                        select(func.count(Offer.id)).where(Offer.product_id == pid)
+                    )
+                    counts[pid] = cnt_result.scalar() or 0
+
+                # Canonical = most offers, oldest as tiebreaker
+                sorted_pids = sorted(
+                    product_ids,
+                    key=lambda pid: (-counts[pid], str(pid)),
+                )
+                canonical_id = sorted_pids[0]
+                duplicate_ids = sorted_pids[1:]
+
+                if not duplicate_ids:
+                    continue
+
+                # Reassign offers
+                await session.execute(
+                    update(Offer)
+                    .where(Offer.product_id.in_(duplicate_ids))
+                    .values(product_id=canonical_id)
+                )
+
+                # Reassign watchlist entries (skip if user already watches canonical)
+                existing_wl = await session.execute(
+                    select(UserWatchlist.user_id).where(
+                        UserWatchlist.product_id == canonical_id
+                    )
+                )
+                existing_user_ids = {row[0] for row in existing_wl.fetchall()}
+
+                if existing_user_ids:
+                    await session.execute(
+                        delete(UserWatchlist).where(
+                            UserWatchlist.product_id.in_(duplicate_ids),
+                            UserWatchlist.user_id.in_(existing_user_ids),
+                        )
+                    )
+
+                await session.execute(
+                    update(UserWatchlist)
+                    .where(UserWatchlist.product_id.in_(duplicate_ids))
+                    .values(product_id=canonical_id)
+                )
+
+                # Enrich canonical with data from duplicates
+                canonical_result = await session.execute(
+                    select(Product).where(Product.id == canonical_id)
+                )
+                canonical = canonical_result.scalar_one()
+
+                for dup_id in duplicate_ids:
+                    dup_result = await session.execute(
+                        select(Product).where(Product.id == dup_id)
+                    )
+                    dup = dup_result.scalar_one_or_none()
+                    if not dup:
+                        continue
+                    if not canonical.image_url and dup.image_url:
+                        canonical.image_url = dup.image_url
+                    if (not canonical.category or canonical.category == "Supermercato") and dup.category:
+                        canonical.category = dup.category
+                    if not canonical.subcategory and dup.subcategory:
+                        canonical.subcategory = dup.subcategory
+                    if not canonical.unit and dup.unit:
+                        canonical.unit = dup.unit
+
+                # Delete duplicates
+                await session.execute(
+                    delete(Product).where(Product.id.in_(duplicate_ids))
+                )
+                merged += len(duplicate_ids)
+
+                logger.info(
+                    "Barcode dedup '%s': kept %s, merged %d duplicates",
+                    barcode_val, canonical_id, len(duplicate_ids),
+                )
+
+            await session.commit()
+
+        logger.info("Barcode dedup complete: %d products merged.", merged)
+        return merged

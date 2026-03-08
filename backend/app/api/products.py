@@ -480,8 +480,16 @@ def _names_match(norm_a: str, norm_b: str, threshold: float = 0.78) -> bool:
     return ratio >= threshold
 
 
+def _is_valid_ean(code: str | None) -> bool:
+    """Check if a string looks like a valid EAN-8 or EAN-13."""
+    return bool(code and code.isdigit() and len(code) in (8, 13))
+
+
 def _group_similar_products(products: list[Product]) -> list[list[Product]]:
-    """Group products with similar names.
+    """Group products with similar names, barcode-first.
+
+    Phase A: group products sharing the same valid EAN barcode (exact, fast).
+    Phase B: fuzzy name matching for remaining products (existing logic).
 
     Brand check is soft BUT only for descriptive names (>=3 words).
     Short/generic names like "Vaniglia" ALWAYS require matching brand
@@ -492,6 +500,22 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
     used: set[int] = set()
     normalized = [_normalize_product_name(p.name) for p in products]
 
+    # --- Phase A: Group by barcode (exact, fast) ---
+    barcode_map: dict[str, list[int]] = {}
+    for i, p in enumerate(products):
+        bc = p.barcode
+        if _is_valid_ean(bc):
+            barcode_map.setdefault(bc, []).append(i)
+
+    for bc, indices in barcode_map.items():
+        if len(indices) < 2:
+            continue
+        # Mark all but the first as "used" — they'll join the first's group below
+        first = indices[0]
+        for idx in indices[1:]:
+            used.add(idx)
+
+    # --- Phase B: Fuzzy name matching (with barcode awareness) ---
     for i, p in enumerate(products):
         if i in used:
             continue
@@ -499,10 +523,24 @@ def _group_similar_products(products: list[Product]) -> list[list[Product]]:
         used.add(i)
         brand_i = (p.brand or "").lower().strip()
         cat_i = (p.category or "").strip()
+        bc_i = p.barcode if _is_valid_ean(p.barcode) else None
+
         for j in range(i + 1, len(products)):
             if j in used:
                 continue
             q = products[j]
+            bc_j = q.barcode if _is_valid_ean(q.barcode) else None
+
+            # Barcode match — instant group (skip name check)
+            if bc_i and bc_j and bc_i == bc_j:
+                group.append(q)
+                used.add(j)
+                continue
+
+            # Barcode conflict — never group
+            if bc_i and bc_j and bc_i != bc_j:
+                continue
+
             brand_j = (q.brand or "").lower().strip()
             cat_j = (q.category or "").strip()
             brands_differ = brand_i and brand_j and brand_i != brand_j

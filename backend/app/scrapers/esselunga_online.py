@@ -517,7 +517,7 @@ class EsselungaOnlineScraper:
                 "category": category,
                 "subcategory": category_name if category_name != parent_name else None,
                 "unit": unit,
-                "barcode": code,
+                "barcode": None,  # Esselunga 'code' is internal, not a real EAN
                 "image_url": image_url,
                 "source": "esselunga_online",
             },

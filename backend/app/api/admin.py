@@ -244,6 +244,28 @@ async def edit_product(
     return product
 
 
+@router.post("/dedup-barcodes")
+async def dedup_barcodes(
+    admin: UserProfile = Depends(require_admin),
+):
+    """Merge duplicate products that share the same valid EAN barcode.
+
+    Keeps the product with the most offers as canonical, reassigns all
+    offers and watchlist entries, then deletes the duplicates.
+    """
+    from app.services.product_matcher import ProductMatcher
+
+    try:
+        merged = await ProductMatcher.merge_barcode_duplicates()
+        return {
+            "status": "completed",
+            "merged": merged,
+            "message": f"Merged {merged} duplicate products by barcode.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/scraping/trigger/{chain_slug}", response_model=TriggerResponse)
 async def trigger_scraping(
     chain_slug: str,
