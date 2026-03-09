@@ -480,17 +480,9 @@ export default function SettingsScreen() {
             <SupermarketAccountsSection />
             <Button
               mode="outlined"
-              icon="history"
-              onPress={() => router.push("/purchases")}
-              style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 4 }}
-            >
-              Storico Acquisti
-            </Button>
-            <Button
-              mode="outlined"
               icon="map-marker-radius"
               onPress={() => router.push("/store-map")}
-              style={{ marginHorizontal: 16, marginBottom: 12 }}
+              style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 12 }}
             >
               Mappa Negozi
             </Button>

@@ -20,10 +20,13 @@ import ShoppingList from "../../components/ShoppingList";
 import ListPicker from "../../components/ListPicker";
 import ListSettingsModal from "../../components/ListSettingsModal";
 import ShareListModal from "../../components/ShareListModal";
+import PurchaseOrders from "../../components/PurchaseOrders";
+import PurchaseProducts from "../../components/PurchaseProducts";
 import { glassCard, glassColors, alertBadgeGlass } from "../../styles/glassStyles";
 import { useGlassTheme } from "../../styles/useGlassTheme";
 
-type TabValue = "watchlist" | "shopping";
+type TabValue = "watchlist" | "shopping" | "history";
+type HistorySubTab = "orders" | "products";
 
 export default function WatchlistScreen() {
   const theme = useTheme();
@@ -36,6 +39,7 @@ export default function WatchlistScreen() {
   const [showCreateList, setShowCreateList] = useState(false);
   const [shareList, setShareList] = useState<ShoppingListMeta | null>(null);
   const [snackbar, setSnackbar] = useState("");
+  const [historySubTab, setHistorySubTab] = useState<HistorySubTab>("orders");
 
   const {
     data: items,
@@ -93,6 +97,7 @@ export default function WatchlistScreen() {
           buttons={[
             { value: "watchlist", label: "Watchlist", icon: "star" },
             { value: "shopping", label: "Spesa", icon: "cart" },
+            { value: "history", label: "Storico", icon: "history" },
           ]}
           style={styles.segmented}
         />
@@ -111,6 +116,22 @@ export default function WatchlistScreen() {
               color: data.color ?? undefined,
             })}
           />
+        </View>
+      ) : activeTab === "history" ? (
+        <View style={{ flex: 1 }}>
+          <View style={styles.subTabRow}>
+            <SegmentedButtons
+              value={historySubTab}
+              onValueChange={(v) => setHistorySubTab(v as HistorySubTab)}
+              buttons={[
+                { value: "orders", label: "Ordini", icon: "receipt" },
+                { value: "products", label: "I miei prodotti", icon: "basket" },
+              ]}
+              density="small"
+              style={styles.subSegmented}
+            />
+          </View>
+          {historySubTab === "orders" ? <PurchaseOrders /> : <PurchaseProducts />}
         </View>
       ) : (
       <>
@@ -243,6 +264,14 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   segmented: {},
+  subTabRow: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+  subSegmented: {
+    borderRadius: 12,
+  },
   card: {
     marginHorizontal: 12,
     marginBottom: 8,
