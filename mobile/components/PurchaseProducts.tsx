@@ -56,7 +56,11 @@ export default function PurchaseProducts() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["smartList"] });
       queryClient.invalidateQueries({ queryKey: ["watchlist"] });
-      setSnackbar(`${data.added} prodotti aggiunti alla watchlist`);
+      if (data.added > 0) {
+        setSnackbar(`${data.added} prodotti aggiunti alla watchlist`);
+      } else {
+        setSnackbar("Watchlist aggiornata — tutti i prodotti sono gia' sincronizzati");
+      }
     },
   });
 
@@ -300,5 +304,5 @@ const styles = StyleSheet.create({
   syncBar: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4 },
   syncBtn: { backgroundColor: glassColors.greenDark, borderRadius: 8 },
   forceSyncBtn: { borderColor: glassColors.greenDark, borderRadius: 8 },
-  snackbar: { backgroundColor: "#1a1a2e" },
+  snackbar: { backgroundColor: "#1a1a2e", marginBottom: 72 },
 });
