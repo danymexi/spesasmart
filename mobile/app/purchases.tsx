@@ -1,10 +1,9 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   View,
 } from "react-native";
@@ -22,7 +21,6 @@ import { Snackbar } from "react-native-paper";
 import {
   getPurchaseOrders,
   getPurchaseItems,
-  getPurchaseHabits,
   getSmartList,
   fetchReceiptBlob,
   updatePurchaseOrder,
@@ -33,13 +31,12 @@ import {
 import type {
   PurchaseOrderItem,
   PurchaseItemDetail,
-  PurchaseHabit,
   SmartListItem,
 } from "../services/api";
 import { glassPanel, glassCard, glassColors } from "../styles/glassStyles";
 import { useAppStore } from "../stores/useAppStore";
 
-type Tab = "orders" | "habits" | "smart";
+type Tab = "orders" | "products";
 
 const CHAIN_OPTIONS = [
   { slug: "iperal", label: "Iperal" },
@@ -77,16 +74,14 @@ export default function PurchasesScreen() {
           onValueChange={(v) => setTab(v as Tab)}
           buttons={[
             { value: "orders", label: "Ordini", icon: "receipt" },
-            { value: "habits", label: "Abitudini", icon: "chart-timeline-variant" },
-            { value: "smart", label: "Lista Smart", icon: "lightbulb-on" },
+            { value: "products", label: "I miei prodotti", icon: "basket" },
           ]}
           style={styles.segmented}
         />
       </View>
 
       {tab === "orders" && <OrdersTab />}
-      {tab === "habits" && <HabitsTab />}
-      {tab === "smart" && <SmartListTab />}
+      {tab === "products" && <ProductsTab />}
     </View>
   );
 }
@@ -360,123 +355,9 @@ function OrderDetail({ order }: { order: PurchaseOrderItem }) {
   );
 }
 
-// ── Habits Tab ──────────────────────────────────────────────────────────────
+// ── Products Tab (unified habits + smart list) ─────────────────────────────
 
-function HabitsTab() {
-  const queryClient = useQueryClient();
-  const [snackbar, setSnackbar] = useState("");
-  const { data: habits, isLoading } = useQuery({
-    queryKey: ["purchaseHabits"],
-    queryFn: getPurchaseHabits,
-  });
-
-  const backfillMutation = useMutation({
-    mutationFn: backfillReceiptProducts,
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["purchaseHabits"] });
-      queryClient.invalidateQueries({ queryKey: ["smartList"] });
-      setSnackbar(`Collegati ${data.matched}/${data.total} prodotti al catalogo`);
-    },
-    onError: () => setSnackbar("Errore durante il collegamento prodotti"),
-  });
-
-  if (isLoading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={glassColors.greenMedium} />
-      </View>
-    );
-  }
-
-  if (!habits || habits.length === 0) {
-    return (
-      <View style={styles.center}>
-        <Text variant="bodyLarge" style={{ color: glassColors.textSecondary, textAlign: "center", marginBottom: 12 }}>
-          Nessuna abitudine rilevata.
-        </Text>
-        <Text variant="bodySmall" style={{ color: glassColors.textSecondary, textAlign: "center", marginBottom: 16, paddingHorizontal: 24 }}>
-          Servono almeno 2 acquisti dello stesso prodotto in date diverse. Prova a collegare i prodotti al catalogo:
-        </Text>
-        <Button
-          mode="contained"
-          icon="link-variant"
-          onPress={() => backfillMutation.mutate()}
-          loading={backfillMutation.isPending}
-          disabled={backfillMutation.isPending}
-          style={{ backgroundColor: glassColors.greenMedium }}
-        >
-          Collega prodotti al catalogo
-        </Button>
-        <Snackbar visible={!!snackbar} onDismiss={() => setSnackbar("")} duration={3000}>{snackbar}</Snackbar>
-      </View>
-    );
-  }
-
-  return (
-    <FlatList
-      data={habits}
-      keyExtractor={(item) => item.product_id || item.product_name}
-      contentContainerStyle={styles.listContent}
-      renderItem={({ item }) => (
-        <View style={styles.card}>
-          <Text variant="titleSmall" style={styles.habitName}>
-            {item.product_name}
-          </Text>
-          {item.brand && (
-            <Text variant="bodySmall" style={styles.habitBrand}>
-              {item.brand}
-            </Text>
-          )}
-          <View style={styles.habitStats}>
-            <View style={styles.habitStat}>
-              <Text variant="labelSmall" style={styles.statLabel}>
-                Acquisti
-              </Text>
-              <Text variant="bodyMedium" style={styles.statValue}>
-                {item.total_purchases}
-              </Text>
-            </View>
-            <View style={styles.habitStat}>
-              <Text variant="labelSmall" style={styles.statLabel}>
-                Ogni
-              </Text>
-              <Text variant="bodyMedium" style={styles.statValue}>
-                {item.avg_interval_days} gg
-              </Text>
-            </View>
-            {item.avg_price != null && (
-              <View style={styles.habitStat}>
-                <Text variant="labelSmall" style={styles.statLabel}>
-                  Prezzo medio
-                </Text>
-                <Text variant="bodyMedium" style={styles.statValue}>
-                  {item.avg_price.toFixed(2)}
-                </Text>
-              </View>
-            )}
-            {item.next_purchase_predicted && (
-              <View style={styles.habitStat}>
-                <Text variant="labelSmall" style={styles.statLabel}>
-                  Prossimo
-                </Text>
-                <Text variant="bodyMedium" style={styles.statValue}>
-                  {new Date(item.next_purchase_predicted).toLocaleDateString("it-IT", {
-                    day: "numeric",
-                    month: "short",
-                  })}
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-      )}
-    />
-  );
-}
-
-// ── Smart List Tab ──────────────────────────────────────────────────────────
-
-function SmartListTab() {
+function ProductsTab() {
   const queryClient = useQueryClient();
   const [snackbar, setSnackbar] = useState("");
   const { data: items, isLoading } = useQuery({
@@ -488,7 +369,6 @@ function SmartListTab() {
     mutationFn: backfillReceiptProducts,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["smartList"] });
-      queryClient.invalidateQueries({ queryKey: ["purchaseHabits"] });
       setSnackbar(`Collegati ${data.matched}/${data.total} prodotti al catalogo`);
     },
     onError: () => setSnackbar("Errore durante il collegamento prodotti"),
@@ -524,10 +404,10 @@ function SmartListTab() {
     return (
       <View style={styles.center}>
         <Text variant="bodyLarge" style={{ color: glassColors.textSecondary, textAlign: "center", marginBottom: 12 }}>
-          Nessun suggerimento disponibile.
+          Nessun prodotto rilevato.
         </Text>
         <Text variant="bodySmall" style={{ color: glassColors.textSecondary, textAlign: "center", marginBottom: 16, paddingHorizontal: 24 }}>
-          Servono almeno 2 scontrini con lo stesso prodotto. Prova a collegare i prodotti degli scontrini al catalogo:
+          Servono almeno 2 acquisti dello stesso prodotto. Prova a collegare i prodotti al catalogo:
         </Text>
         <Button
           mode="contained"
@@ -544,13 +424,27 @@ function SmartListTab() {
     );
   }
 
-  const urgencyColor = {
+  const urgencyColor: Record<string, string> = {
     alta: "#C62828",
     media: "#EF6C00",
     bassa: "#2E7D32",
   };
 
   const notInWatchlist = items.filter((i) => !i.in_watchlist && i.product_id !== null);
+  const hasUnmatched = items.some((i) => i.product_id === null);
+
+  const formatDaysInfo = (item: SmartListItem): string | null => {
+    if (item.days_until_due == null) {
+      // Non-urgent: show predicted date
+      if (item.next_purchase_predicted) {
+        return `Prossimo: ${new Date(item.next_purchase_predicted).toLocaleDateString("it-IT", { day: "numeric", month: "short" })}`;
+      }
+      return null;
+    }
+    if (item.days_until_due < 0) return `Scaduto da ${Math.abs(item.days_until_due)} giorni`;
+    if (item.days_until_due === 0) return "Da comprare oggi";
+    return `Tra ${item.days_until_due} giorni`;
+  };
 
   return (
     <View style={{ flex: 1 }}>
@@ -569,83 +463,111 @@ function SmartListTab() {
           </Button>
         </View>
       )}
+      {hasUnmatched && (
+        <View style={styles.backfillBanner}>
+          <Text variant="bodySmall" style={{ color: glassColors.textSecondary, flex: 1 }}>
+            Alcuni prodotti non sono collegati al catalogo.
+          </Text>
+          <Button
+            mode="text"
+            icon="link-variant"
+            compact
+            onPress={() => backfillMutation.mutate()}
+            loading={backfillMutation.isPending}
+            disabled={backfillMutation.isPending}
+            labelStyle={{ fontSize: 11, color: glassColors.greenDark }}
+          >
+            Collega
+          </Button>
+        </View>
+      )}
       <FlatList
         data={items}
         keyExtractor={(item) => item.product_id || item.product_name}
         contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <View style={styles.smartHeader}>
-              <View style={{ flex: 1 }}>
-                <Text variant="titleSmall" style={styles.habitName}>
-                  {item.product_name}
-                </Text>
-                {item.brand && (
-                  <Text variant="bodySmall" style={styles.habitBrand}>
-                    {item.brand}
+        renderItem={({ item }) => {
+          const daysText = formatDaysInfo(item);
+          return (
+            <View style={styles.card}>
+              <View style={styles.smartHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text variant="titleSmall" style={styles.habitName}>
+                    {item.product_name}
                   </Text>
-                )}
-              </View>
-              {item.product_id !== null && (
-                <IconButton
-                  icon={item.in_watchlist ? "star" : "star-outline"}
-                  size={20}
-                  iconColor={item.in_watchlist ? "#FFD200" : glassColors.textMuted}
-                  onPress={() => {
-                    if (!item.in_watchlist && item.product_id) {
-                      addSingleMutation.mutate(item.product_id);
-                    }
-                  }}
-                  disabled={item.in_watchlist || addSingleMutation.isPending}
-                  style={{ margin: 0 }}
-                />
-              )}
-              <Chip
-                compact
-                style={{
-                  backgroundColor: `${urgencyColor[item.urgency as keyof typeof urgencyColor]}15`,
-                }}
-                textStyle={{
-                  color: urgencyColor[item.urgency as keyof typeof urgencyColor],
-                  fontSize: 11,
-                  fontWeight: "700",
-                }}
-              >
-                {item.urgency.toUpperCase()}
-              </Chip>
-            </View>
-
-            <View style={styles.smartDetails}>
-              {item.best_current_price != null && (
-                <View style={styles.smartPriceRow}>
-                  <Text variant="bodySmall" style={styles.statLabel}>
-                    Miglior prezzo:
-                  </Text>
-                  <Text variant="bodyMedium" style={styles.smartPrice}>
-                    {item.best_current_price.toFixed(2)}
-                  </Text>
-                  {item.best_chain && (
-                    <Text variant="bodySmall" style={styles.smartChain}>
-                      ({item.best_chain})
+                  {item.brand && (
+                    <Text variant="bodySmall" style={styles.habitBrand}>
+                      {item.brand}
                     </Text>
                   )}
                 </View>
-              )}
-              {item.savings_vs_avg != null && item.savings_vs_avg > 0 && (
-                <Text variant="bodySmall" style={styles.savings}>
-                  Risparmi {item.savings_vs_avg.toFixed(2)} vs media storica
-                </Text>
-              )}
-              <Text variant="bodySmall" style={styles.daysInfo}>
-                {item.days_until_due < 0
-                  ? `Scaduto da ${Math.abs(item.days_until_due)} giorni`
-                  : item.days_until_due === 0
-                  ? "Da comprare oggi"
-                  : `Tra ${item.days_until_due} giorni`}
+                {item.product_id !== null && (
+                  <IconButton
+                    icon={item.in_watchlist ? "star" : "star-outline"}
+                    size={20}
+                    iconColor={item.in_watchlist ? "#FFD200" : glassColors.textMuted}
+                    onPress={() => {
+                      if (!item.in_watchlist && item.product_id) {
+                        addSingleMutation.mutate(item.product_id);
+                      }
+                    }}
+                    disabled={item.in_watchlist || addSingleMutation.isPending}
+                    style={{ margin: 0 }}
+                  />
+                )}
+                {item.urgency && (
+                  <Chip
+                    compact
+                    style={{
+                      backgroundColor: `${urgencyColor[item.urgency]}15`,
+                    }}
+                    textStyle={{
+                      color: urgencyColor[item.urgency],
+                      fontSize: 11,
+                      fontWeight: "700",
+                    }}
+                  >
+                    {item.urgency.toUpperCase()}
+                  </Chip>
+                )}
+              </View>
+
+              {/* Stats row */}
+              <Text variant="bodySmall" style={styles.statsRow}>
+                {item.total_purchases} acquisti{" "}
+                {item.avg_interval_days > 0 && `\u00B7 ogni ${Math.round(item.avg_interval_days)}gg `}
+                {item.avg_price != null && `\u00B7 \u20AC${item.avg_price.toFixed(2)}`}
               </Text>
+
+              <View style={styles.smartDetails}>
+                {item.best_current_price != null && (
+                  <View style={styles.smartPriceRow}>
+                    <Text variant="bodySmall" style={styles.statLabel}>
+                      Miglior prezzo:
+                    </Text>
+                    <Text variant="bodyMedium" style={styles.smartPrice}>
+                      {item.best_current_price.toFixed(2)}
+                    </Text>
+                    {item.best_chain && (
+                      <Text variant="bodySmall" style={styles.smartChain}>
+                        ({item.best_chain})
+                      </Text>
+                    )}
+                  </View>
+                )}
+                {item.savings_vs_avg != null && item.savings_vs_avg > 0 && (
+                  <Text variant="bodySmall" style={styles.savings}>
+                    Risparmi {item.savings_vs_avg.toFixed(2)} vs media storica
+                  </Text>
+                )}
+                {daysText && (
+                  <Text variant="bodySmall" style={styles.daysInfo}>
+                    {daysText}
+                  </Text>
+                )}
+              </View>
             </View>
-          </View>
-        )}
+          );
+        }}
       />
       <Snackbar
         visible={!!snackbar}
@@ -714,13 +636,21 @@ const styles = StyleSheet.create({
   itemQty: { color: glassColors.textMuted, fontSize: 10 },
   itemPrice: { color: glassColors.greenDark, fontWeight: "600", fontSize: 13 },
 
-  // Habits
+  // Products (unified)
   habitName: { color: glassColors.textPrimary, fontWeight: "600" },
   habitBrand: { color: glassColors.textMuted, marginTop: 2 },
-  habitStats: { flexDirection: "row", marginTop: 12, gap: 16 },
-  habitStat: { alignItems: "center" },
   statLabel: { color: glassColors.textMuted, fontSize: 10, marginBottom: 2 },
-  statValue: { color: glassColors.greenDark, fontWeight: "600" },
+  statsRow: { color: glassColors.textMuted, fontSize: 12, marginTop: 8 },
+  backfillBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255,210,0,0.08)",
+    borderRadius: 8,
+    marginHorizontal: 12,
+    marginTop: 4,
+  },
 
   // Smart list
   smartHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },

@@ -567,8 +567,10 @@ export interface SmartListItem {
   total_purchases: number;
   avg_interval_days: number;
   avg_price: number | null;
-  urgency: "alta" | "media" | "bassa";
-  days_until_due: number;
+  last_purchased: string;
+  next_purchase_predicted: string | null;
+  urgency: "alta" | "media" | "bassa" | null;
+  days_until_due: number | null;
   best_current_price: number | null;
   best_chain: string | null;
   savings_vs_avg: number | null;

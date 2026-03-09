@@ -237,39 +237,23 @@ async def generate_smart_list(user_id: uuid.UUID) -> list[dict[str, Any]]:
     today = date.today()
     suggestions = []
 
-    for habit in habits:
-        next_pred_str = habit.get("next_purchase_predicted")
-        if not next_pred_str:
-            continue
+    # Collect all product_ids that need offer lookup
+    product_ids_to_check: list[str] = [
+        h["product_id"] for h in habits if h["product_id"] is not None
+    ]
 
-        next_pred = date.fromisoformat(next_pred_str)
-        days_until = (next_pred - today).days
+    # Batch-fetch best offers for all products in one query
+    best_offers: dict[str, tuple[float, str | None]] = {}
+    if product_ids_to_check:
+        async with async_session() as session:
+            from app.models.chain import Chain
 
-        # Determine urgency
-        if days_until < -3:
-            urgency = "alta"
-        elif days_until <= 7:
-            urgency = "media"
-        elif days_until <= 14:
-            urgency = "bassa"
-        else:
-            continue  # Not due soon enough
-
-        product_id = habit["product_id"]
-
-        best_price = None
-        best_chain = None
-        savings = None
-        in_watchlist = False
-
-        # Only look up offers and watchlist for items with a product_id
-        if product_id is not None:
-            in_watchlist = product_id in watchlist_pids
-            async with async_session() as session:
+            for pid_str in product_ids_to_check:
                 stmt = (
-                    select(Offer.offer_price, Offer.chain_id)
+                    select(Offer.offer_price, Chain.name)
+                    .join(Chain, Offer.chain_id == Chain.id)
                     .where(
-                        Offer.product_id == uuid.UUID(product_id),
+                        Offer.product_id == uuid.UUID(pid_str),
                         Offer.valid_from <= today,
                         Offer.valid_to >= today,
                     )
@@ -279,15 +263,39 @@ async def generate_smart_list(user_id: uuid.UUID) -> list[dict[str, Any]]:
                 result = await session.execute(stmt)
                 row = result.first()
                 if row:
-                    best_price = float(row[0])
-                    from app.models.chain import Chain
-                    chain_result = await session.execute(
-                        select(Chain.name).where(Chain.id == row[1])
-                    )
-                    best_chain = chain_result.scalar_one_or_none()
+                    best_offers[pid_str] = (float(row[0]), row[1])
 
-                    if habit["avg_price"] and best_price < habit["avg_price"]:
-                        savings = round(habit["avg_price"] - best_price, 2)
+    for habit in habits:
+        next_pred_str = habit.get("next_purchase_predicted")
+        days_until: int | None = None
+        urgency: str | None = None
+
+        if next_pred_str:
+            next_pred = date.fromisoformat(next_pred_str)
+            days_until = (next_pred - today).days
+
+            if days_until < -3:
+                urgency = "alta"
+            elif days_until <= 7:
+                urgency = "media"
+            elif days_until <= 14:
+                urgency = "bassa"
+            # days_until > 14 → urgency stays None
+
+        product_id = habit["product_id"]
+
+        best_price = None
+        best_chain = None
+        savings = None
+        in_watchlist = False
+
+        if product_id is not None:
+            in_watchlist = product_id in watchlist_pids
+            offer = best_offers.get(product_id)
+            if offer:
+                best_price, best_chain = offer
+                if habit["avg_price"] and best_price < habit["avg_price"]:
+                    savings = round(habit["avg_price"] - best_price, 2)
 
         suggestions.append({
             **habit,
@@ -299,7 +307,15 @@ async def generate_smart_list(user_id: uuid.UUID) -> list[dict[str, Any]]:
             "in_watchlist": in_watchlist,
         })
 
-    # Sort by urgency (alta first), then by days_until_due
+    # Sort: urgent first (alta=0, media=1, bassa=2), then non-urgent (3)
+    # Within same urgency group, sort by days_until_due (soonest first)
+    # Non-urgent items sort by next_purchase_predicted
     urgency_order = {"alta": 0, "media": 1, "bassa": 2}
-    suggestions.sort(key=lambda s: (urgency_order.get(s["urgency"], 3), s["days_until_due"]))
+
+    def _sort_key(s: dict) -> tuple:
+        urg = urgency_order.get(s["urgency"], 3) if s["urgency"] else 3
+        days = s["days_until_due"] if s["days_until_due"] is not None else 9999
+        return (urg, days)
+
+    suggestions.sort(key=_sort_key)
     return suggestions
