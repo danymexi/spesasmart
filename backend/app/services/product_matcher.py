@@ -131,16 +131,47 @@ _ABBREVIATION_MAP: dict[str, str] = {
     "affet.": "affettato", "affet": "affettato",
     "cot.": "cotto", "cot": "cotto",
     "crud.": "crudo", "crud": "crudo",
+    # Additional receipt abbreviations (from ghost analysis)
+    "vanigl.": "vaniglia", "vanigl": "vaniglia",
+    "artig.": "artigianale", "artig": "artigianale",
+    "atlant.": "atlantico", "atlant": "atlantico",
+    "fil.": "filetto",
+    "peper.": "peperoni", "peper": "peperoni",
+    "salm.": "salmone", "salm": "salmone",
+    "crost.": "crostata", "crost": "crostata",
+    "sarac.": "saraceno", "sarac": "saraceno",
+    "spin.": "spinaci", "spin": "spinaci",
+    "ric.": "ricotta",
+    "tov.li": "tovaglioli",
+    "pad.": "padano", "pad": "padano",
+    "balsami": "balsamico",
+    "ondulata": "ondulata",
+    "van.": "vaniglia",
+    "ital.": "italiano", "ital": "italiano",
+    "fr.": "fresco",
+    "saltimboc": "saltimbocca",
+    "sh": "shampoo",
 }
 
 # Multi-token abbreviation expansions (applied before tokenizing)
 _MULTI_TOKEN_ABBREVS: dict[str, str] = {
     "s/glutine": "senza glutine",
     "s/lattosio": "senza lattosio",
+    "s/olio": "sott'olio",
+    "s/g": "senza glutine",
     "p.s.": "parzialmente scremato",
     "a.q.": "alta qualita",
+    "fr.aq": "fresco alta qualita",
+    "fr.a.q.": "fresco alta qualita",
     "o.v.": "olio vergine",
     "e.v.": "extra vergine",
+    "o evo": "olio extra vergine oliva",
+    "o.o.": "olio d'oliva",
+    "o.o": "olio d'oliva",
+    "g.biscotto": "gran biscotto",
+    "100%it": "100% italiano",
+    "gra.pad.": "grana padano",
+    "grana pad.": "grana padano",
 }
 
 # ---------------------------------------------------------------------------
@@ -548,6 +579,90 @@ BRAND_TO_CATEGORY: dict[str, str] = {
 
 # Private-label brand names (chain own-brands)
 PRIVATE_LABELS: set[str] = {"Esselunga", "Iperal", "Coop", "Lidl"}
+
+# ---------------------------------------------------------------------------
+# Receipt brand abbreviation expansions
+# Keys are UPPERCASE as they appear on receipts; values are (display_name, brand)
+# ---------------------------------------------------------------------------
+_RECEIPT_BRAND_ABBREVS: dict[str, tuple[str, str]] = {
+    # Iperal private labels
+    "VVBIO": ("Via Verde Bio", "Via Verde Bio Primia"),
+    "VV BIO": ("Via Verde Bio", "Via Verde Bio Primia"),
+    "VV.BIO": ("Via Verde Bio", "Via Verde Bio Primia"),
+    "PRIMIA": ("Primia", "Primia"),
+    # Esselunga private labels
+    "ESSELUN.": ("Esselunga", "Esselunga"),
+    "ESSELUN": ("Esselunga", "Esselunga"),
+    "ESSEL.": ("Esselunga", "Esselunga"),
+    "ESSEL": ("Esselunga", "Esselunga"),
+    "ESSEL.TOP": ("Esselunga Top", "Esselunga"),
+    "ESS.BIO": ("Esselunga Bio", "Esselunga"),
+    "ESS.EQUIL": ("Esselunga Equilibrio", "Esselunga"),
+    "ESS.NATUR": ("Esselunga Naturama", "Esselunga"),
+    # Coop private labels
+    "COOP VV": ("Coop Vivi Verde", "Coop"),
+    "COOP FF": ("Coop Fior Fiore", "Coop"),
+    # Common brand abbreviations on receipts
+    "S.LUCIA": ("Santa Lucia", "Galbani"),
+    "S. LUCIA": ("Santa Lucia", "Galbani"),
+    "CAS.ITALIA": ("Cascina Italia", "Cascina Italia"),
+    "PDG": ("Puglia Sapori i Gourmet", "Puglia Sapori"),
+    "ROSSOG": ("Rosso Gargano", "Rosso Gargano"),
+    "ROSSOG.": ("Rosso Gargano", "Rosso Gargano"),
+    "M.BIANCO": ("Mulino Bianco", "Mulino Bianco"),
+    "MUL.BIANCO": ("Mulino Bianco", "Mulino Bianco"),
+    "S.BENED.": ("San Benedetto", "San Benedetto"),
+    "S.PELLEGRINO": ("San Pellegrino", "San Pellegrino"),
+    "S.ANNA": ("Sant'Anna", "Sant'Anna"),
+    "G.RANA": ("Giovanni Rana", "Giovanni Rana"),
+    "N.NANNI": ("Nonno Nanni", "Nonno Nanni"),
+    # Additional from ghost analysis
+    "3CUOCHI": ("3 Cuochi", "3 Cuochi"),
+    "AZURPESCA": ("Azur Pesca", "Azur Pesca"),
+    "B.AD.": ("Banco Alimentare Della", ""),
+    "LA CASINA": ("La Casina", "La Casina"),
+    "SCHERINI": ("Scherini", "Scherini"),
+    "ZUCCATO": ("Zuccato", "Zuccato"),
+    "VICENZI": ("Vicenzi", "Vicenzi"),
+    "ITALPIZZA": ("Italpizza", "Italpizza"),
+    "VIPITENO": ("Vipiteno", "Latteria Vipiteno"),
+    "PANAPESCA": ("Panapesca", "Panapesca"),
+    "IPERAL": ("Iperal", "Iperal"),
+    "ESS.": ("Esselunga", "Esselunga"),
+    "SMART": ("Esselunga Smart", "Esselunga"),
+}
+
+# Pre-sort by descending key length so longer prefixes match first
+_RECEIPT_BRAND_ABBREVS_SORTED: list[tuple[str, tuple[str, str]]] = sorted(
+    _RECEIPT_BRAND_ABBREVS.items(), key=lambda x: len(x[0]), reverse=True
+)
+
+
+def expand_receipt_brands(name: str) -> tuple[str, str | None]:
+    """Expand receipt brand abbreviations in a product name.
+
+    Returns (expanded_name, detected_brand).
+    The match is case-insensitive on the prefix.
+    Also detects full brand names (from BRAND_ALIASES) at the start.
+    """
+    upper = name.upper().strip()
+    # 1. Try receipt-specific abbreviations first
+    for abbrev, (display_name, brand) in _RECEIPT_BRAND_ABBREVS_SORTED:
+        if upper.startswith(abbrev):
+            rest = name[len(abbrev):].lstrip(" .-")
+            expanded = f"{display_name} {rest}".strip() if rest else display_name
+            return expanded, brand if brand else None
+
+    # 2. Try to detect full brand names at the start (MUTTI, BARILLA, etc.)
+    words = name.strip().split()
+    for n in (3, 2, 1):
+        if len(words) >= n + 1:  # need at least brand + 1 product word
+            candidate = " ".join(words[:n]).lower()
+            canonical = BRAND_ALIASES.get(candidate)
+            if canonical:
+                return name, canonical
+
+    return name, None
 
 
 class ProductMatcher:

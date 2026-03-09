@@ -797,6 +797,26 @@ async def backfill_products(
     return result
 
 
+@router.post("/purchases/rematch-ghosts")
+async def rematch_ghost_products_endpoint(
+    user: UserProfile = Depends(get_current_user),
+):
+    """Clean up ghost products (UPPERCASE, no brand) from previous backfills."""
+    from app.services.backfill_receipt_products import rematch_ghost_products
+    result = await rematch_ghost_products(user.id)
+    return result
+
+
+@router.post("/purchases/cleanup-ghost-names")
+async def cleanup_ghost_names_endpoint(
+    user: UserProfile = Depends(get_current_user),
+):
+    """Rename remaining ghost products: expand abbreviations, title-case, set brand."""
+    from app.services.backfill_receipt_products import cleanup_ghost_names
+    result = await cleanup_ghost_names()
+    return result
+
+
 # ── Habits & Smart List ──────────────────────────────────────────────────────
 
 @router.get("/purchase-habits")

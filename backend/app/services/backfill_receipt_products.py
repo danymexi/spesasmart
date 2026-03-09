@@ -1,20 +1,29 @@
 """Backfill product_id on PurchaseItems from receipt uploads.
 
-Step 1: fuzzy matching via ProductMatcher (unchanged).
-Step 2 (new): AI matching via Claude/Gemini for items that fuzzy match failed on.
+Step 1: fuzzy matching via ProductMatcher (with receipt brand expansion).
+Step 2: AI matching via Claude/Gemini for items that fuzzy match failed on.
+Step 3: Create new products for anything still unmatched.
+
+Also provides rematch_ghost_products() to clean up ghost products created
+by previous backfills that didn't expand receipt abbreviations.
 """
 
 import json
 import logging
+import re
 import uuid
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select, update
 
 from app.config import get_settings
 from app.database import async_session
 from app.models import Product
 from app.models.purchase import PurchaseItem, PurchaseOrder
-from app.services.product_matcher import ProductMatcher
+from app.services.product_matcher import (
+    BRAND_ALIASES,
+    ProductMatcher,
+    expand_receipt_brands,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,26 +45,51 @@ No markdown fences, no commentary — just the JSON array."""
 _AI_BATCH_SIZE = 10
 _AI_TIMEOUT = 30
 
+# Non-product line filter (bags, discounts, payment methods, etc.)
+_NON_PRODUCT_RE = re.compile(
+    r"(?i)"
+    r"sacchett[oi]|busta|shopper|"
+    r"buono|coupon|sconto|"
+    r"carta\s+fedelta|fidelity|punti|"
+    r"cauzione|deposito|"
+    r"subtotal|contante|bancomat|"
+    r"carta\s+credito|carta\s+debito|"
+    r"resto\s+euro|arrotondamento|"
+    r"commissione|iva\b|"
+    r"reso\b|rimborso|cashback|acconto"
+)
+
 
 async def _get_candidates_for_item(
     item: PurchaseItem,
     session,
 ) -> list[dict]:
-    """Query DB for candidate products using ILIKE on significant tokens."""
-    tokens = [t for t in item.external_name.split() if len(t) > 3]
+    """Query DB for candidate products using ILIKE on significant tokens.
+
+    Expands receipt brand abbreviations before tokenizing, and adds brand
+    filter when a brand is detected from abbreviation expansion.
+    """
+    # Expand receipt brand abbreviations
+    expanded_name, detected_brand = expand_receipt_brands(item.external_name)
+
+    tokens = [t for t in expanded_name.split() if len(t) > 3]
     if not tokens:
-        tokens = [t for t in item.external_name.split() if len(t) > 2]
+        tokens = [t for t in expanded_name.split() if len(t) > 2]
     if not tokens:
         return []
 
     # Use up to 3 tokens for ILIKE OR filter
     significant = tokens[:3]
-    stmt = select(Product).where(
-        or_(*[Product.name.ilike(f"%{tok}%") for tok in significant])
-    )
+    filters = [Product.name.ilike(f"%{tok}%") for tok in significant]
+
+    # Also search by detected brand
+    if detected_brand:
+        filters.append(Product.brand.ilike(f"%{detected_brand}%"))
+
+    stmt = select(Product).where(or_(*filters))
     if item.category:
         stmt = stmt.where(Product.category.ilike(f"%{item.category}%"))
-    stmt = stmt.limit(20)
+    stmt = stmt.limit(30)
 
     result = await session.execute(stmt)
     candidates = result.scalars().all()
@@ -186,13 +220,17 @@ async def _ai_match_batch(
 async def backfill_unmatched_receipt_items(user_id: uuid.UUID) -> dict:
     """Find PurchaseItems with product_id=NULL from receipt uploads and try to match them.
 
-    Step 1: Fuzzy matching via ProductMatcher.
+    Step 1: Fuzzy matching via ProductMatcher (with receipt brand expansion).
     Step 2: AI matching via Claude/Gemini for remaining unmatched items.
+    Step 3: Create new products for anything still unmatched.
+
+    Non-product lines (SHOPPER, SCONTO, etc.) are skipped entirely.
 
     Returns a summary dict with counts of matched and total items processed.
     """
     matcher = ProductMatcher()
     matched = 0
+    skipped_non_product = 0
     total = 0
 
     async with async_session() as session:
@@ -209,13 +247,31 @@ async def backfill_unmatched_receipt_items(user_id: uuid.UUID) -> dict:
         items = result.scalars().all()
         total = len(items)
 
-        # ── Step 1: Fuzzy matching (find_matching_product only, no auto-create) ──
-        still_unmatched: list[PurchaseItem] = []
+        # ── Step 0: Filter non-product items ──
+        product_items: list[PurchaseItem] = []
         for item in items:
+            if _NON_PRODUCT_RE.search(item.external_name):
+                skipped_non_product += 1
+                logger.debug("Skipping non-product: '%s'", item.external_name)
+                continue
+            product_items.append(item)
+
+        if skipped_non_product:
+            logger.info("Skipped %d non-product items", skipped_non_product)
+
+        # ── Step 1: Fuzzy matching with receipt brand expansion ──
+        still_unmatched: list[PurchaseItem] = []
+        for item in product_items:
             try:
+                # Expand receipt abbreviations before matching
+                expanded_name, detected_brand = expand_receipt_brands(
+                    item.external_name
+                )
+                brand = detected_brand or item.brand
+
                 product = await matcher.find_matching_product(
-                    item.external_name,
-                    item.brand,
+                    expanded_name,
+                    brand,
                     session=session,
                 )
                 if product is not None:
@@ -278,11 +334,19 @@ async def backfill_unmatched_receipt_items(user_id: uuid.UUID) -> dict:
                 logger.info("AI matching: %d additional items matched", ai_matched)
 
         # ── Step 3: Create new products for anything still unmatched ──
-        final_unmatched = [it for it in items if it.product_id is None]
+        final_unmatched = [it for it in product_items if it.product_id is None]
         for item in final_unmatched:
             try:
+                # Use expanded name for cleaner product creation
+                expanded_name, detected_brand = expand_receipt_brands(
+                    item.external_name
+                )
                 product = await matcher.create_or_match_product(
-                    {"name": item.external_name, "category": item.category},
+                    {
+                        "name": expanded_name,
+                        "brand": detected_brand or item.brand,
+                        "category": item.category,
+                    },
                     session=session,
                 )
                 item.product_id = product.id
@@ -294,6 +358,202 @@ async def backfill_unmatched_receipt_items(user_id: uuid.UUID) -> dict:
             await session.commit()
 
     logger.info(
-        "Backfill for user %s: %d/%d items matched", user_id, matched, total
+        "Backfill for user %s: %d/%d items matched (%d non-product skipped)",
+        user_id, matched, total, skipped_non_product,
     )
-    return {"matched": matched, "total": total}
+    return {
+        "matched": matched,
+        "total": total,
+        "skipped_non_product": skipped_non_product,
+    }
+
+
+async def rematch_ghost_products(user_id: uuid.UUID) -> dict:
+    """Find and clean up ghost products created by previous backfills.
+
+    Ghost products are identified as:
+    - name == UPPER(name) (all-caps, from receipt OCR)
+    - brand is NULL or empty
+    - short name (< 40 chars, typical receipt line length)
+
+    For each ghost:
+    1. If it's a non-product (SHOPPER, SCONTO, etc.) → unlink items, delete ghost
+    2. Otherwise → expand abbreviations, re-run fuzzy + AI matching
+    3. If a real match is found → reassign items to real product, delete ghost
+    4. Delete orphan ghosts (no items linked)
+
+    Returns summary dict.
+    """
+    matcher = ProductMatcher()
+    rematched = 0
+    deleted_non_product = 0
+    deleted_orphan = 0
+    total_ghosts = 0
+
+    async with async_session() as session:
+        # Find ghost products: all-caps name, no brand, short
+        stmt = select(Product).where(
+            Product.name == func.upper(Product.name),
+            func.length(Product.name) < 40,
+            or_(Product.brand.is_(None), Product.brand == ""),
+        )
+        result = await session.execute(stmt)
+        ghosts: list[Product] = list(result.scalars().all())
+        total_ghosts = len(ghosts)
+        logger.info("Found %d ghost products to process", total_ghosts)
+
+        for ghost in ghosts:
+            # Count linked purchase_items
+            item_count_result = await session.execute(
+                select(func.count(PurchaseItem.id)).where(
+                    PurchaseItem.product_id == ghost.id
+                )
+            )
+            item_count = item_count_result.scalar() or 0
+
+            # 1. Delete orphans (no items linked)
+            if item_count == 0:
+                await session.delete(ghost)
+                deleted_orphan += 1
+                logger.debug("Deleted orphan ghost: '%s'", ghost.name)
+                continue
+
+            # 2. Non-product check
+            if _NON_PRODUCT_RE.search(ghost.name):
+                # Unlink all items
+                await session.execute(
+                    update(PurchaseItem)
+                    .where(PurchaseItem.product_id == ghost.id)
+                    .values(product_id=None)
+                )
+                await session.delete(ghost)
+                deleted_non_product += 1
+                logger.info(
+                    "Deleted non-product ghost '%s' (%d items unlinked)",
+                    ghost.name, item_count,
+                )
+                continue
+
+            # 3. Try to rematch: expand abbreviations, fuzzy match
+            expanded_name, detected_brand = expand_receipt_brands(ghost.name)
+
+            real_product = await matcher.find_matching_product(
+                expanded_name,
+                detected_brand,
+                session=session,
+            )
+
+            # 4. If no fuzzy match, try find_receipt_match (lower threshold)
+            if real_product is None:
+                real_product = await matcher.find_receipt_match(
+                    expanded_name,
+                    session=session,
+                )
+
+            if real_product is not None and real_product.id != ghost.id:
+                # Reassign all items to the real product
+                await session.execute(
+                    update(PurchaseItem)
+                    .where(PurchaseItem.product_id == ghost.id)
+                    .values(product_id=real_product.id)
+                )
+                await session.delete(ghost)
+                rematched += 1
+                logger.info(
+                    "Rematched ghost '%s' -> '%s' [%s] (%d items)",
+                    ghost.name, real_product.name, real_product.brand or "no brand",
+                    item_count,
+                )
+            else:
+                logger.debug(
+                    "Could not rematch ghost '%s' (expanded: '%s')",
+                    ghost.name, expanded_name,
+                )
+
+        await session.commit()
+
+    logger.info(
+        "Ghost cleanup for user %s: %d rematched, %d non-product deleted, "
+        "%d orphans deleted (of %d total ghosts)",
+        user_id, rematched, deleted_non_product, deleted_orphan, total_ghosts,
+    )
+    return {
+        "total_ghosts": total_ghosts,
+        "rematched": rematched,
+        "deleted_non_product": deleted_non_product,
+        "deleted_orphan": deleted_orphan,
+        "remaining": total_ghosts - rematched - deleted_non_product - deleted_orphan,
+    }
+
+
+async def cleanup_ghost_names() -> dict:
+    """Rename remaining ghost products: expand abbreviations, title-case, set brand.
+
+    Targets products where name == UPPER(name) and (brand IS NULL or empty).
+    Does NOT delete or rematch — just cleans up the display name and brand.
+
+    Returns summary dict.
+    """
+    renamed = 0
+    total = 0
+
+    async with async_session() as session:
+        stmt = select(Product).where(
+            Product.name == func.upper(Product.name),
+            func.length(Product.name) < 40,
+            or_(Product.brand.is_(None), Product.brand == ""),
+        )
+        result = await session.execute(stmt)
+        ghosts: list[Product] = list(result.scalars().all())
+        total = len(ghosts)
+
+        for ghost in ghosts:
+            original = ghost.name
+
+            # 1. Expand receipt brand abbreviations
+            expanded, detected_brand = expand_receipt_brands(original)
+
+            # 2. Expand multi-token and single-token abbreviations
+            #    via ProductMatcher's normalize pipeline (but we want display form)
+            #    So we do a lighter cleanup: expand "/" separators, remove weight suffixes
+            expanded = re.sub(r"(\w)/(\w)", r"\1 / \2", expanded)  # N/STRACCETTI → N / STRACCETTI
+
+            # 3. Clean product name (title-case, normalize units)
+            cleaned = ProductMatcher.clean_product_name(
+                expanded, detected_brand, strip_brand=False
+            )
+
+            # 4. Set brand if detected (and not already set)
+            if detected_brand and not ghost.brand:
+                ghost.brand = detected_brand
+
+            # 5. Try to detect brand from full name if still no brand
+            if not ghost.brand:
+                words = cleaned.strip().split()
+                for n in (3, 2, 1):
+                    if len(words) >= n + 1:
+                        candidate = " ".join(words[:n]).lower()
+                        canonical = BRAND_ALIASES.get(candidate)
+                        if canonical:
+                            ghost.brand = canonical
+                            break
+
+            # 6. Try to categorize
+            if not ghost.category or ghost.category == "Supermercato":
+                cat = ProductMatcher.categorize_by_keywords(cleaned, ghost.brand)
+                if cat:
+                    ghost.category = cat
+
+            if cleaned != original:
+                ghost.name = cleaned
+                renamed += 1
+                logger.info(
+                    "Renamed ghost '%s' -> '%s' [brand=%s]",
+                    original, cleaned, ghost.brand or "none",
+                )
+
+        if renamed > 0:
+            await session.commit()
+
+    logger.info("Ghost name cleanup: %d/%d renamed", renamed, total)
+    return {"total": total, "renamed": renamed}
