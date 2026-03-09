@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
-import { Button, IconButton, SegmentedButtons, Text, useTheme } from "react-native-paper";
+import { Button, IconButton, SegmentedButtons, Snackbar, Text, useTheme } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import {
@@ -35,6 +35,7 @@ export default function WatchlistScreen() {
   const [activeTab, setActiveTab] = useState<TabValue>("watchlist");
   const [showCreateList, setShowCreateList] = useState(false);
   const [shareList, setShareList] = useState<ShoppingListMeta | null>(null);
+  const [snackbar, setSnackbar] = useState("");
 
   const {
     data: items,
@@ -59,6 +60,17 @@ export default function WatchlistScreen() {
       queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
       queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
       queryClient.invalidateQueries({ queryKey: ["shoppingLists"] });
+    },
+  });
+
+  const addAllToListMutation = useMutation({
+    mutationFn: (productIds: string[]) =>
+      addToShoppingList({ product_ids: productIds, list_id: activeListId ?? undefined }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
+      queryClient.invalidateQueries({ queryKey: ["shoppingLists"] });
+      setSnackbar(`${items?.length ?? 0} prodotti aggiunti alla spesa`);
     },
   });
 
@@ -101,6 +113,23 @@ export default function WatchlistScreen() {
           />
         </View>
       ) : (
+      <>
+        {items && items.length > 0 && (
+          <View style={styles.bulkBar}>
+            <Button
+              mode="contained"
+              icon="cart-arrow-down"
+              compact
+              onPress={() => addAllToListMutation.mutate(items.map((i) => i.product_id))}
+              loading={addAllToListMutation.isPending}
+              disabled={addAllToListMutation.isPending}
+              style={styles.bulkBtn}
+              labelStyle={{ fontSize: 12 }}
+            >
+              Aggiungi tutto alla spesa ({items.length})
+            </Button>
+          </View>
+        )}
         <FlatList
           data={items}
           keyExtractor={(item) => item.id}
@@ -195,6 +224,10 @@ export default function WatchlistScreen() {
           }
           contentContainerStyle={items?.length === 0 ? styles.emptyContainer : styles.listContent}
         />
+        <Snackbar visible={!!snackbar} onDismiss={() => setSnackbar("")} duration={3000} style={{ backgroundColor: "#1a1a2e" }}>
+          {snackbar}
+        </Snackbar>
+      </>
       )}
     </View>
   );
@@ -231,5 +264,7 @@ const styles = StyleSheet.create({
   alertText: { color: glassColors.greenMedium, fontSize: 10, fontWeight: "bold" },
   emptyTitle: { marginBottom: 8, color: "#1a1a1a" },
   emptyText: { color: "#555", textAlign: "center", marginBottom: 16 },
+  bulkBar: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4 },
+  bulkBtn: { backgroundColor: glassColors.greenDark, borderRadius: 8 },
   listContent: { paddingTop: 12, paddingBottom: 96 },
 });
