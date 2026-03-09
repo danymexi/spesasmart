@@ -341,6 +341,19 @@ export interface CategoryTreeNode {
   children: CategoryChild[];
 }
 
+export interface CatalogHomeCategory {
+  name: string;
+  slug: string;
+  icon: string;
+  count: number;
+  offers: Offer[];
+}
+
+export interface CatalogHomeResponse {
+  featured: Offer[];
+  categories: CatalogHomeCategory[];
+}
+
 export interface AuthResponse {
   access_token: string;
   refresh_token?: string;
@@ -873,6 +886,11 @@ export async function getCategories(): Promise<CategoryInfo[]> {
 
 export async function getCategoriesTree(): Promise<CategoryTreeNode[]> {
   const res = await apiClient.get<CategoryTreeNode[]>("/products/categories/tree");
+  return res.data;
+}
+
+export async function getCatalogHome(): Promise<CatalogHomeResponse> {
+  const res = await apiClient.get<CatalogHomeResponse>("/products/catalog-home");
   return res.data;
 }
 

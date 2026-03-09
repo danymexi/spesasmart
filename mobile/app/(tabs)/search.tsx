@@ -6,8 +6,8 @@ import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   addToShoppingList,
-  getBestOffers,
   getCatalogGrouped,
+  getCatalogHome,
   getChains,
   getWatchlistIds,
   addToWatchlist,
@@ -16,8 +16,7 @@ import {
 } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import ExpandableCatalogCard from "../../components/ExpandableCatalogCard";
-import OfferCard from "../../components/OfferCard";
-import CategoryPicker from "../../components/CategoryPicker";
+import CatalogHome from "../../components/CatalogHome";
 import { SkeletonList } from "../../components/Skeleton";
 import {
   glassChip,
@@ -63,11 +62,11 @@ export default function CatalogScreen() {
   // Are we browsing (have any filter/search active)?
   const isBrowsing = !!debouncedQuery || !!selectedCategory || !!selectedChain;
 
-  // Best offers for empty state
-  const { data: bestOffers } = useQuery({
-    queryKey: ["bestOffers", 8],
-    queryFn: () => getBestOffers(8),
-    enabled: !isBrowsing,
+  // Catalog home data for browse-mode category chips
+  const { data: catalogHomeData } = useQuery({
+    queryKey: ["catalogHome"],
+    queryFn: getCatalogHome,
+    staleTime: 300_000,
   });
 
   // Local search from preloaded catalog (instant results while API loads)
@@ -266,39 +265,38 @@ export default function CatalogScreen() {
         ))}
       </View>
 
-      {/* Category picker (tiles when idle, chips when browsing) */}
+      {/* Idle: vertical feed — Browsing: category chips + results */}
       {!isBrowsing ? (
-        <>
-          <CategoryPicker
-            selectedCategory={selectedCategory}
-            onSelectCategory={setSelectedCategory}
-          />
-          {/* Best offers empty state */}
-          {bestOffers && bestOffers.length > 0 && (
-            <>
-              <Text variant="titleMedium" style={[styles.bestOffersTitle, { color: glass.colors.primary }]}>
-                Migliori offerte
-              </Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.bestOffersList}
-              >
-                {bestOffers.map((offer) => (
-                  <View key={offer.id} style={styles.bestOfferCard}>
-                    <OfferCard offer={offer} compact />
-                  </View>
-                ))}
-              </ScrollView>
-            </>
-          )}
-        </>
+        <CatalogHome onSelectCategory={setSelectedCategory} />
       ) : (
         <>
-          <CategoryPicker
-            selectedCategory={selectedCategory}
-            onSelectCategory={setSelectedCategory}
-          />
+          {/* Category chips from catalogHome cache */}
+          {catalogHomeData && catalogHomeData.categories.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+              style={{ flexGrow: 0 }}
+            >
+              {catalogHomeData.categories.map((cat) => (
+                <Chip
+                  key={cat.slug}
+                  selected={selectedCategory === cat.name}
+                  onPress={() =>
+                    setSelectedCategory(selectedCategory === cat.name ? null : cat.name)
+                  }
+                  style={[
+                    styles.filterChip,
+                    glass.chip,
+                    selectedCategory === cat.name && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }],
+                  ]}
+                  compact
+                >
+                  {cat.name}
+                </Chip>
+              ))}
+            </ScrollView>
+          )}
 
           {/* Results count */}
           {rawResults.length > 0 && (
@@ -363,14 +361,10 @@ const styles = StyleSheet.create({
   } as any,
   chipRow: { flexDirection: "row", paddingHorizontal: 12, paddingVertical: 4, gap: 6 },
   chipSelected: { backgroundColor: glassColors.greenAccent },
-  categoryRow: { paddingHorizontal: 12, paddingVertical: 4, gap: 6 },
   resultCount: { paddingHorizontal: 16, paddingVertical: 4, color: "#444" },
   loader: { marginTop: 40 },
   footerLoader: { paddingVertical: 16 },
   emptyText: { textAlign: "center", marginTop: 40, color: "#555", paddingHorizontal: 20 },
-  bestOffersTitle: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, fontWeight: "700" },
-  bestOffersList: { paddingHorizontal: 12 },
-  bestOfferCard: { width: 260, marginRight: 12 },
   listContent: { paddingBottom: 96 },
   snackbar: { marginBottom: 80 },
   separator: {

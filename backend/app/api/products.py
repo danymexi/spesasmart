@@ -337,7 +337,11 @@ async def get_catalog_products(
     )
 
     if category:
-        query = query.where(Product.category.ilike(category))
+        variants = _reverse_category_lookup(category)
+        if len(variants) > 1:
+            query = query.where(or_(*[Product.category.ilike(v) for v in variants]))
+        else:
+            query = query.where(Product.category.ilike(category))
     if brand:
         query = query.where(Product.brand.ilike(f"%{brand}%"))
     if q:
@@ -762,6 +766,215 @@ async def _find_similar_ids(product: Product, db: AsyncSession) -> list:
     return product_ids
 
 
+# ── Category normalisation for catalog-home ──────────────────────────────────
+
+# Maps raw category names (lowercased) → canonical display name.
+# Categories that map to the same canonical name are merged.
+_CATEGORY_NORM: dict[str, str] = {
+    "salumi e formaggi": "Salumi e Formaggi",
+    "salumi e Formaggi": "Salumi e Formaggi",
+    "igiene personale": "Igiene e Cura Persona",
+    "igiene e cura persona": "Igiene e Cura Persona",
+    "pulizia casa": "Pulizia Casa",
+    "cura della casa": "Pulizia Casa",
+    "frutta e verdura": "Frutta e Verdura",
+    "benessere & intolleranze": "Benessere e Intolleranze",
+    "dolci, colazione e merenda": "Dolci e Snack",
+    "dolci e snack": "Dolci e Snack",
+    "olio, condimenti e conserve": "Condimenti e Conserve",
+    "condimenti e conserve": "Condimenti e Conserve",
+    "animali domestici": "Pet Care",
+    "pet care": "Pet Care",
+    "latte, burro, uova e yogurt": "Latticini",
+    "latticini": "Latticini",
+    "surgelati e gelati": "Surgelati",
+    "surgelati": "Surgelati",
+    "birre e liquori": "Alcolici",
+    "vini, spumanti e champagne": "Alcolici",
+    "alcolici": "Alcolici",
+    "acqua, bibite, succhi e aperitivi": "Bevande",
+    "bevande": "Bevande",
+    "pasta e riso, farina e preparati": "Pasta e Riso",
+    "pasta e riso": "Pasta e Riso",
+    "pane e snack salati": "Pane e Cereali",
+    "pane e cereali": "Pane e Cereali",
+    "caffè, infusi e zucchero": "Caffe e Te",
+    "caffe e te": "Caffe e Te",
+    "carne e pesce": "Carne",
+    "carne": "Carne",
+    "pesce": "Pesce",
+    "gastronomia": "Gastronomia",
+    "neonati e infanzia": "Neonati e Infanzia",
+}
+
+# Categories to exclude (catch-all, seasonal, non-food)
+_CATEGORY_EXCLUDE = {
+    "supermercato", "altro", "pasqua", "videogiochi", "console",
+    "action figure", "cancelleria", "giocattoli", "elettronica",
+    "telefonia", "informatica", "giardinaggio", "auto e moto",
+}
+
+# MaterialCommunityIcons name per canonical category
+_CATEGORY_ICONS: dict[str, str] = {
+    "Carne": "food-steak",
+    "Latticini": "cow",
+    "Bevande": "bottle-soda-classic",
+    "Surgelati": "snowflake",
+    "Frutta e Verdura": "fruit-watermelon",
+    "Pesce": "fish",
+    "Dolci e Snack": "candy",
+    "Igiene e Cura Persona": "hand-wash",
+    "Pulizia Casa": "spray-bottle",
+    "Pasta e Riso": "pasta",
+    "Condimenti e Conserve": "shaker",
+    "Salumi e Formaggi": "cheese",
+    "Caffe e Te": "coffee",
+    "Alcolici": "glass-wine",
+    "Pane e Cereali": "bread-slice",
+    "Pet Care": "paw",
+    "Gastronomia": "food-turkey",
+    "Benessere e Intolleranze": "leaf",
+    "Neonati e Infanzia": "baby-carriage",
+}
+
+
+def _normalize_category(raw: str | None) -> str | None:
+    """Map a raw product category to its canonical display name."""
+    if not raw:
+        return None
+    key = raw.lower().strip()
+    if key in _CATEGORY_EXCLUDE:
+        return None
+    canonical = _CATEGORY_NORM.get(key)
+    if canonical:
+        return canonical
+    # If raw name matches a canonical name directly (case-insensitive), keep it
+    for canon in _CATEGORY_ICONS:
+        if key == canon.lower():
+            return canon
+    return raw.strip()  # keep as-is if not mapped
+
+
+def _reverse_category_lookup(canonical: str) -> list[str]:
+    """Return all raw category keys (lowercased) that map to the given canonical name."""
+    variants = []
+    for raw_key, canon in _CATEGORY_NORM.items():
+        if canon == canonical:
+            variants.append(raw_key)
+    # Also include the canonical name itself (lowercased)
+    variants.append(canonical.lower())
+    return list(set(variants))
+
+
+class CatalogHomeCategoryResponse(BaseModel):
+    name: str
+    slug: str
+    icon: str
+    count: int
+    offers: list  # Will contain OfferResponse dicts
+
+
+class CatalogHomeResponse(BaseModel):
+    featured: list  # Will contain OfferResponse dicts
+    categories: list[CatalogHomeCategoryResponse]
+
+
+@router.get("/catalog-home")
+async def get_catalog_home(
+    db: AsyncSession = Depends(get_db),
+):
+    """Home feed for catalog tab: featured offers + per-category sections."""
+    from app.api.offers import OfferResponse, _build_offer_responses, _get_previous_prices
+
+    today = date.today()
+
+    # ── 1. Aggregate product counts by normalised category ──
+    cat_query = select(Product.category, func.count()).group_by(Product.category)
+    cat_result = await db.execute(cat_query)
+    cat_counts: dict[str, int] = defaultdict(int)
+    cat_raw_variants: dict[str, set[str]] = defaultdict(set)  # canonical → set of raw names
+
+    for raw_cat, cnt in cat_result.all():
+        canonical = _normalize_category(raw_cat)
+        if not canonical:
+            continue
+        cat_counts[canonical] += cnt
+        cat_raw_variants[canonical].add(raw_cat)
+
+    # Top 12 categories with >50 products
+    top_categories = sorted(
+        [(name, count) for name, count in cat_counts.items() if count > 50],
+        key=lambda x: -x[1],
+    )[:12]
+
+    # ── 2. Featured offers (top 8 by discount) ──
+    feat_query = (
+        select(Offer)
+        .options(joinedload(Offer.product), joinedload(Offer.chain))
+        .where(
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+            Offer.discount_pct.is_not(None),
+        )
+        .order_by(Offer.discount_pct.desc())
+        .limit(8)
+    )
+    feat_result = await db.execute(feat_query)
+    featured_offers = feat_result.unique().scalars().all()
+
+    feat_pids = [o.product_id for o in featured_offers]
+    feat_dates = {o.product_id: o.valid_from for o in featured_offers if o.valid_from}
+    feat_prev = await _get_previous_prices(feat_pids, feat_dates, db)
+    featured_data = _build_offer_responses(featured_offers, feat_prev)
+
+    # ── 3. Per-category top 6 offers ──
+    categories_data = []
+    for cat_name, cat_count in top_categories:
+        # Get all raw variants for this normalised category
+        raw_variants = cat_raw_variants.get(cat_name, {cat_name})
+        variant_filters = [Product.category.ilike(v) for v in raw_variants]
+
+        cat_offer_query = (
+            select(Offer)
+            .options(joinedload(Offer.product), joinedload(Offer.chain))
+            .join(Offer.product)
+            .where(
+                Offer.valid_from <= today,
+                Offer.valid_to >= today,
+                Offer.discount_pct.is_not(None),
+                or_(*variant_filters),
+            )
+            .order_by(Offer.discount_pct.desc())
+            .limit(6)
+        )
+        cat_offer_result = await db.execute(cat_offer_query)
+        cat_offers = cat_offer_result.unique().scalars().all()
+
+        if not cat_offers:
+            continue
+
+        co_pids = [o.product_id for o in cat_offers]
+        co_dates = {o.product_id: o.valid_from for o in cat_offers if o.valid_from}
+        co_prev = await _get_previous_prices(co_pids, co_dates, db)
+        offers_data = _build_offer_responses(cat_offers, co_prev)
+
+        slug = cat_name.lower().replace(" ", "-").replace("'", "")
+        icon = _CATEGORY_ICONS.get(cat_name, "tag-outline")
+
+        categories_data.append({
+            "name": cat_name,
+            "slug": slug,
+            "icon": icon,
+            "count": cat_count,
+            "offers": [o.model_dump(mode="json") for o in offers_data],
+        })
+
+    return {
+        "featured": [o.model_dump(mode="json") for o in featured_data],
+        "categories": categories_data,
+    }
+
+
 @router.get("/catalog-grouped")
 async def get_catalog_grouped(
     category: str | None = Query(None),
@@ -790,7 +1003,14 @@ async def get_catalog_grouped(
         Product.id, Product.name, Product.brand, Product.category, Product.barcode
     )
     if category:
-        prod_query = prod_query.where(Product.category.ilike(category))
+        # Check if this is a normalised category name → search all raw variants
+        variants = _reverse_category_lookup(category)
+        if len(variants) > 1:
+            prod_query = prod_query.where(
+                or_(*[Product.category.ilike(v) for v in variants])
+            )
+        else:
+            prod_query = prod_query.where(Product.category.ilike(category))
     if brand:
         prod_query = prod_query.where(Product.brand.ilike(f"%{brand}%"))
     if q:
