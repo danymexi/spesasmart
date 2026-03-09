@@ -4,6 +4,7 @@ import { Button, Modal, Portal, Text, TextInput } from "react-native-paper";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { importTextToList, type ImportedItem } from "../services/api";
 import { glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface ImportListModalProps {
   visible: boolean;
@@ -12,6 +13,7 @@ interface ImportListModalProps {
 }
 
 export default function ImportListModal({ visible, onDismiss, listId }: ImportListModalProps) {
+  const { colors } = useGlassTheme();
   const queryClient = useQueryClient();
   const [text, setText] = useState("");
   const [results, setResults] = useState<ImportedItem[] | null>(null);
@@ -33,11 +35,11 @@ export default function ImportListModal({ visible, onDismiss, listId }: ImportLi
 
   return (
     <Portal>
-      <Modal visible={visible} onDismiss={handleClose} contentContainerStyle={styles.modal}>
-        <Text variant="titleMedium" style={styles.title}>
+      <Modal visible={visible} onDismiss={handleClose} contentContainerStyle={[styles.modal, { backgroundColor: colors.surface }]}>
+        <Text variant="titleMedium" style={[styles.title, { color: colors.primary }]}>
           Importa lista da testo
         </Text>
-        <Text variant="bodySmall" style={styles.hint}>
+        <Text variant="bodySmall" style={[styles.hint, { color: colors.textMuted }]}>
           Scrivi o incolla una lista, ad esempio:{"\n"}
           "latte, pane, 2 yogurt, pasta, pomodori"
         </Text>
@@ -62,7 +64,7 @@ export default function ImportListModal({ visible, onDismiss, listId }: ImportLi
                 onPress={() => importMutation.mutate()}
                 loading={importMutation.isPending}
                 disabled={!text.trim() || importMutation.isPending}
-                style={styles.importBtn}
+                style={[styles.importBtn, { backgroundColor: colors.primary }]}
               >
                 Importa
               </Button>
@@ -70,29 +72,29 @@ export default function ImportListModal({ visible, onDismiss, listId }: ImportLi
           </>
         ) : (
           <>
-            <Text variant="bodyMedium" style={styles.resultSummary}>
+            <Text variant="bodyMedium" style={[styles.resultSummary, { color: colors.primary }]}>
               {results.length} articoli importati
             </Text>
             <View style={styles.resultList}>
               {results.map((item, i) => (
-                <View key={i} style={styles.resultItem}>
+                <View key={i} style={[styles.resultItem, { borderBottomColor: colors.divider }]}>
                   <View style={styles.resultItemInfo}>
-                    <Text variant="bodyMedium" style={styles.resultItemName}>
+                    <Text variant="bodyMedium" style={[styles.resultItemName, { color: colors.textPrimary }]}>
                       {item.name}{item.quantity > 1 ? ` x${item.quantity}` : ""}
                     </Text>
                     {item.matched_product_name && (
-                      <Text variant="labelSmall" style={styles.matchBadge}>
+                      <Text variant="labelSmall" style={[styles.matchBadge, { color: colors.primary }]}>
                         Trovato: {item.matched_product_name}
                       </Text>
                     )}
                   </View>
-                  <Text style={item.matched_product_id ? styles.matchDot : styles.noMatchDot}>
+                  <Text style={item.matched_product_id ? [styles.matchDot, { color: colors.primary }] : [styles.noMatchDot, { color: colors.textMuted }]}>
                     {item.matched_product_id ? "\u2713" : "\u2022"}
                   </Text>
                 </View>
               ))}
             </View>
-            <Button mode="contained" onPress={handleClose} style={styles.doneBtn}>
+            <Button mode="contained" onPress={handleClose} style={[styles.doneBtn, { backgroundColor: colors.primary }]}>
               Fatto
             </Button>
           </>

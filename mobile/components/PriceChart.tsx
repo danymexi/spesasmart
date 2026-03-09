@@ -4,6 +4,7 @@ import { Chip, Text } from "react-native-paper";
 import { LineChart } from "react-native-chart-kit";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { glassPanel, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface PricePoint {
   date: string;
@@ -58,8 +59,10 @@ function computeMovingAverage(values: number[], window: number): (number | null)
   });
 }
 
-function getTrendText(prices: number[]): { text: string; color: string; icon: "trending-down" | "trending-up" | "trending-neutral" } {
-  if (prices.length < 3) return { text: "Dati insufficienti", color: "#888", icon: "trending-neutral" };
+type TrendType = "success" | "error" | "neutral";
+
+function getTrendText(prices: number[]): { text: string; type: TrendType; icon: "trending-down" | "trending-up" | "trending-neutral" } {
+  if (prices.length < 3) return { text: "Dati insufficienti", type: "neutral", icon: "trending-neutral" };
 
   // Check last 3 data points
   const recent = prices.slice(-3);
@@ -74,7 +77,7 @@ function getTrendText(prices: number[]): { text: string; color: string; icon: "t
   }
 
   if (allDecreasing && streak >= 2) {
-    return { text: `In calo da ${streak} settimane`, color: "#2E7D32", icon: "trending-down" };
+    return { text: `In calo da ${streak} settimane`, type: "success", icon: "trending-down" };
   }
 
   let upStreak = 0;
@@ -84,13 +87,15 @@ function getTrendText(prices: number[]): { text: string; color: string; icon: "t
   }
 
   if (allIncreasing && upStreak >= 2) {
-    return { text: `In aumento da ${upStreak} settimane`, color: "#C62828", icon: "trending-up" };
+    return { text: `In aumento da ${upStreak} settimane`, type: "error", icon: "trending-up" };
   }
 
-  return { text: "Prezzo stabile", color: "#666", icon: "trending-neutral" };
+  return { text: "Prezzo stabile", type: "neutral", icon: "trending-neutral" };
 }
 
 export default function PriceChart({ data }: Props) {
+  const glass = useGlassTheme();
+  const { colors, isDark } = glass;
   const hasPpu = data.some((p) => p.price_per_unit != null);
   const [viewMode, setViewMode] = useState<ViewMode>(hasPpu ? "price_per_unit" : "price");
 
@@ -149,7 +154,7 @@ export default function PriceChart({ data }: Props) {
 
     datasets.push({
       data: maValues,
-      color: () => "rgba(0,0,0,0.3)",
+      color: () => isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)",
       strokeWidth: 1,
     });
 
@@ -161,12 +166,12 @@ export default function PriceChart({ data }: Props) {
     const trend = getTrendText(allPrices.filter((v) => v > 0));
 
     return { labels, datasets, chains, trend, minPrice, minIndex, allPrices };
-  }, [data, viewMode]);
+  }, [data, viewMode, isDark]);
 
   if (!chartData) {
     return (
       <View style={styles.empty}>
-        <Text variant="bodyMedium" style={styles.emptyText}>
+        <Text variant="bodyMedium" style={[styles.emptyText, { color: colors.textMuted }]}>
           Dati insufficienti per il grafico
         </Text>
       </View>
@@ -186,8 +191,17 @@ export default function PriceChart({ data }: Props) {
     i % showEvery === 0 ? l : ""
   );
 
+  const trendColor =
+    chartData.trend.type === "success"
+      ? colors.success
+      : chartData.trend.type === "error"
+        ? colors.error
+        : colors.textMuted;
+
+  const maColor = isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)";
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, glass.panel]}>
       {/* Toggle chips */}
       {hasPpu && (
         <View style={styles.toggleRow}>
@@ -215,12 +229,12 @@ export default function PriceChart({ data }: Props) {
         <MaterialCommunityIcons
           name={chartData.trend.icon}
           size={18}
-          color={chartData.trend.color}
+          color={trendColor}
         />
-        <Text variant="bodySmall" style={[styles.trendText, { color: chartData.trend.color }]}>
+        <Text variant="bodySmall" style={[styles.trendText, { color: trendColor }]}>
           {chartData.trend.text}
         </Text>
-        <Text variant="labelSmall" style={styles.minText}>
+        <Text variant="labelSmall" style={[styles.minText, { color: colors.textMuted }]}>
           Min storico: {"\u20AC"}{chartData.minPrice.toFixed(2)}
         </Text>
       </View>
@@ -236,15 +250,18 @@ export default function PriceChart({ data }: Props) {
         yAxisSuffix={yAxisSuffix}
         chartConfig={{
           backgroundColor: "transparent",
-          backgroundGradientFrom: "rgba(255,255,255,0.01)",
-          backgroundGradientTo: "rgba(255,255,255,0.01)",
+          backgroundGradientFrom: isDark ? "rgba(30,30,46,0.01)" : "rgba(255,255,255,0.01)",
+          backgroundGradientTo: isDark ? "rgba(30,30,46,0.01)" : "rgba(255,255,255,0.01)",
           decimalPlaces: 2,
           color: (opacity = 1) => `rgba(100, 100, 100, ${opacity})`,
-          labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity * 0.6})`,
+          labelColor: (opacity = 1) =>
+            isDark
+              ? `rgba(255, 255, 255, ${opacity * 0.6})`
+              : `rgba(0, 0, 0, ${opacity * 0.6})`,
           propsForDots: { r: "3", strokeWidth: "1" },
           propsForBackgroundLines: {
             strokeDasharray: "",
-            stroke: "rgba(0,0,0,0.06)",
+            stroke: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
           },
         }}
         bezier
@@ -266,8 +283,8 @@ export default function PriceChart({ data }: Props) {
           </View>
         ))}
         <View style={styles.legendItem}>
-          <View style={[styles.legendLine]} />
-          <Text variant="labelSmall" style={styles.legendMa}>Media mobile</Text>
+          <View style={[styles.legendLine, { borderColor: maColor }]} />
+          <Text variant="labelSmall" style={[styles.legendMa, { color: colors.textMuted }]}>Media mobile</Text>
         </View>
       </View>
     </View>

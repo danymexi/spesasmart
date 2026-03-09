@@ -21,6 +21,7 @@ interface PreferredStore {
 interface AppState {
   // Auth
   accessToken: string | null;
+  refreshToken: string | null;
   userEmail: string | null;
   isLoggedIn: boolean;
   isGuest: boolean;
@@ -62,8 +63,9 @@ interface AppState {
   availableChains: Chain[];
 
   // Actions
-  setAuth: (token: string, userId: string, email: string, isGuest?: boolean) => void;
-  setGuest: (token: string, userId: string) => void;
+  setAuth: (token: string, userId: string, email: string, isGuest?: boolean, refreshToken?: string) => void;
+  setGuest: (token: string, userId: string, refreshToken?: string) => void;
+  setRefreshToken: (token: string | null) => void;
   logout: () => void;
   setUserId: (id: string) => void;
   setPushToken: (token: string | null) => void;
@@ -104,6 +106,7 @@ interface AppState {
 
 const initialState = {
   accessToken: null as string | null,
+  refreshToken: null as string | null,
   userEmail: null as string | null,
   isLoggedIn: false,
   isGuest: false,
@@ -146,15 +149,18 @@ export const useAppStore = create<AppState>()(
 
       // ── Auth actions ──────────────────────────────────────────────────
 
-      setAuth: (token: string, userId: string, email: string, isGuest?: boolean) =>
-        set({ accessToken: token, userId, userEmail: email, isLoggedIn: true, isGuest: isGuest ?? false }),
+      setAuth: (token: string, userId: string, email: string, isGuest?: boolean, refreshToken?: string) =>
+        set({ accessToken: token, refreshToken: refreshToken ?? null, userId, userEmail: email, isLoggedIn: true, isGuest: isGuest ?? false }),
 
-      setGuest: (token: string, userId: string) =>
-        set({ accessToken: token, userId, userEmail: null, isLoggedIn: true, isGuest: true }),
+      setGuest: (token: string, userId: string, refreshToken?: string) =>
+        set({ accessToken: token, refreshToken: refreshToken ?? null, userId, userEmail: null, isLoggedIn: true, isGuest: true }),
+
+      setRefreshToken: (token: string | null) => set({ refreshToken: token }),
 
       logout: () =>
         set({
           accessToken: null,
+          refreshToken: null,
           userEmail: null,
           isLoggedIn: false,
           isGuest: false,
@@ -297,6 +303,7 @@ export const useAppStore = create<AppState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         accessToken: state.accessToken,
+        refreshToken: state.refreshToken,
         userEmail: state.userEmail,
         isLoggedIn: state.isLoggedIn,
         isGuest: state.isGuest,

@@ -7,13 +7,14 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import Chain, Offer, Product, ShoppingList, ShoppingListItem, ShoppingListItemProduct, UserBrand, UserProfile, UserStore, UserWatchlist
+from app.models.purchase import PurchaseOrder
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -179,6 +180,76 @@ async def update_me(
     return user
 
 
+# --- Budget ---
+
+class BudgetResponse(BaseModel):
+    monthly_budget: float | None
+    spent_this_month: float
+    remaining: float | None
+    progress_pct: float | None
+
+
+class BudgetSetRequest(BaseModel):
+    monthly_budget: float | None
+
+
+@router.get("/me/budget", response_model=BudgetResponse)
+async def get_budget(
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the user's monthly budget and spending progress."""
+    today = date.today()
+    first_of_month = today.replace(day=1)
+
+    spent_result = await db.execute(
+        select(func.coalesce(func.sum(PurchaseOrder.total_amount), 0)).where(
+            PurchaseOrder.user_id == user.id,
+            PurchaseOrder.order_date >= first_of_month,
+        )
+    )
+    spent = float(spent_result.scalar() or 0)
+
+    budget = float(user.monthly_budget) if user.monthly_budget else None
+    return BudgetResponse(
+        monthly_budget=budget,
+        spent_this_month=round(spent, 2),
+        remaining=round(budget - spent, 2) if budget else None,
+        progress_pct=round((spent / budget) * 100, 1) if budget and budget > 0 else None,
+    )
+
+
+@router.put("/me/budget", response_model=BudgetResponse)
+async def set_budget(
+    data: BudgetSetRequest,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set or clear the monthly budget."""
+    from decimal import Decimal
+    user.monthly_budget = Decimal(str(data.monthly_budget)) if data.monthly_budget is not None else None
+    await db.flush()
+
+    # Return updated budget info
+    today = date.today()
+    first_of_month = today.replace(day=1)
+    spent_result = await db.execute(
+        select(func.coalesce(func.sum(PurchaseOrder.total_amount), 0)).where(
+            PurchaseOrder.user_id == user.id,
+            PurchaseOrder.order_date >= first_of_month,
+        )
+    )
+    spent = float(spent_result.scalar() or 0)
+    budget = float(user.monthly_budget) if user.monthly_budget else None
+
+    return BudgetResponse(
+        monthly_budget=budget,
+        spent_this_month=round(spent, 2),
+        remaining=round(budget - spent, 2) if budget else None,
+        progress_pct=round((spent / budget) * 100, 1) if budget and budget > 0 else None,
+    )
+
+
 # --- Watchlist ---
 
 @router.get("/me/watchlist", response_model=list[WatchlistItemResponse])
@@ -192,23 +263,48 @@ async def get_watchlist(
         .where(UserWatchlist.user_id == user.id)
     )
     items = result.unique().scalars().all()
+    if not items:
+        return []
 
     today = date.today()
+    product_ids = [item.product_id for item in items]
+
+    # Batch query: best offer per product using window function
+    from sqlalchemy import over, literal_column
+    rn = func.row_number().over(
+        partition_by=Offer.product_id,
+        order_by=Offer.offer_price,
+    ).label("rn")
+    ranked_sq = (
+        select(
+            Offer.product_id,
+            Offer.offer_price,
+            Chain.name.label("chain_name"),
+            rn,
+        )
+        .join(Chain, Offer.chain_id == Chain.id)
+        .where(
+            Offer.product_id.in_(product_ids),
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+        )
+        .subquery()
+    )
+    best_result = await db.execute(
+        select(
+            ranked_sq.c.product_id,
+            ranked_sq.c.offer_price,
+            ranked_sq.c.chain_name,
+        ).where(ranked_sq.c.rn == 1)
+    )
+    best_map = {
+        str(row.product_id): (row.offer_price, row.chain_name)
+        for row in best_result.all()
+    }
+
     response = []
     for item in items:
-        offer_result = await db.execute(
-            select(Offer)
-            .options(joinedload(Offer.chain))
-            .where(
-                Offer.product_id == item.product_id,
-                Offer.valid_from <= today,
-                Offer.valid_to >= today,
-            )
-            .order_by(Offer.offer_price)
-            .limit(1)
-        )
-        best = offer_result.unique().scalar_one_or_none()
-
+        best = best_map.get(str(item.product_id))
         response.append(
             WatchlistItemResponse(
                 id=item.id,
@@ -217,8 +313,8 @@ async def get_watchlist(
                 brand=item.product.brand if item.product else None,
                 target_price=item.target_price,
                 notify_any_offer=item.notify_any_offer,
-                best_current_price=best.offer_price if best else None,
-                best_chain=best.chain.name if best and best.chain else None,
+                best_current_price=best[0] if best else None,
+                best_chain=best[1] if best else None,
             )
         )
     return response
@@ -324,7 +420,7 @@ async def update_preferred_chains(
     db: AsyncSession = Depends(get_db),
 ):
     """Set the user's preferred chain slugs."""
-    valid_slugs = {"esselunga", "lidl", "coop", "iperal", "carrefour", "conad", "eurospin", "aldi", "md", "penny", "pam"}
+    valid_slugs = {"esselunga", "lidl", "coop", "iperal", "carrefour", "conad", "eurospin", "aldi", "md-discount", "penny", "pam"}
     filtered = [c for c in data.chains if c in valid_slugs]
     user.preferred_chains = ",".join(filtered) if filtered else None
     await db.flush()

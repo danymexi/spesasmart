@@ -6,6 +6,7 @@ import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getUserDeals, type UserDeal } from "../services/api";
 import { glassCard, glassColors, glassPanel, productImage, imagePlaceholder } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface GroupedDeal {
   product_id: string;
@@ -56,6 +57,8 @@ function groupDealsByProduct(deals: UserDeal[]): GroupedDeal[] {
 }
 
 export default function PersonalDeals() {
+  const glass = useGlassTheme();
+  const { colors } = glass;
   const { data: deals, isLoading } = useQuery({
     queryKey: ["userDeals"],
     queryFn: getUserDeals,
@@ -74,7 +77,7 @@ export default function PersonalDeals() {
 
   return (
     <View style={styles.section}>
-      <Text variant="titleLarge" style={styles.sectionTitle}>
+      <Text variant="titleLarge" style={[styles.sectionTitle, { color: colors.primary }]}>
         Le Tue Offerte {hasDeals ? `(${grouped.length})` : ""}
       </Text>
 
@@ -84,22 +87,22 @@ export default function PersonalDeals() {
             <DealCard key={group.product_id} group={group} />
           ))}
           <View style={styles.ctaContainer}>
-            <Text variant="bodySmall" style={styles.ctaText}>
+            <Text variant="bodySmall" style={[styles.ctaText, { color: colors.textMuted }]}>
               Vuoi monitorare altri prodotti?
             </Text>
             <Button
               mode="text"
               compact
               onPress={() => router.push("/(tabs)/search")}
-              textColor={glassColors.greenDark}
+              textColor={colors.primary}
             >
               Sfoglia il catalogo
             </Button>
           </View>
         </>
       ) : (
-        <View style={styles.emptyCard}>
-          <Text variant="bodyMedium" style={styles.emptyText}>
+        <View style={[styles.emptyCard, glass.card]}>
+          <Text variant="bodyMedium" style={[styles.emptyText, { color: colors.textMuted }]}>
             Nessuna offerta per i tuoi prodotti questa settimana
           </Text>
           <Button
@@ -117,11 +120,13 @@ export default function PersonalDeals() {
 }
 
 function DealCard({ group }: { group: GroupedDeal }) {
+  const glass = useGlassTheme();
+  const { colors } = glass;
   const bestPrice = Math.min(...group.offers.map((o) => o.offer_price));
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, glass.card]}
       onPress={() => router.push(`/product/${group.product_id}`)}
       activeOpacity={0.7}
     >
@@ -134,16 +139,16 @@ function DealCard({ group }: { group: GroupedDeal }) {
           />
         ) : (
           <View style={[styles.dealImage, styles.dealImagePlaceholder]}>
-            <MaterialCommunityIcons name="food-variant" size={20} color="#ccc" />
+            <MaterialCommunityIcons name="food-variant" size={20} color={colors.textMuted} />
           </View>
         )}
 
         <View style={styles.dealInfo}>
-          <Text variant="titleSmall" numberOfLines={1} style={styles.productName}>
+          <Text variant="titleSmall" numberOfLines={1} style={[styles.productName, { color: colors.textPrimary }]}>
             {group.product_name}
           </Text>
           {group.brand && (
-            <Text variant="bodySmall" style={styles.brand}>
+            <Text variant="bodySmall" style={[styles.brand, { color: colors.textSecondary }]}>
               {group.brand}
             </Text>
           )}
@@ -159,30 +164,31 @@ function DealCard({ group }: { group: GroupedDeal }) {
               key={offer.chain_name}
               style={[
                 styles.chainPriceCell,
-                isBest && styles.chainPriceCellBest,
+                { backgroundColor: colors.subtleBg },
+                isBest && [styles.chainPriceCellBest, { backgroundColor: colors.primarySubtle }],
               ]}
             >
               <Text
                 variant="labelSmall"
-                style={[styles.chainLabel, isBest && styles.chainLabelBest]}
+                style={[styles.chainLabel, { color: colors.textSecondary }, isBest && [styles.chainLabelBest, { color: colors.primary }]]}
                 numberOfLines={1}
               >
                 {offer.chain_name}
               </Text>
               <Text
                 variant="titleMedium"
-                style={[styles.offerPrice, isBest && styles.offerPriceBest]}
+                style={[styles.offerPrice, { color: colors.primary }, isBest && styles.offerPriceBest]}
               >
                 {"\u20AC"}{Number(offer.offer_price).toFixed(2)}
               </Text>
               {offer.original_price && (
-                <Text variant="bodySmall" style={styles.originalPrice}>
+                <Text variant="bodySmall" style={[styles.originalPrice, { color: colors.textMuted }]}>
                   {"\u20AC"}{Number(offer.original_price).toFixed(2)}
                 </Text>
               )}
               {offer.discount_pct && (
-                <View style={[styles.discountBadge, isBest && styles.discountBadgeBest]}>
-                  <Text style={[styles.discountText, isBest && styles.discountTextBest]}>
+                <View style={[styles.discountBadge, { backgroundColor: colors.accentSubtle }, isBest && [styles.discountBadgeBest, { backgroundColor: colors.primarySubtle }]]}>
+                  <Text style={[styles.discountText, { color: colors.accent }, isBest && [styles.discountTextBest, { color: colors.primary }]]}>
                     -{Number(offer.discount_pct).toFixed(0)}%
                   </Text>
                 </View>

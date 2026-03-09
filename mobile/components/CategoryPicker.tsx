@@ -4,6 +4,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { getCategoriesTree, type CategoryTreeNode } from "../services/api";
 import { glassCard, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface Props {
   selectedCategory: string | null;
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function CategoryPicker({ selectedCategory, onSelectCategory }: Props) {
+  const { colors } = useGlassTheme();
   const { data: tree } = useQuery({
     queryKey: ["categoriesTree"],
     queryFn: getCategoriesTree,
@@ -33,7 +35,7 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory }: P
         )}
         contentContainerStyle={styles.tileGrid}
         ListHeaderComponent={
-          <Text style={styles.gridTitle}>Categorie</Text>
+          <Text style={[styles.gridTitle, { color: colors.primary }]}>Categorie</Text>
         }
       />
     );
@@ -54,7 +56,11 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory }: P
             onPress={() =>
               onSelectCategory(selectedCategory === item.name ? null : item.name)
             }
-            style={[styles.chip, selectedCategory === item.name && styles.chipSelected]}
+            style={[
+              styles.chip,
+              { backgroundColor: colors.subtleBg },
+              selectedCategory === item.name && { backgroundColor: colors.primarySubtle },
+            ]}
             compact
           >
             {item.name} ({item.count})
@@ -73,7 +79,7 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory }: P
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <Chip
-              style={styles.subChip}
+              style={[styles.subChip, { backgroundColor: colors.subtleBg }]}
               compact
               onPress={() => {
                 // For now sub-categories are informational; pressing clears
@@ -92,18 +98,20 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory }: P
 }
 
 function CategoryTile({ category, onPress }: { category: CategoryTreeNode; onPress: () => void }) {
+  const glass = useGlassTheme();
+  const { colors } = glass;
   const iconName = category.icon || "tag-outline";
   return (
-    <TouchableOpacity style={styles.tile} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity style={[styles.tile, glass.card]} onPress={onPress} activeOpacity={0.7}>
       <MaterialCommunityIcons
         name={iconName as any}
         size={28}
-        color={glassColors.greenDark}
+        color={colors.primary}
       />
-      <Text style={styles.tileName} numberOfLines={1}>
+      <Text style={[styles.tileName, { color: colors.textPrimary }]} numberOfLines={1}>
         {category.name}
       </Text>
-      <Text style={styles.tileCount}>{category.count}</Text>
+      <Text style={[styles.tileCount, { color: colors.textMuted }]}>{category.count}</Text>
     </TouchableOpacity>
   );
 }

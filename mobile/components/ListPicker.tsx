@@ -5,12 +5,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getShoppingLists, type ShoppingListMeta } from "../services/api";
 import { useAppStore } from "../stores/useAppStore";
 import { glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface Props {
   onCreateList: () => void;
 }
 
 export default function ListPicker({ onCreateList }: Props) {
+  const { colors } = useGlassTheme();
   const activeListId = useAppStore((s) => s.activeListId);
   const setActiveListId = useAppStore((s) => s.setActiveListId);
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
@@ -40,21 +42,37 @@ export default function ListPicker({ onCreateList }: Props) {
           return (
             <Pressable
               key={list.id}
-              style={[styles.chip, isActive && styles.chipActive]}
+              style={[
+                styles.chip,
+                { backgroundColor: colors.subtleBg, borderColor: colors.subtleBorder },
+                isActive && { backgroundColor: colors.primarySubtleStrong, borderColor: colors.primarySubtle },
+              ]}
               onPress={() => handleSelect(list.id)}
             >
               {list.emoji ? (
                 <Text style={styles.emoji}>{list.emoji}</Text>
               ) : null}
               <Text
-                style={[styles.chipText, isActive && styles.chipTextActive]}
+                style={[
+                  styles.chipText,
+                  { color: colors.textSecondary },
+                  isActive && { color: colors.primary, fontWeight: "700" },
+                ]}
                 numberOfLines={1}
               >
                 {list.name}
               </Text>
               {list.unchecked_count > 0 && (
-                <View style={[styles.badge, isActive && styles.badgeActive]}>
-                  <Text style={[styles.badgeText, isActive && styles.badgeTextActive]}>
+                <View style={[
+                  styles.badge,
+                  { backgroundColor: colors.subtleBg },
+                  isActive && { backgroundColor: colors.primarySubtle },
+                ]}>
+                  <Text style={[
+                    styles.badgeText,
+                    { color: colors.textMuted },
+                    isActive && { color: colors.primary },
+                  ]}>
                     {list.unchecked_count}
                   </Text>
                 </View>
@@ -65,7 +83,7 @@ export default function ListPicker({ onCreateList }: Props) {
         <IconButton
           icon="plus"
           size={18}
-          style={styles.addBtn}
+          style={[styles.addBtn, { backgroundColor: colors.subtleBg }]}
           onPress={onCreateList}
         />
       </ScrollView>

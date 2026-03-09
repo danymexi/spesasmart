@@ -3,6 +3,7 @@ import { Text } from "react-native-paper";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { glassCard, glassColors, productImage, imagePlaceholder } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 import type { CompareItemInfo } from "../services/api";
 
 interface Props {
@@ -10,6 +11,9 @@ interface Props {
 }
 
 export default function ShoppingListCompareGrid({ items }: Props) {
+  const glass = useGlassTheme();
+  const { colors } = glass;
+
   if (items.length === 0) return null;
 
   return (
@@ -18,15 +22,15 @@ export default function ShoppingListCompareGrid({ items }: Props) {
         <MaterialCommunityIcons
           name="format-list-checks"
           size={20}
-          color={glassColors.greenDark}
+          color={colors.primary}
         />
-        <Text style={styles.sectionTitle}>I Tuoi Prodotti</Text>
+        <Text style={[styles.sectionTitle, { color: colors.primary }]}>I Tuoi Prodotti</Text>
       </View>
 
       {items.map((item) => (
         <TouchableOpacity
           key={item.item_id}
-          style={styles.card}
+          style={[styles.card, glass.card]}
           activeOpacity={0.7}
           onPress={() => {
             if (item.product_id) {
@@ -46,21 +50,21 @@ export default function ShoppingListCompareGrid({ items }: Props) {
                 <MaterialCommunityIcons
                   name="food-variant"
                   size={18}
-                  color="#ccc"
+                  color={colors.textMuted}
                 />
               </View>
             )}
             <View style={styles.nameSection}>
               {item.search_term && (
-                <Text style={styles.searchTerm}>
+                <Text style={[styles.searchTerm, { color: colors.textMuted }]}>
                   Cercato: "{item.search_term}"
                 </Text>
               )}
-              <Text style={styles.itemName} numberOfLines={2}>
+              <Text style={[styles.itemName, { color: colors.textPrimary }]} numberOfLines={2}>
                 {item.display_name}
               </Text>
               {item.quantity > 1 && (
-                <Text style={styles.qty}>x{item.quantity}</Text>
+                <Text style={[styles.qty, { color: colors.textMuted }]}>x{item.quantity}</Text>
               )}
             </View>
           </View>
@@ -70,12 +74,17 @@ export default function ShoppingListCompareGrid({ items }: Props) {
               {item.chain_prices.map((cp) => (
                 <View
                   key={cp.chain_slug}
-                  style={[styles.chainCell, cp.is_best && styles.chainCellBest]}
+                  style={[
+                    styles.chainCell,
+                    { backgroundColor: colors.subtleBg },
+                    cp.is_best && { backgroundColor: colors.primarySubtle },
+                  ]}
                 >
                   <Text
                     style={[
                       styles.chainName,
-                      cp.is_best && styles.chainNameBest,
+                      { color: colors.textSecondary },
+                      cp.is_best && { color: colors.primary, fontWeight: "600" },
                     ]}
                     numberOfLines={1}
                   >
@@ -84,7 +93,8 @@ export default function ShoppingListCompareGrid({ items }: Props) {
                   <Text
                     style={[
                       styles.chainPrice,
-                      cp.is_best && styles.chainPriceBest,
+                      { color: colors.textPrimary },
+                      cp.is_best && { color: colors.primary },
                     ]}
                   >
                     {"\u20AC"}{Number(cp.offer_price).toFixed(2)}
@@ -93,14 +103,15 @@ export default function ShoppingListCompareGrid({ items }: Props) {
                     <MaterialCommunityIcons
                       name="star"
                       size={12}
-                      color={glassColors.greenDark}
+                      color={colors.primary}
                     />
                   )}
                   {cp.discount_pct && (
                     <Text
                       style={[
                         styles.discount,
-                        cp.is_best && styles.discountBest,
+                        { color: colors.accent },
+                        cp.is_best && { color: colors.primary },
                       ]}
                     >
                       -{Number(cp.discount_pct).toFixed(0)}%
@@ -110,7 +121,7 @@ export default function ShoppingListCompareGrid({ items }: Props) {
               ))}
             </View>
           ) : (
-            <Text style={styles.noPrices}>
+            <Text style={[styles.noPrices, { color: colors.textMuted }]}>
               Nessuna offerta trovata
             </Text>
           )}

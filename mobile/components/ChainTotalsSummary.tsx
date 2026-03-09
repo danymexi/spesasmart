@@ -3,6 +3,7 @@ import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { glassCard, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 import type { ChainTotalInfo } from "../services/api";
 
 interface Props {
@@ -20,6 +21,8 @@ export default function ChainTotalsSummary({
   potentialSavings,
   onOpenOptimizer,
 }: Props) {
+  const glass = useGlassTheme();
+  const { colors } = glass;
   const [expanded, setExpanded] = useState(false);
 
   if (chainTotals.length === 0) return null;
@@ -29,7 +32,7 @@ export default function ChainTotalsSummary({
   return (
     <View style={styles.container}>
       <TouchableOpacity
-        style={styles.card}
+        style={[styles.card, glass.card, { borderColor: colors.primarySubtle }]}
         activeOpacity={0.7}
         onPress={() => setExpanded(!expanded)}
       >
@@ -38,26 +41,26 @@ export default function ChainTotalsSummary({
           <MaterialCommunityIcons
             name="cart-check"
             size={22}
-            color={glassColors.greenDark}
+            color={colors.primary}
           />
-          <Text style={styles.title}>Confronto Spesa</Text>
+          <Text style={[styles.title, { color: colors.primary }]}>Confronto Spesa</Text>
           <MaterialCommunityIcons
             name={expanded ? "chevron-up" : "chevron-down"}
             size={22}
-            color={glassColors.textMuted}
+            color={colors.textMuted}
           />
         </View>
 
         {/* Best chain highlight */}
         <View style={styles.bestRow}>
-          <View style={styles.bestBadge}>
+          <View style={[styles.bestBadge, { backgroundColor: colors.primaryMuted }]}>
             <MaterialCommunityIcons name="star" size={14} color="#fff" />
           </View>
-          <Text style={styles.bestChain}>{best.chain_name}</Text>
-          <Text style={styles.bestPrice}>
+          <Text style={[styles.bestChain, { color: colors.primary }]}>{best.chain_name}</Text>
+          <Text style={[styles.bestPrice, { color: colors.primary }]}>
             {"\u20AC"}{Number(best.total).toFixed(2)}
           </Text>
-          <Text style={styles.coverage}>
+          <Text style={[styles.coverage, { color: colors.textMuted }]}>
             ({best.items_covered}/{itemsTotal})
           </Text>
         </View>
@@ -67,45 +70,45 @@ export default function ChainTotalsSummary({
           <View style={styles.chainList}>
             {chainTotals.slice(1).map((chain) => (
               <View key={chain.chain_slug} style={styles.chainRow}>
-                <Text style={styles.chainName}>{chain.chain_name}</Text>
-                <Text style={styles.chainPrice}>
+                <Text style={[styles.chainName, { color: colors.textPrimary }]}>{chain.chain_name}</Text>
+                <Text style={[styles.chainPrice, { color: colors.textPrimary }]}>
                   {"\u20AC"}{Number(chain.total).toFixed(2)}
                 </Text>
-                <Text style={styles.coverage}>
+                <Text style={[styles.coverage, { color: colors.textMuted }]}>
                   ({chain.items_covered}/{itemsTotal})
                 </Text>
               </View>
             ))}
 
             {/* Multi-store total */}
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: colors.subtleBorder }]} />
             <View style={styles.multiRow}>
               <MaterialCommunityIcons
                 name="store-marker"
                 size={16}
-                color={glassColors.greenDark}
+                color={colors.primary}
               />
-              <Text style={styles.multiLabel}>Multi-negozio</Text>
-              <Text style={styles.multiPrice}>
+              <Text style={[styles.multiLabel, { color: colors.primary }]}>Multi-negozio</Text>
+              <Text style={[styles.multiPrice, { color: colors.primary }]}>
                 {"\u20AC"}{Number(multiStoreTotal).toFixed(2)}
               </Text>
             </View>
             {potentialSavings > 0 && (
-              <Text style={styles.savings}>
+              <Text style={[styles.savings, { color: colors.primary }]}>
                 Risparmio: {"\u20AC"}{Number(potentialSavings).toFixed(2)}
               </Text>
             )}
 
             {onOpenOptimizer && (
               <TouchableOpacity
-                style={styles.detailsBtn}
+                style={[styles.detailsBtn, { backgroundColor: colors.primarySubtle }]}
                 onPress={onOpenOptimizer}
               >
-                <Text style={styles.detailsBtnText}>Dettagli Ottimizzazione</Text>
+                <Text style={[styles.detailsBtnText, { color: colors.primary }]}>Dettagli Ottimizzazione</Text>
                 <MaterialCommunityIcons
                   name="arrow-right"
                   size={16}
-                  color={glassColors.greenDark}
+                  color={colors.primary}
                 />
               </TouchableOpacity>
             )}

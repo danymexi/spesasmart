@@ -3,6 +3,7 @@ import { IconButton, Text } from "react-native-paper";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { glassCard, glassColors, productImage, imagePlaceholder } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 import type { SuggestionItem } from "../services/api";
 
 interface Props {
@@ -18,9 +19,11 @@ function SuggestionCard({
   item: SuggestionItem;
   onAdd: () => void;
 }) {
+  const glass = useGlassTheme();
+  const { colors } = glass;
   return (
     <TouchableOpacity
-      style={styles.itemCard}
+      style={[styles.itemCard, glass.card]}
       activeOpacity={0.7}
       onPress={() => router.push(`/product/${item.product_id}`)}
     >
@@ -32,33 +35,33 @@ function SuggestionCard({
         />
       ) : (
         <View style={[styles.image, styles.imagePlaceholder]}>
-          <MaterialCommunityIcons name="food-variant" size={16} color="#ccc" />
+          <MaterialCommunityIcons name="food-variant" size={16} color={colors.textMuted} />
         </View>
       )}
-      <Text style={styles.itemName} numberOfLines={2}>
+      <Text style={[styles.itemName, { color: colors.textPrimary }]} numberOfLines={2}>
         {item.product_name}
       </Text>
       {item.brand && (
-        <Text style={styles.brand} numberOfLines={1}>
+        <Text style={[styles.brand, { color: colors.textMuted }]} numberOfLines={1}>
           {item.brand}
         </Text>
       )}
       <View style={styles.priceRow}>
-        <Text style={styles.price}>
+        <Text style={[styles.price, { color: colors.primary }]}>
           {"\u20AC"}{Number(item.offer_price).toFixed(2)}
         </Text>
-        <Text style={styles.chain} numberOfLines={1}>
+        <Text style={[styles.chain, { color: colors.textMuted }]} numberOfLines={1}>
           {item.chain_name}
         </Text>
       </View>
       {item.discount_pct && (
-        <Text style={styles.discount}>
+        <Text style={[styles.discount, { color: colors.accent }]}>
           -{Number(item.discount_pct).toFixed(0)}%
         </Text>
       )}
       <IconButton
         icon="cart-plus"
-        iconColor={glassColors.greenMedium}
+        iconColor={colors.primaryMuted}
         size={20}
         onPress={onAdd}
         style={styles.addBtn}
@@ -72,6 +75,7 @@ export default function SuggestionsSection({
   complementary,
   onAddToList,
 }: Props) {
+  const { colors } = useGlassTheme();
   if (alternatives.length === 0 && complementary.length === 0) return null;
 
   return (
@@ -82,9 +86,9 @@ export default function SuggestionsSection({
             <MaterialCommunityIcons
               name="swap-horizontal"
               size={20}
-              color="#E65100"
+              color={colors.accent}
             />
-            <Text style={styles.sectionTitle}>Alternative Convenienti</Text>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Alternative Convenienti</Text>
           </View>
           <FlatList
             horizontal
@@ -108,9 +112,9 @@ export default function SuggestionsSection({
             <MaterialCommunityIcons
               name="lightbulb-on-outline"
               size={20}
-              color="#1565C0"
+              color={colors.primary}
             />
-            <Text style={styles.sectionTitle}>Potresti aver bisogno di...</Text>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Potresti aver bisogno di...</Text>
           </View>
           <FlatList
             horizontal

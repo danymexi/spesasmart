@@ -2,6 +2,7 @@ import { Dimensions, StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { LineChart } from "react-native-chart-kit";
 import { glassPanel, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 import type { PriceTrendPoint } from "../services/api";
 
 interface Props {
@@ -25,13 +26,16 @@ function unitLabel(unitRef: string | null): string {
 }
 
 export default function PriceTrendChart({ trends, unitReference }: Props) {
+  const glass = useGlassTheme();
+  const { colors, isDark } = glass;
+
   // Filter to periods that have price_per_unit data
   const withPpu = trends.filter((t) => t.avg_price_per_unit != null);
 
   if (withPpu.length < 2) {
     return (
       <View style={styles.empty}>
-        <Text variant="bodyMedium" style={styles.emptyText}>
+        <Text variant="bodyMedium" style={[styles.emptyText, { color: colors.textMuted }]}>
           Dati insufficienti per l'andamento
         </Text>
       </View>
@@ -58,7 +62,7 @@ export default function PriceTrendChart({ trends, unitReference }: Props) {
   const label = unitLabel(unitReference);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, glass.panel]}>
       <LineChart
         data={{
           labels,
@@ -66,17 +70,26 @@ export default function PriceTrendChart({ trends, unitReference }: Props) {
             {
               data: maxData,
               strokeWidth: 1,
-              color: (opacity = 1) => `rgba(198, 40, 40, ${opacity * 0.5})`,
+              color: (opacity = 1) =>
+                isDark
+                  ? `rgba(248, 113, 113, ${opacity * 0.5})`
+                  : `rgba(198, 40, 40, ${opacity * 0.5})`,
             },
             {
               data: avgData,
               strokeWidth: 2,
-              color: (opacity = 1) => `rgba(27, 94, 32, ${opacity})`,
+              color: (opacity = 1) =>
+                isDark
+                  ? `rgba(96, 165, 250, ${opacity})`
+                  : `rgba(37, 99, 235, ${opacity})`,
             },
             {
               data: minData,
               strokeWidth: 1,
-              color: (opacity = 1) => `rgba(21, 101, 192, ${opacity * 0.5})`,
+              color: (opacity = 1) =>
+                isDark
+                  ? `rgba(147, 197, 253, ${opacity * 0.5})`
+                  : `rgba(21, 101, 192, ${opacity * 0.5})`,
             },
           ],
           legend: ["Max", "Media", "Min"],
@@ -87,25 +100,31 @@ export default function PriceTrendChart({ trends, unitReference }: Props) {
         yAxisSuffix=""
         chartConfig={{
           backgroundColor: "transparent",
-          backgroundGradientFrom: "rgba(255,255,255,0.01)",
-          backgroundGradientTo: "rgba(255,255,255,0.01)",
+          backgroundGradientFrom: isDark ? "rgba(30,30,46,0.01)" : "rgba(255,255,255,0.01)",
+          backgroundGradientTo: isDark ? "rgba(30,30,46,0.01)" : "rgba(255,255,255,0.01)",
           decimalPlaces: 2,
-          color: (opacity = 1) => `rgba(27, 94, 32, ${opacity})`,
-          labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity * 0.6})`,
+          color: (opacity = 1) =>
+            isDark
+              ? `rgba(96, 165, 250, ${opacity})`
+              : `rgba(37, 99, 235, ${opacity})`,
+          labelColor: (opacity = 1) =>
+            isDark
+              ? `rgba(255, 255, 255, ${opacity * 0.6})`
+              : `rgba(0, 0, 0, ${opacity * 0.6})`,
           propsForDots: { r: "3", strokeWidth: "1" },
           propsForBackgroundLines: {
             strokeDasharray: "",
-            stroke: "rgba(0,0,0,0.06)",
+            stroke: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
           },
         }}
         bezier
         style={styles.chart}
       />
 
-      <View style={styles.summary}>
-        <Text variant="bodyMedium" style={styles.summaryText}>
+      <View style={[styles.summary, { borderTopColor: colors.subtleBorder }]}>
+        <Text variant="bodyMedium" style={[styles.summaryText, { color: colors.textMuted }]}>
           Media {withPpu.length} mesi:{" "}
-          <Text style={styles.summaryValue}>
+          <Text style={[styles.summaryValue, { color: colors.primary }]}>
             {totalAvg.toFixed(2)} {label}
           </Text>
         </Text>

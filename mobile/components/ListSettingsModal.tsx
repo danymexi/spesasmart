@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Button, Modal, Portal, Text, TextInput } from "react-native-paper";
 import { glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 const EMOJI_OPTIONS = [
   null, "\uD83D\uDED2", "\uD83C\uDF4E", "\uD83C\uDF3F", "\uD83C\uDF7D\uFE0F",
@@ -29,6 +30,7 @@ export default function ListSettingsModal({
   initial,
   title = "Nuova lista",
 }: Props) {
+  const { colors } = useGlassTheme();
   const [name, setName] = useState(initial?.name ?? "");
   const [emoji, setEmoji] = useState<string | null>(initial?.emoji ?? null);
   const [color, setColor] = useState<string | null>(initial?.color ?? null);
@@ -46,9 +48,9 @@ export default function ListSettingsModal({
       <Modal
         visible={visible}
         onDismiss={onDismiss}
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[styles.container, { backgroundColor: colors.surface }]}
       >
-        <Text variant="titleLarge" style={styles.title}>
+        <Text variant="titleLarge" style={[styles.title, { color: colors.textPrimary }]}>
           {title}
         </Text>
 
@@ -61,7 +63,7 @@ export default function ListSettingsModal({
           autoFocus
         />
 
-        <Text variant="labelLarge" style={styles.sectionLabel}>
+        <Text variant="labelLarge" style={[styles.sectionLabel, { color: colors.textSecondary }]}>
           Icona
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -69,7 +71,11 @@ export default function ListSettingsModal({
             {EMOJI_OPTIONS.map((e, i) => (
               <Pressable
                 key={i}
-                style={[styles.emojiBtn, emoji === e && styles.optionSelected]}
+                style={[
+                  styles.emojiBtn,
+                  { backgroundColor: colors.subtleBg },
+                  emoji === e && [styles.optionSelected, { borderColor: colors.primaryMuted }],
+                ]}
                 onPress={() => setEmoji(e)}
               >
                 <Text style={styles.emojiText}>{e ?? "–"}</Text>
@@ -78,7 +84,7 @@ export default function ListSettingsModal({
           </View>
         </ScrollView>
 
-        <Text variant="labelLarge" style={styles.sectionLabel}>
+        <Text variant="labelLarge" style={[styles.sectionLabel, { color: colors.textSecondary }]}>
           Colore
         </Text>
         <View style={styles.optionRow}>
@@ -88,7 +94,7 @@ export default function ListSettingsModal({
               style={[
                 styles.colorBtn,
                 { backgroundColor: c ?? "#ddd" },
-                color === c && styles.optionSelected,
+                color === c && [styles.optionSelected, { borderColor: colors.primaryMuted }],
               ]}
               onPress={() => setColor(c)}
             />

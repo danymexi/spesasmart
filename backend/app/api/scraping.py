@@ -3,10 +3,20 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel
 
+from app.config import get_settings
+
 router = APIRouter(prefix="/scraping", tags=["scraping"])
+
+
+async def require_admin_key(x_admin_key: str = Header(...)):
+    """Validate the admin API key from request header."""
+    settings = get_settings()
+    if not settings.admin_api_key or x_admin_key != settings.admin_api_key:
+        raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
+    return True
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +99,7 @@ async def _run_scraper(chain_slug: str, source: str = "auto") -> dict:
 
 
 @router.post("/trigger/{chain_slug}", response_model=ScrapeResponse)
-async def trigger_scraping(chain_slug: str, background_tasks: BackgroundTasks):
+async def trigger_scraping(chain_slug: str, background_tasks: BackgroundTasks, _=Depends(require_admin_key)):
     """Trigger scraping for a specific chain in the background.
 
     The scraping runs asynchronously -- this endpoint returns immediately.
@@ -122,7 +132,7 @@ async def trigger_scraping(chain_slug: str, background_tasks: BackgroundTasks):
 
 
 @router.post("/trigger/{chain_slug}/sync", response_model=ScrapeResult)
-async def trigger_scraping_sync(chain_slug: str, source: str = "auto"):
+async def trigger_scraping_sync(chain_slug: str, source: str = "auto", _=Depends(require_admin_key)):
     """Trigger scraping for a specific chain and wait for it to finish.
 
     Use this for debugging/testing. May take 30-60 seconds.
@@ -153,7 +163,7 @@ async def trigger_scraping_sync(chain_slug: str, source: str = "auto"):
 
 
 @router.post("/test-telegram/{user_id}")
-async def test_telegram_notification(user_id: str):
+async def test_telegram_notification(user_id: str, _=Depends(require_admin_key)):
     """Send a test Telegram notification to a user.
 
     The user must have a telegram_chat_id set in their profile.
@@ -200,7 +210,7 @@ async def test_telegram_notification(user_id: str):
 
 
 @router.post("/catalog-sync/iperal-online", response_model=ScrapeResult)
-async def trigger_iperal_online_sync():
+async def trigger_iperal_online_sync(_=Depends(require_admin_key)):
     """Trigger Iperal Online catalog sync and wait for it to finish.
 
     Scrapes the full Iperal Spesa Online product catalog via REST API.
@@ -222,7 +232,7 @@ async def trigger_iperal_online_sync():
 
 
 @router.post("/catalog-sync/esselunga-online", response_model=ScrapeResult)
-async def trigger_esselunga_online_sync():
+async def trigger_esselunga_online_sync(_=Depends(require_admin_key)):
     """Trigger Esselunga Online catalog sync and wait for it to finish.
 
     Scrapes the Esselunga Spesa Online product catalog via REST API.
@@ -244,7 +254,7 @@ async def trigger_esselunga_online_sync():
 
 
 @router.post("/catalog-sync/carrefour-online", response_model=ScrapeResult)
-async def trigger_carrefour_online_sync():
+async def trigger_carrefour_online_sync(_=Depends(require_admin_key)):
     """Trigger Carrefour Online catalog sync and wait for it to finish.
 
     Scrapes the Carrefour Italy product catalog via sitemap + page parsing.
@@ -266,7 +276,7 @@ async def trigger_carrefour_online_sync():
 
 
 @router.post("/catalog-sync/penny-online", response_model=ScrapeResult)
-async def trigger_penny_online_sync():
+async def trigger_penny_online_sync(_=Depends(require_admin_key)):
     """Trigger Penny Market Online catalog sync and wait for it to finish.
 
     Scrapes the Penny Market Italy product catalog via sitemap + SSR page parsing.
@@ -288,7 +298,7 @@ async def trigger_penny_online_sync():
 
 
 @router.post("/backfill-images")
-async def trigger_image_backfill(limit: int = 50):
+async def trigger_image_backfill(limit: int = 50, _=Depends(require_admin_key)):
     """Find images for products without image_url.
 
     Uses Claude Haiku for query generation, then Open Food Facts + Google Images.
@@ -315,7 +325,7 @@ async def trigger_image_backfill(limit: int = 50):
 
 
 @router.post("/dedup-products")
-async def dedup_products(dry_run: bool = True):
+async def dedup_products(dry_run: bool = True, _=Depends(require_admin_key)):
     """Deduplicate products across chains using fuzzy matching.
 
     Finds cross-source duplicates (e.g. same product from Iperal and Esselunga)
@@ -465,7 +475,7 @@ async def dedup_products(dry_run: bool = True):
 
 
 @router.post("/fix-ppu-units")
-async def fix_ppu_units():
+async def fix_ppu_units(_=Depends(require_admin_key)):
     """Batch-fix offers where unit_reference='pz' but PPU suggests kg or l.
 
     Finds offers where price_per_unit > offer_price * 1.5 and unit_reference='pz',

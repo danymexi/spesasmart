@@ -18,6 +18,7 @@ import {
 } from "../styles/glassStyles";
 import { useGlassTheme } from "../styles/useGlassTheme";
 import type { SmartSearchResult } from "../services/api";
+import { useChainLogos } from "../hooks/useChainLogos";
 
 const INDICATOR_STYLE: Record<
   string,
@@ -46,6 +47,7 @@ export default function ExpandableCatalogCard({
   onAddToShoppingList,
 }: Props) {
   const glass = useGlassTheme();
+  const chainLogos = useChainLogos();
   const { colors } = glass;
   const {
     product,
@@ -278,6 +280,12 @@ export default function ExpandableCatalogCard({
                   },
                 ]}
               >
+                {chainLogos[offer.chain_name] ? (
+                  <Image
+                    source={{ uri: chainLogos[offer.chain_name]! }}
+                    style={styles.chainLogo}
+                  />
+                ) : null}
                 <Text
                   style={[
                     styles.offerChain,
@@ -420,6 +428,12 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     marginBottom: 2,
+  },
+  chainLogo: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    marginRight: 4,
   },
   offerChain: {
     width: 90,

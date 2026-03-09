@@ -3,6 +3,7 @@ import { Text, useTheme, ActivityIndicator } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { getProductCompare } from "../services/api";
 import { glassPanel, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface Props {
   productId: string;
@@ -24,6 +25,7 @@ const CHAIN_COLORS: Record<string, string> = {
 
 export default function ProductComparison({ productId }: Props) {
   const theme = useTheme();
+  const { colors } = useGlassTheme();
 
   const { data, isLoading } = useQuery({
     queryKey: ["comparison", productId],
@@ -39,7 +41,7 @@ export default function ProductComparison({ productId }: Props) {
   if (!offers || offers.length === 0) {
     return (
       <View style={styles.container}>
-        <Text variant="bodyMedium" style={styles.emptyText}>
+        <Text variant="bodyMedium" style={[styles.emptyText, { color: colors.textMuted }]}>
           Nessuna offerta attiva per il confronto
         </Text>
       </View>
@@ -61,12 +63,12 @@ export default function ProductComparison({ productId }: Props) {
             <View style={styles.chainLabel}>
               <Text
                 variant="bodyMedium"
-                style={[styles.chainName, isBest && { fontWeight: "bold" }]}
+                style={[styles.chainName, { color: colors.textPrimary }, isBest && { fontWeight: "bold" }]}
               >
                 {offer.chain_name}
               </Text>
               {offer.product_name && (
-                <Text variant="labelSmall" style={styles.productName} numberOfLines={1}>
+                <Text variant="labelSmall" style={[styles.productName, { color: colors.textMuted }]} numberOfLines={1}>
                   {offer.product_name}
                 </Text>
               )}
@@ -94,7 +96,7 @@ export default function ProductComparison({ productId }: Props) {
                 {"\u20AC"}{price.toFixed(2)}
               </Text>
               {isBest && (
-                <Text variant="labelSmall" style={styles.bestLabel}>
+                <Text variant="labelSmall" style={[styles.bestLabel, { color: colors.primary }]}>
                   MIGLIORE
                 </Text>
               )}

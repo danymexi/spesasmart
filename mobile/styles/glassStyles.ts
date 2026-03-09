@@ -3,73 +3,121 @@ import { Platform, ViewStyle } from "react-native";
 // ── Light palette ────────────────────────────────────────────────────────────
 
 export const lightGradientColors = {
-  start: "#E8F5E9",
-  mid: "#E0F2F1",
-  end: "#E3F2FD",
+  start: "#F5F5F5",
+  mid: "#F0F4FF",
+  end: "#F5F5F5",
 };
 
 export const lightGlassColors = {
-  glass: "rgba(255,255,255,0.78)",
-  glassBorder: "rgba(255,255,255,0.45)",
-  glassLight: "rgba(255,255,255,0.5)",
-  glassDark: "rgba(30,30,30,0.6)",
+  // Surfaces
+  glass: "#FFFFFF",
+  glassBorder: "#E5E7EB",
+  glassLight: "#F3F4F6",
+  glassDark: "#1E1E2E",
 
-  greenAccent: "rgba(27,94,32,0.12)",
-  greenAccentStrong: "rgba(27,94,32,0.15)",
-  orangeAccent: "rgba(255,111,0,0.12)",
-  redAccent: "rgba(198,40,40,0.12)",
+  // Semantic accents (subtle backgrounds)
+  primarySubtle: "rgba(37,99,235,0.10)",
+  primarySubtleStrong: "rgba(37,99,235,0.15)",
+  accentSubtle: "rgba(249,115,22,0.10)",
+  errorSubtle: "rgba(220,38,38,0.10)",
+  successSubtle: "rgba(22,163,74,0.10)",
 
-  greenDark: "#1B5E20",
-  greenMedium: "#2E7D32",
-  greenLight: "#66BB6A",
-  greenSubtle: "rgba(27,94,32,0.7)",
+  // Core semantic colors
+  primary: "#2563EB",
+  primaryMuted: "#3B82F6",
+  primaryLight: "#60A5FA",
+  primaryFaded: "rgba(37,99,235,0.7)",
+  accent: "#F97316",
+  success: "#16A34A",
+  warning: "#F59E0B",
+  error: "#DC2626",
+
+  // Text
   textPrimary: "#1a1a1a",
-  textSecondary: "#444",
-  textMuted: "#666",
+  textSecondary: "#4B5563",
+  textMuted: "#6B7280",
 
-  subtleBg: "rgba(0,0,0,0.04)",
+  // Backgrounds & borders
+  surface: "#FFFFFF",
+  subtleBg: "rgba(0,0,0,0.03)",
   subtleBorder: "rgba(0,0,0,0.06)",
+  divider: "#E5E7EB",
 
-  tabBarBg: "rgba(255,255,255,0.85)",
-  tabBarBorder: "rgba(200,200,200,0.5)",
-  searchbarBg: "rgba(255,255,255,0.6)",
-  cardShadow: "0 8px 32px rgba(0,0,0,0.12)",
+  // Tab bar
+  tabBarBg: "#FFFFFF",
+  tabBarBorder: "rgba(0,0,0,0.08)",
+  searchbarBg: "#F3F4F6",
+  cardShadow: "0 2px 8px rgba(0,0,0,0.08)",
+
+  // ── Backward-compat aliases (old green names → new blue) ──
+  greenAccent: "rgba(37,99,235,0.10)",
+  greenAccentStrong: "rgba(37,99,235,0.15)",
+  orangeAccent: "rgba(249,115,22,0.10)",
+  redAccent: "rgba(220,38,38,0.10)",
+  greenDark: "#2563EB",
+  greenMedium: "#3B82F6",
+  greenLight: "#60A5FA",
+  greenSubtle: "rgba(37,99,235,0.7)",
 };
 
 // ── Dark palette ─────────────────────────────────────────────────────────────
 
 export const darkGradientColors = {
   start: "#121212",
-  mid: "#1a1a2e",
-  end: "#0d1b2a",
+  mid: "#151520",
+  end: "#121212",
 };
 
 export const darkGlassColors: typeof lightGlassColors = {
-  glass: "rgba(30,30,30,0.78)",
-  glassBorder: "rgba(255,255,255,0.12)",
-  glassLight: "rgba(255,255,255,0.08)",
-  glassDark: "rgba(10,10,10,0.8)",
+  // Surfaces
+  glass: "#1E1E2E",
+  glassBorder: "rgba(255,255,255,0.10)",
+  glassLight: "rgba(255,255,255,0.06)",
+  glassDark: "#0F0F1A",
 
-  greenAccent: "rgba(102,187,106,0.15)",
-  greenAccentStrong: "rgba(102,187,106,0.22)",
-  orangeAccent: "rgba(255,183,77,0.18)",
-  redAccent: "rgba(239,83,80,0.18)",
+  // Semantic accents (subtle backgrounds)
+  primarySubtle: "rgba(96,165,250,0.12)",
+  primarySubtleStrong: "rgba(96,165,250,0.20)",
+  accentSubtle: "rgba(251,146,60,0.15)",
+  errorSubtle: "rgba(248,113,113,0.15)",
+  successSubtle: "rgba(74,222,128,0.12)",
 
-  greenDark: "#81C784",
-  greenMedium: "#66BB6A",
-  greenLight: "#A5D6A7",
-  greenSubtle: "rgba(102,187,106,0.7)",
+  // Core semantic colors
+  primary: "#60A5FA",
+  primaryMuted: "#93C5FD",
+  primaryLight: "#BFDBFE",
+  primaryFaded: "rgba(96,165,250,0.7)",
+  accent: "#FB923C",
+  success: "#4ADE80",
+  warning: "#FBBF24",
+  error: "#F87171",
+
+  // Text
   textPrimary: "#E8E8E8",
   textSecondary: "#B0B0B0",
   textMuted: "#888",
 
-  subtleBg: "rgba(255,255,255,0.05)",
+  // Backgrounds & borders
+  surface: "#1E1E2E",
+  subtleBg: "rgba(255,255,255,0.04)",
   subtleBorder: "rgba(255,255,255,0.08)",
+  divider: "rgba(255,255,255,0.10)",
 
-  tabBarBg: "rgba(30,30,30,0.92)",
-  tabBarBorder: "rgba(255,255,255,0.1)",
-  searchbarBg: "rgba(255,255,255,0.08)",
-  cardShadow: "0 8px 32px rgba(0,0,0,0.4)",
+  // Tab bar
+  tabBarBg: "#1A1A28",
+  tabBarBorder: "rgba(255,255,255,0.08)",
+  searchbarBg: "rgba(255,255,255,0.06)",
+  cardShadow: "0 2px 8px rgba(0,0,0,0.4)",
+
+  // ── Backward-compat aliases (old green names → new blue) ──
+  greenAccent: "rgba(96,165,250,0.12)",
+  greenAccentStrong: "rgba(96,165,250,0.20)",
+  orangeAccent: "rgba(251,146,60,0.15)",
+  redAccent: "rgba(248,113,113,0.15)",
+  greenDark: "#60A5FA",
+  greenMedium: "#93C5FD",
+  greenLight: "#BFDBFE",
+  greenSubtle: "rgba(96,165,250,0.7)",
 };
 
 // ── Backward-compatible exports (light theme default) ────────────────────────
@@ -79,86 +127,78 @@ export const glassColors = lightGlassColors;
 
 export type GlassColorTokens = typeof lightGlassColors;
 
-// Web-only backdrop filter styles (passed as `as any` for TypeScript)
-const webBlur = Platform.OS === "web"
-  ? ({
-      backdropFilter: "blur(20px) saturate(180%)",
-      WebkitBackdropFilter: "blur(20px) saturate(180%)",
-    } as any)
+// Flat card style — no backdrop blur
+const flatShadow = Platform.OS === "web"
+  ? ({ boxShadow: "0 2px 8px rgba(0,0,0,0.08)" } as any)
   : {};
 
-const webBlurStrong = Platform.OS === "web"
-  ? ({
-      backdropFilter: "blur(24px) saturate(200%)",
-      WebkitBackdropFilter: "blur(24px) saturate(200%)",
-    } as any)
-  : {};
-
-// Shared glass card style
+// Shared flat card style
 export const glassCard: ViewStyle = {
   backgroundColor: glassColors.glass,
-  borderRadius: 20,
-  borderWidth: 1,
-  borderColor: glassColors.glassBorder,
-  elevation: 0,
-  shadowOpacity: 0,
-  ...webBlur,
-} as any;
-
-// Glass panel (for sections / headers)
-export const glassPanel: ViewStyle = {
-  backgroundColor: glassColors.glass,
-  borderRadius: 20,
-  borderWidth: 1,
-  borderColor: glassColors.glassBorder,
-  ...webBlur,
-} as any;
-
-// Glass searchbar
-export const glassSearchbar: ViewStyle = {
-  backgroundColor: "rgba(255,255,255,0.6)",
   borderRadius: 16,
   borderWidth: 1,
   borderColor: glassColors.glassBorder,
-  elevation: 0,
-  ...webBlur,
+  elevation: 2,
+  shadowColor: "#000",
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.06,
+  shadowRadius: 4,
+  ...flatShadow,
 } as any;
 
-// Glass chip
+// Flat panel (for sections / headers)
+export const glassPanel: ViewStyle = {
+  backgroundColor: glassColors.glass,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: glassColors.glassBorder,
+} as any;
+
+// Flat searchbar
+export const glassSearchbar: ViewStyle = {
+  backgroundColor: glassColors.searchbarBg,
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: glassColors.glassBorder,
+  elevation: 0,
+} as any;
+
+// Flat chip
 export const glassChip: ViewStyle = {
   backgroundColor: glassColors.glassLight,
   borderWidth: 1,
   borderColor: glassColors.glassBorder,
-  borderRadius: 14,
+  borderRadius: 12,
 } as any;
 
-// Floating tab bar style
+// Tab bar style (solid, no blur)
 export const glassTabBar: ViewStyle = {
   position: "absolute",
   bottom: 16,
   left: 20,
   right: 20,
   height: 64,
-  borderRadius: 28,
-  backgroundColor: "rgba(255,255,255,0.85)",
+  borderRadius: 24,
+  backgroundColor: glassColors.tabBarBg,
   borderWidth: 1,
-  borderColor: "rgba(200,200,200,0.5)",
-  elevation: 0,
-  shadowOpacity: 0,
-  ...webBlurStrong,
+  borderColor: glassColors.tabBarBorder,
+  elevation: 4,
+  shadowColor: "#000",
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.1,
+  shadowRadius: 8,
   ...(Platform.OS === "web"
-    ? ({ boxShadow: "0 8px 32px rgba(0,0,0,0.12)" } as any)
+    ? ({ boxShadow: "0 4px 16px rgba(0,0,0,0.10)" } as any)
     : {}),
 } as any;
 
-// Glass header style (for Stack / Tabs headers)
+// Header style (solid)
 export const glassHeader: ViewStyle = {
   backgroundColor: glassColors.glass,
   borderBottomWidth: 1,
   borderBottomColor: glassColors.glassBorder,
   elevation: 0,
   shadowOpacity: 0,
-  ...webBlur,
 } as any;
 
 // Product image sizes
@@ -176,7 +216,7 @@ export const imagePlaceholder: ViewStyle = {
   alignItems: "center",
 };
 
-// Gradient background for web (applied to contentStyle)
+// Background for web (flat gradient)
 export const gradientBackground = Platform.OS === "web"
   ? ({
       background: `linear-gradient(160deg, ${gradientColors.start}, ${gradientColors.mid}, ${gradientColors.end})`,
@@ -184,28 +224,28 @@ export const gradientBackground = Platform.OS === "web"
     } as any)
   : { backgroundColor: gradientColors.start };
 
-// Chain badge glass style
+// Chain badge style
 export const chainBadgeGlass: ViewStyle = {
-  backgroundColor: glassColors.greenAccentStrong,
+  backgroundColor: glassColors.primarySubtleStrong,
   borderRadius: 10,
   paddingHorizontal: 8,
   paddingVertical: 3,
 };
 
-// Discount badge glass style
+// Discount badge style
 export const discountBadgeGlass: ViewStyle = {
-  backgroundColor: glassColors.orangeAccent,
+  backgroundColor: glassColors.accentSubtle,
   borderRadius: 8,
   paddingHorizontal: 6,
   paddingVertical: 2,
 };
 
-// Alert badge glass style
+// Alert badge style
 export const alertBadgeGlass: ViewStyle = {
-  backgroundColor: glassColors.greenAccent,
+  backgroundColor: glassColors.primarySubtle,
   borderRadius: 8,
   borderWidth: 1,
-  borderColor: "rgba(46,125,50,0.2)",
+  borderColor: "rgba(37,99,235,0.2)",
   paddingHorizontal: 6,
   paddingVertical: 2,
 };
@@ -233,38 +273,43 @@ export function getGlassStyles(isDark: boolean): GlassTheme {
   const c = isDark ? darkGlassColors : lightGlassColors;
   const g = isDark ? darkGradientColors : lightGradientColors;
 
+  const flatShadowThemed = Platform.OS === "web"
+    ? ({ boxShadow: c.cardShadow } as any)
+    : {};
+
   const card: ViewStyle = {
     backgroundColor: c.glass,
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: c.glassBorder,
-    elevation: 0,
-    shadowOpacity: 0,
-    ...webBlur,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: isDark ? 0.2 : 0.06,
+    shadowRadius: 4,
+    ...flatShadowThemed,
   } as any;
 
   const panel: ViewStyle = {
     backgroundColor: c.glass,
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: c.glassBorder,
-    ...webBlur,
   } as any;
 
   const searchbar: ViewStyle = {
     backgroundColor: c.searchbarBg,
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: c.glassBorder,
     elevation: 0,
-    ...webBlur,
   } as any;
 
   const chip: ViewStyle = {
     backgroundColor: c.glassLight,
     borderWidth: 1,
     borderColor: c.glassBorder,
-    borderRadius: 14,
+    borderRadius: 12,
   } as any;
 
   const tabBar: ViewStyle = {
@@ -273,15 +318,17 @@ export function getGlassStyles(isDark: boolean): GlassTheme {
     left: 20,
     right: 20,
     height: 64,
-    borderRadius: 28,
+    borderRadius: 24,
     backgroundColor: c.tabBarBg,
     borderWidth: 1,
     borderColor: c.tabBarBorder,
-    elevation: 0,
-    shadowOpacity: 0,
-    ...webBlurStrong,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: isDark ? 0.3 : 0.1,
+    shadowRadius: 8,
     ...(Platform.OS === "web"
-      ? ({ boxShadow: c.cardShadow } as any)
+      ? ({ boxShadow: isDark ? "0 4px 16px rgba(0,0,0,0.3)" : "0 4px 16px rgba(0,0,0,0.10)" } as any)
       : {}),
   } as any;
 
@@ -291,7 +338,6 @@ export function getGlassStyles(isDark: boolean): GlassTheme {
     borderBottomColor: c.glassBorder,
     elevation: 0,
     shadowOpacity: 0,
-    ...webBlur,
   } as any;
 
   const background =
@@ -314,22 +360,22 @@ export function getGlassStyles(isDark: boolean): GlassTheme {
     header,
     background,
     chainBadge: {
-      backgroundColor: c.greenAccentStrong,
+      backgroundColor: c.primarySubtleStrong,
       borderRadius: 10,
       paddingHorizontal: 8,
       paddingVertical: 3,
     },
     discountBadge: {
-      backgroundColor: c.orangeAccent,
+      backgroundColor: c.accentSubtle,
       borderRadius: 8,
       paddingHorizontal: 6,
       paddingVertical: 2,
     },
     alertBadge: {
-      backgroundColor: c.greenAccent,
+      backgroundColor: c.primarySubtle,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: isDark ? "rgba(102,187,106,0.3)" : "rgba(46,125,50,0.2)",
+      borderColor: isDark ? "rgba(96,165,250,0.3)" : "rgba(37,99,235,0.2)",
       paddingHorizontal: 6,
       paddingVertical: 2,
     },

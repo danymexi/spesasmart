@@ -46,11 +46,11 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: glass.colors.greenMedium,
+        tabBarActiveTintColor: glass.colors.primary,
         tabBarInactiveTintColor: glass.isDark ? "#666" : "#999",
         headerStyle: glass.header as any,
-        headerTintColor: glass.colors.greenDark,
-        headerTitleStyle: { fontWeight: "bold", color: glass.colors.greenDark },
+        headerTintColor: glass.colors.primary,
+        headerTitleStyle: { fontWeight: "bold", color: glass.colors.primary },
         headerShadowVisible: false,
         tabBarStyle: glass.tabBar as any,
         tabBarItemStyle: { paddingVertical: 4 },
@@ -63,28 +63,28 @@ export default function TabLayout() {
         options={{
           title: "Home",
           headerShown: false,
-          tabBarIcon: ({ color, size, focused }) => <TabIcon name="home" color={color} size={size} focused={focused} dotColor={glass.colors.greenMedium} />,
+          tabBarIcon: ({ color, size, focused }) => <TabIcon name="home" color={color} size={size} focused={focused} dotColor={glass.colors.primary} />,
         }}
       />
       <Tabs.Screen
         name="search"
         options={{
           title: "Catalogo",
-          tabBarIcon: ({ color, size, focused }) => <TabIcon name="view-grid-outline" color={color} size={size} focused={focused} dotColor={glass.colors.greenMedium} />,
+          tabBarIcon: ({ color, size, focused }) => <TabIcon name="view-grid-outline" color={color} size={size} focused={focused} dotColor={glass.colors.primary} />,
         }}
       />
       <Tabs.Screen
         name="flyers"
         options={{
           title: "Volantini",
-          tabBarIcon: ({ color, size, focused }) => <TabIcon name="newspaper-variant-outline" color={color} size={size} focused={focused} dotColor={glass.colors.greenMedium} />,
+          tabBarIcon: ({ color, size, focused }) => <TabIcon name="newspaper-variant-outline" color={color} size={size} focused={focused} dotColor={glass.colors.primary} />,
         }}
       />
       <Tabs.Screen
         name="watchlist"
         options={{
           title: "La Mia Lista",
-          tabBarIcon: ({ color, size, focused }) => <TabIcon name="star" color={color} size={size} focused={focused} dotColor={glass.colors.greenMedium} />,
+          tabBarIcon: ({ color, size, focused }) => <TabIcon name="star" color={color} size={size} focused={focused} dotColor={glass.colors.primary} />,
           tabBarBadge: shoppingCount && shoppingCount > 0 ? shoppingCount : undefined,
         }}
       />
@@ -92,7 +92,7 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: "Impostazioni",
-          tabBarIcon: ({ color, size, focused }) => <TabIcon name="cog" color={color} size={size} focused={focused} dotColor={glass.colors.greenMedium} />,
+          tabBarIcon: ({ color, size, focused }) => <TabIcon name="cog" color={color} size={size} focused={focused} dotColor={glass.colors.primary} />,
         }}
       />
     </Tabs>

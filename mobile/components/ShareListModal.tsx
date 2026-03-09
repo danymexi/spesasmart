@@ -3,6 +3,7 @@ import { Platform, Share, StyleSheet, View } from "react-native";
 import { Button, IconButton, Modal, Portal, Snackbar, Text } from "react-native-paper";
 import { shareShoppingList, type ShoppingListMeta } from "../services/api";
 import { glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface Props {
   visible: boolean;
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function ShareListModal({ visible, onDismiss, list }: Props) {
+  const { colors } = useGlassTheme();
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -54,12 +56,12 @@ export default function ShareListModal({ visible, onDismiss, list }: Props) {
       <Modal
         visible={visible}
         onDismiss={handleDismiss}
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[styles.container, { backgroundColor: colors.surface }]}
       >
-        <Text variant="titleLarge" style={styles.title}>
+        <Text variant="titleLarge" style={[styles.title, { color: colors.textPrimary }]}>
           Condividi lista
         </Text>
-        <Text variant="bodyMedium" style={styles.subtitle}>
+        <Text variant="bodyMedium" style={[styles.subtitle, { color: colors.textSecondary }]}>
           {list?.emoji} {list?.name}
         </Text>
 
@@ -74,10 +76,10 @@ export default function ShareListModal({ visible, onDismiss, list }: Props) {
             Genera link (24h)
           </Button>
         ) : (
-          <View style={styles.linkRow}>
+          <View style={[styles.linkRow, { backgroundColor: colors.subtleBg }]}>
             <Text
               variant="bodySmall"
-              style={styles.link}
+              style={[styles.link, { color: colors.primaryMuted }]}
               numberOfLines={2}
               selectable
             >

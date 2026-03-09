@@ -343,6 +343,7 @@ export interface CategoryTreeNode {
 
 export interface AuthResponse {
   access_token: string;
+  refresh_token?: string;
   user: UserProfile;
 }
 
@@ -593,15 +594,62 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor: auto-logout on 401
+// Response interceptor: refresh token on 401, then retry once
+let isRefreshing = false;
+let refreshPromise: Promise<string | null> | null = null;
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response) {
       if (error.response.status === 401) {
         const { useAppStore } = require("../stores/useAppStore");
         const state = useAppStore.getState();
-        if (state.isLoggedIn) {
+        const originalRequest = error.config;
+
+        // Skip refresh for auth endpoints or already-retried requests
+        if (originalRequest._retry || originalRequest.url?.startsWith("/auth/")) {
+          if (state.isLoggedIn) state.logout();
+          return Promise.reject(error);
+        }
+
+        if (state.refreshToken && state.isLoggedIn) {
+          originalRequest._retry = true;
+
+          // Deduplicate concurrent refresh calls
+          if (!isRefreshing) {
+            isRefreshing = true;
+            refreshPromise = axios
+              .post<AuthResponse>(`${BASE_URL}/auth/refresh`, {
+                refresh_token: state.refreshToken,
+              })
+              .then((res) => {
+                const { access_token, refresh_token } = res.data;
+                state.setAuth(
+                  access_token,
+                  state.userId,
+                  state.userEmail || "",
+                  state.isGuest,
+                  refresh_token
+                );
+                return access_token;
+              })
+              .catch(() => {
+                state.logout();
+                return null;
+              })
+              .finally(() => {
+                isRefreshing = false;
+                refreshPromise = null;
+              });
+          }
+
+          const newToken = await refreshPromise;
+          if (newToken) {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            return apiClient(originalRequest);
+          }
+        } else if (state.isLoggedIn) {
           state.logout();
         }
       }
@@ -622,6 +670,16 @@ export async function registerUser(email: string, password: string): Promise<Aut
 
 export async function loginUser(email: string, password: string): Promise<AuthResponse> {
   const res = await apiClient.post<AuthResponse>("/auth/login", { email, password });
+  return res.data;
+}
+
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const res = await apiClient.post<{ message: string }>("/auth/forgot-password", { email });
+  return res.data;
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<AuthResponse> {
+  const res = await apiClient.post<AuthResponse>("/auth/reset-password", { token, new_password: newPassword });
   return res.data;
 }
 
@@ -1033,6 +1091,27 @@ export async function getProductCompare(productId: string): Promise<CompareRespo
 
 // ── User Profile Update ─────────────────────────────────────────────────────
 
+// ── Budget ──────────────────────────────────────────────────────────────────
+
+export interface BudgetResponse {
+  monthly_budget: number | null;
+  spent_this_month: number;
+  remaining: number | null;
+  progress_pct: number | null;
+}
+
+export async function getBudget(): Promise<BudgetResponse> {
+  const res = await apiClient.get<BudgetResponse>("/users/me/budget");
+  return res.data;
+}
+
+export async function setBudget(monthlyBudget: number | null): Promise<BudgetResponse> {
+  const res = await apiClient.put<BudgetResponse>("/users/me/budget", {
+    monthly_budget: monthlyBudget,
+  });
+  return res.data;
+}
+
 export async function updateUserProfile(data: {
   notification_mode?: string;
   telegram_chat_id?: number;
@@ -1043,6 +1122,11 @@ export async function updateUserProfile(data: {
 }
 
 // ── Smart Search ─────────────────────────────────────────────────────────────
+
+export async function getProductByBarcode(ean: string): Promise<SmartSearchResult> {
+  const res = await apiClient.get<SmartSearchResult>(`/products/barcode/${ean}`);
+  return res.data;
+}
 
 export async function smartSearch(q: string, limit: number = 10): Promise<SmartSearchResult[]> {
   const res = await apiClient.get<SmartSearchResult[]>("/products/smart-search", {

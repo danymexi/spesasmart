@@ -31,6 +31,7 @@ import {
   type LinkedProductDetail,
 } from "../services/api";
 import { glassCard, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 import { useAppStore } from "../stores/useAppStore";
 import ChainTotalsSummary from "./ChainTotalsSummary";
 import ImportListModal from "./ImportListModal";
@@ -52,6 +53,8 @@ interface ShoppingListProps {
 
 export default function ShoppingList({ listId }: ShoppingListProps) {
   const theme = useTheme();
+  const glass = useGlassTheme();
+  const { colors } = glass;
   const queryClient = useQueryClient();
   const nearbyChains = useAppStore((s) => s.nearbyChains);
   const [customInput, setCustomInput] = useState("");
@@ -257,7 +260,7 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
   const renderPricePills = (itemId: string) => {
     if (loadingCompare) {
       return (
-        <Text variant="labelSmall" style={styles.loadingPrices}>
+        <Text variant="labelSmall" style={[styles.loadingPrices, { color: colors.textMuted }]}>
           Cercando prezzi...
         </Text>
       );
@@ -266,7 +269,7 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
     const compareInfo = compareMap.get(itemId);
     if (!compareInfo || compareInfo.chain_prices.length === 0) {
       return (
-        <Text variant="labelSmall" style={styles.noPrices}>
+        <Text variant="labelSmall" style={[styles.noPrices, { color: colors.textMuted }]}>
           Nessuna offerta trovata
         </Text>
       );
@@ -277,10 +280,10 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
         {compareInfo.chain_prices.map((cp: ChainPriceInfo) => (
           <View
             key={cp.chain_slug}
-            style={[styles.pill, cp.is_best && styles.pillBest]}
+            style={[styles.pill, { backgroundColor: colors.subtleBg }, cp.is_best && styles.pillBest, cp.is_best && { backgroundColor: colors.primarySubtle }]}
           >
             <Text
-              style={[styles.pillText, cp.is_best && styles.pillTextBest]}
+              style={[styles.pillText, { color: colors.textSecondary }, cp.is_best && styles.pillTextBest, cp.is_best && { color: colors.primary }]}
               numberOfLines={1}
             >
               {cp.chain_name} {"\u20AC"}
@@ -300,7 +303,7 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
     return (
       <Pressable
         key={item.id}
-        style={[styles.itemCard, isChecked && styles.itemChecked]}
+        style={[styles.itemCard, glass.card, isChecked && styles.itemChecked]}
         onPress={() => {
           if (hasLinked && !isChecked) {
             setEditingItem(item);
@@ -317,20 +320,20 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
         <View style={styles.itemContent}>
           <Text
             variant="bodyMedium"
-            style={[styles.itemName, isChecked && styles.itemNameChecked]}
+            style={[styles.itemName, { color: colors.textPrimary }, isChecked && styles.itemNameChecked, isChecked && { color: colors.textMuted }]}
             numberOfLines={2}
           >
             {displayName}
             {item.quantity > 1 ? `  x${item.quantity}` : ""}
           </Text>
           {hasLinked && !isChecked && (
-            <Text variant="labelSmall" style={styles.linkedBadge}>
+            <Text variant="labelSmall" style={[styles.linkedBadge, { color: colors.primary }]}>
               {item.linked_product_count} prodotti collegati
             </Text>
           )}
           {!isChecked && renderPricePills(item.id)}
           {item.notes && (
-            <Text variant="labelSmall" style={styles.noteText}>
+            <Text variant="labelSmall" style={[styles.noteText, { color: colors.textMuted }]}>
               {item.notes}
             </Text>
           )}
@@ -373,7 +376,7 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
 
         {/* Autocomplete dropdown */}
         {inputFocused && customInput.trim().length >= 2 && (showSuggestions || loadingSuggestions || selectedSuggestions.size > 0) && (
-          <View style={styles.autocompleteDropdown}>
+          <View style={[styles.autocompleteDropdown, { backgroundColor: colors.surface, borderColor: colors.divider }]}>
             <ScrollView
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
@@ -382,7 +385,7 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
               {loadingSuggestions && suggestions.length === 0 && (
                 <View style={styles.autocompleteLoading}>
                   <ActivityIndicator size={16} />
-                  <Text variant="bodySmall" style={styles.autocompleteLoadingText}>
+                  <Text variant="bodySmall" style={[styles.autocompleteLoadingText, { color: colors.textMuted }]}>
                     Cercando...
                   </Text>
                 </View>
@@ -395,20 +398,20 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
                 return (
                   <Pressable
                     key={result.product.id}
-                    style={[styles.autocompleteItem, isSelected && styles.autocompleteItemSelected]}
+                    style={[styles.autocompleteItem, { borderBottomColor: colors.divider }, isSelected && styles.autocompleteItemSelected, isSelected && { backgroundColor: colors.primarySubtle }]}
                     onPress={() => toggleSuggestionSelection(result)}
                   >
                     <MaterialCommunityIcons
                       name={isSelected ? "checkbox-marked" : "checkbox-blank-outline"}
                       size={20}
-                      color={isSelected ? glassColors.greenDark : "#999"}
+                      color={isSelected ? colors.primary : colors.textMuted}
                       style={styles.autocompleteCheckbox}
                     />
                     <View style={styles.autocompleteTextWrap}>
-                      <Text variant="bodyMedium" style={styles.autocompleteName} numberOfLines={1}>
+                      <Text variant="bodyMedium" style={[styles.autocompleteName, { color: colors.textPrimary }]} numberOfLines={1}>
                         {result.product.name}
                       </Text>
-                      <Text variant="labelSmall" style={styles.autocompleteMeta} numberOfLines={1}>
+                      <Text variant="labelSmall" style={[styles.autocompleteMeta, { color: colors.textMuted }]} numberOfLines={1}>
                         {result.product.brand || ""}
                         {bestOffer
                           ? `${result.product.brand ? " \u00B7 " : ""}\u20AC${Number(bestOffer.offer_price).toFixed(2)} — ${bestOffer.chain_name}`
@@ -421,8 +424,8 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
             </ScrollView>
             {/* Action buttons at bottom */}
             {selectedSuggestions.size > 0 ? (
-              <View style={styles.autocompleteActions}>
-                <Pressable style={styles.autocompleteAddBtn} onPress={handleAddSelected}>
+              <View style={[styles.autocompleteActions, { backgroundColor: colors.surface, borderTopColor: colors.divider }]}>
+                <Pressable style={[styles.autocompleteAddBtn, { backgroundColor: colors.primary }]} onPress={handleAddSelected}>
                   <MaterialCommunityIcons name="cart-plus" size={16} color="#fff" />
                   <Text style={styles.autocompleteAddBtnText}>
                     Aggiungi {selectedSuggestions.size} alla lista
@@ -432,13 +435,13 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
                   style={styles.autocompleteCancelBtn}
                   onPress={() => setSelectedSuggestions(new Map())}
                 >
-                  <Text style={styles.autocompleteCancelText}>Annulla</Text>
+                  <Text style={[styles.autocompleteCancelText, { color: colors.textMuted }]}>Annulla</Text>
                 </Pressable>
               </View>
             ) : (
-              <Pressable style={styles.autocompleteCustom} onPress={handleAddCustom}>
-                <MaterialCommunityIcons name="magnify" size={16} color="#666" />
-                <Text variant="bodySmall" style={styles.autocompleteCustomText} numberOfLines={1}>
+              <Pressable style={[styles.autocompleteCustom, { backgroundColor: colors.surface, borderTopColor: colors.divider }]} onPress={handleAddCustom}>
+                <MaterialCommunityIcons name="magnify" size={16} color={colors.textMuted} />
+                <Text variant="bodySmall" style={[styles.autocompleteCustomText, { color: colors.textMuted }]} numberOfLines={1}>
                   Aggiungi "{customInput.trim()}" (auto-match)
                 </Text>
               </Pressable>
@@ -456,10 +459,10 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
         {/* Empty state */}
         {!isLoading && (items || []).length === 0 && (
           <View style={styles.emptyContainer}>
-            <Text variant="titleMedium" style={styles.emptyTitle}>
+            <Text variant="titleMedium" style={[styles.emptyTitle, { color: colors.textPrimary }]}>
               Lista della spesa vuota
             </Text>
-            <Text variant="bodyMedium" style={styles.emptyText}>
+            <Text variant="bodyMedium" style={[styles.emptyText, { color: colors.textSecondary }]}>
               Aggiungi prodotti dal catalogo o scrivi un articolo qui sopra.
             </Text>
             <Button
@@ -502,7 +505,7 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
               mode="contained"
               icon="cart-check"
               onPress={() => router.push({ pathname: "/shopping-mode", params: { listId: listId ?? "" } })}
-              style={styles.optimizeButton}
+              style={[styles.optimizeButton, { backgroundColor: colors.primary }]}
               labelStyle={styles.actionLabel}
               compact
             >
@@ -544,7 +547,7 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
         {checkedItems.length > 0 && (
           <>
             <View style={styles.checkedHeader}>
-              <Text variant="labelMedium" style={styles.checkedHeaderText}>
+              <Text variant="labelMedium" style={[styles.checkedHeaderText, { color: colors.textMuted }]}>
                 Completati ({checkedItems.length})
               </Text>
             </View>
@@ -583,25 +586,25 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
         <Modal
           visible={!!editingItem}
           onDismiss={() => setEditingItem(null)}
-          contentContainerStyle={styles.modalContainer}
+          contentContainerStyle={[styles.modalContainer, { backgroundColor: colors.surface }]}
         >
           {editingItem && (
             <View>
-              <Text variant="titleMedium" style={styles.modalTitle}>
+              <Text variant="titleMedium" style={[styles.modalTitle, { color: colors.textPrimary }]}>
                 Prodotti collegati
               </Text>
-              <Text variant="bodySmall" style={styles.modalSubtitle}>
+              <Text variant="bodySmall" style={[styles.modalSubtitle, { color: colors.textMuted }]}>
                 {editingItem.custom_name || editingItem.product_name}
               </Text>
               <View style={styles.modalList}>
                 {editingItem.linked_products_details.map((p) => (
-                  <View key={p.id} style={styles.modalItem}>
+                  <View key={p.id} style={[styles.modalItem, { borderBottomColor: colors.divider }]}>
                     <View style={styles.modalItemInfo}>
-                      <Text variant="bodyMedium" style={styles.modalItemName} numberOfLines={2}>
+                      <Text variant="bodyMedium" style={[styles.modalItemName, { color: colors.textPrimary }]} numberOfLines={2}>
                         {p.name}
                       </Text>
                       {p.brand && (
-                        <Text variant="labelSmall" style={styles.modalItemBrand}>
+                        <Text variant="labelSmall" style={[styles.modalItemBrand, { color: colors.textMuted }]}>
                           {p.brand}
                         </Text>
                       )}
@@ -609,7 +612,7 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
                     <IconButton
                       icon="close-circle-outline"
                       size={20}
-                      iconColor="#C62828"
+                      iconColor={colors.error}
                       onPress={() => handleRemoveLinkedProduct(p.id)}
                       style={styles.modalRemoveBtn}
                     />

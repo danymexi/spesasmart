@@ -16,10 +16,12 @@ import { registerUser, loginUser, claimGuestAccount, googleAuth, getUserBrands, 
 import type { NearbyChainInfo, SupermarketAccount, ReceiptItem, ReceiptUploadResponse } from "../../services/api";
 import { registerForPushNotifications } from "../../services/notifications";
 import { glassPanel, glassColors, glassCard } from "../../styles/glassStyles";
+import { useGlassTheme } from "../../styles/useGlassTheme";
 
 export default function SettingsScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const { colors, isDark, panel: themePanel } = useGlassTheme();
   const { isLoggedIn, isGuest, userEmail, setAuth, logout, themeMode, setThemeMode } = useAppStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -38,7 +40,7 @@ export default function SettingsScreen() {
     const handleGoogleCredential = async (response: any) => {
       try {
         const res = await googleAuth(response.credential);
-        setAuth(res.access_token, res.user.id, res.user.email ?? "");
+        setAuth(res.access_token, res.user.id, res.user.email ?? "", false, res.refresh_token);
         showAlert("Accesso con Google", "Hai effettuato l'accesso con Google.");
       } catch {
         setError("Errore durante l'accesso con Google.");
@@ -129,7 +131,7 @@ export default function SettingsScreen() {
       const res = isGuest
         ? await claimGuestAccount(email, password)
         : await registerUser(email, password);
-      setAuth(res.access_token, res.user.id, res.user.email!);
+      setAuth(res.access_token, res.user.id, res.user.email!, false, res.refresh_token);
       setEmail("");
       setPassword("");
       showAlert(
@@ -155,7 +157,7 @@ export default function SettingsScreen() {
     setLoading(true);
     try {
       const res = await loginUser(email, password);
-      setAuth(res.access_token, res.user.id, res.user.email!);
+      setAuth(res.access_token, res.user.id, res.user.email!, false, res.refresh_token);
       setEmail("");
       setPassword("");
     } catch (err: any) {
@@ -187,16 +189,16 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={styles.container}>
       {/* Profile section */}
-      <View style={styles.section}>
+      <View style={[styles.section, themePanel]}>
         <List.Section>
-          <List.Subheader style={styles.listSubheader}>Profilo</List.Subheader>
+          <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>Profilo</List.Subheader>
           {isLoggedIn && !isGuest ? (
             <View style={styles.loggedInSection}>
               <List.Item
                 title="Email"
                 description={userEmail}
-                titleStyle={styles.listTitle}
-                descriptionStyle={styles.listDescription}
+                titleStyle={[styles.listTitle, { color: colors.textPrimary }]}
+                descriptionStyle={[styles.listDescription, { color: colors.textSecondary }]}
                 left={(props) => <List.Icon {...props} icon="account" />}
               />
               <Button
@@ -211,22 +213,22 @@ export default function SettingsScreen() {
           ) : (
             <View style={styles.createSection}>
               {isGuest && (
-                <View style={styles.guestBanner}>
-                  <Text variant="titleSmall" style={styles.guestBannerTitle}>
+                <View style={[styles.guestBanner, { backgroundColor: isDark ? colors.accentSubtle : "rgba(245,127,23,0.08)" }]}>
+                  <Text variant="titleSmall" style={[styles.guestBannerTitle, { color: colors.accent }]}>
                     Stai usando un account ospite
                   </Text>
-                  <Text variant="bodySmall" style={styles.guestBannerText}>
+                  <Text variant="bodySmall" style={[styles.guestBannerText, { color: colors.accent }]}>
                     Registrati per salvare i tuoi dati e accedere da altri dispositivi.
                   </Text>
                 </View>
               )}
-              <Text variant="bodyMedium" style={styles.createText}>
+              <Text variant="bodyMedium" style={[styles.createText, { color: colors.textSecondary }]}>
                 {isGuest
                   ? "Crea il tuo account per non perdere le tue liste e preferenze."
                   : "Accedi o registrati per salvare la tua lista e ricevere notifiche."}
               </Text>
               {error && (
-                <Text variant="bodySmall" style={styles.errorText}>
+                <Text variant="bodySmall" style={[styles.errorText, { color: colors.error }]}>
                   {error}
                 </Text>
               )}
@@ -254,7 +256,7 @@ export default function SettingsScreen() {
               >
                 Accedi con Google
               </Button>
-              <Text variant="labelSmall" style={styles.orDivider}>oppure</Text>
+              <Text variant="labelSmall" style={[styles.orDivider, { color: colors.textMuted }]}>oppure</Text>
               <TextInput
                 label="Email"
                 value={email}
@@ -274,15 +276,38 @@ export default function SettingsScreen() {
               />
               <View style={styles.buttonRow}>
                 {!isGuest && (
-                  <Button
-                    mode="contained"
-                    onPress={handleLogin}
-                    loading={loading}
-                    disabled={!email || !password || loading}
-                    style={styles.authButton}
-                  >
-                    Accedi
-                  </Button>
+                  <>
+                    <Button
+                      mode="contained"
+                      onPress={handleLogin}
+                      loading={loading}
+                      disabled={!email || !password || loading}
+                      style={styles.authButton}
+                    >
+                      Accedi
+                    </Button>
+                    <Button
+                      mode="text"
+                      onPress={() => {
+                        if (!email) {
+                          showAlert("Email richiesta", "Inserisci la tua email per recuperare la password.");
+                          return;
+                        }
+                        (async () => {
+                          try {
+                            const { forgotPassword } = require("../../services/api");
+                            await forgotPassword(email);
+                            showAlert("Controlla i log", "Se l'email e' registrata, un token di reset e' stato generato nei log del server.");
+                          } catch {
+                            showAlert("Errore", "Impossibile inviare la richiesta. Riprova.");
+                          }
+                        })();
+                      }}
+                      compact
+                    >
+                      Password dimenticata?
+                    </Button>
+                  </>
                 )}
                 <Button
                   mode={isGuest ? "contained" : "outlined"}
@@ -300,9 +325,9 @@ export default function SettingsScreen() {
       </View>
 
       {/* Theme */}
-      <View style={styles.section}>
+      <View style={[styles.section, themePanel]}>
         <List.Section>
-          <List.Subheader style={styles.listSubheader}>Aspetto</List.Subheader>
+          <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>Aspetto</List.Subheader>
           <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 12 }}>
             {(["system", "light", "dark"] as const).map((mode) => {
               const labels = { system: "Sistema", light: "Chiaro", dark: "Scuro" };
@@ -324,14 +349,14 @@ export default function SettingsScreen() {
       </View>
 
       {/* Notifications */}
-      <View style={styles.section}>
+      <View style={[styles.section, themePanel]}>
         <List.Section>
-          <List.Subheader style={styles.listSubheader}>Notifiche</List.Subheader>
+          <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>Notifiche</List.Subheader>
           <List.Item
             title="Notifiche Push"
             description="Ricevi avvisi quando i tuoi prodotti sono in offerta"
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
+            titleStyle={[styles.listTitle, { color: colors.textPrimary }]}
+            descriptionStyle={[styles.listDescription, { color: colors.textSecondary }]}
             left={(props) => <List.Icon {...props} icon="bell" />}
             right={() => (
               <Switch
@@ -344,8 +369,8 @@ export default function SettingsScreen() {
           <List.Item
             title="Telegram Bot"
             description="Cerca @SpesaSmartBot su Telegram"
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
+            titleStyle={[styles.listTitle, { color: colors.textPrimary }]}
+            descriptionStyle={[styles.listDescription, { color: colors.textSecondary }]}
             left={(props) => <List.Icon {...props} icon="send" />}
           />
           <List.Item
@@ -355,8 +380,8 @@ export default function SettingsScreen() {
                 ? "Attivo: ricevi un riepilogo ogni lunedi'"
                 : "Disattivo: ricevi notifiche immediate"
             }
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
+            titleStyle={[styles.listTitle, { color: colors.textPrimary }]}
+            descriptionStyle={[styles.listDescription, { color: colors.textSecondary }]}
             left={(props) => <List.Icon {...props} icon="calendar-week" />}
             right={() => (
               <Switch
@@ -373,9 +398,9 @@ export default function SettingsScreen() {
 
       {/* Marche Preferite */}
       {isLoggedIn && (
-        <View style={styles.section}>
+        <View style={[styles.section, themePanel]}>
           <List.Section>
-            <List.Subheader style={styles.listSubheader}>Marche Preferite</List.Subheader>
+            <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>Marche Preferite</List.Subheader>
             <View style={styles.brandInputRow}>
               <TextInput
                 label="Aggiungi marca"
@@ -419,15 +444,15 @@ export default function SettingsScreen() {
                   key={ub.id}
                   title={ub.brand_name}
                   description={ub.category || undefined}
-                  titleStyle={styles.listTitle}
-                  descriptionStyle={styles.listDescription}
+                  titleStyle={[styles.listTitle, { color: colors.textPrimary }]}
+                  descriptionStyle={[styles.listDescription, { color: colors.textSecondary }]}
                   left={(props) => <List.Icon {...props} icon="tag-heart" />}
                   right={() => (
                     <Button
                       mode="text"
                       compact
                       onPress={() => removeBrandMutation.mutate(ub.id)}
-                      textColor="#D32F2F"
+                      textColor={colors.error}
                       icon="close"
                     >
                       {""}
@@ -436,7 +461,7 @@ export default function SettingsScreen() {
                 />
               ))
             ) : (
-              <Text variant="bodySmall" style={styles.brandEmptyText}>
+              <Text variant="bodySmall" style={[styles.brandEmptyText, { color: colors.textMuted }]}>
                 Nessuna marca salvata. Aggiungi le tue marche preferite per ricevere notifiche.
               </Text>
             )}
@@ -446,10 +471,10 @@ export default function SettingsScreen() {
 
       {/* Account Supermercato (Purchase History) */}
       {isLoggedIn && (
-        <View style={styles.section}>
+        <View style={[styles.section, themePanel]}>
           <List.Section>
-            <List.Subheader style={styles.listSubheader}>Account Supermercato</List.Subheader>
-            <Text variant="bodySmall" style={styles.brandEmptyText}>
+            <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>Account Supermercato</List.Subheader>
+            <Text variant="bodySmall" style={[styles.brandEmptyText, { color: colors.textMuted }]}>
               Collega il tuo account per scaricare lo storico ordini e ricevere suggerimenti personalizzati.
             </Text>
             <SupermarketAccountsSection />
@@ -457,18 +482,29 @@ export default function SettingsScreen() {
               mode="outlined"
               icon="history"
               onPress={() => router.push("/purchases")}
-              style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 12 }}
+              style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 4 }}
             >
               Storico Acquisti
+            </Button>
+            <Button
+              mode="outlined"
+              icon="map-marker-radius"
+              onPress={() => router.push("/store-map")}
+              style={{ marginHorizontal: 16, marginBottom: 12 }}
+            >
+              Mappa Negozi
             </Button>
           </List.Section>
         </View>
       )}
 
+      {/* Budget */}
+      {isLoggedIn && <BudgetSection />}
+
       {/* Supermercati (Geolocation + Chains) */}
-      <View style={styles.section}>
+      <View style={[styles.section, themePanel]}>
         <List.Section>
-          <List.Subheader style={styles.listSubheader}>I Tuoi Supermercati</List.Subheader>
+          <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>I Tuoi Supermercati</List.Subheader>
           <NearbyStoresSelector isLoggedIn={isLoggedIn} />
           {isLoggedIn && <ReceiptUploadSection />}
           {isLoggedIn && Platform.OS === "web" && <EsselungaBookmarkletSection />}
@@ -476,21 +512,21 @@ export default function SettingsScreen() {
       </View>
 
       {/* App info */}
-      <View style={styles.section}>
+      <View style={[styles.section, themePanel]}>
         <List.Section>
-          <List.Subheader style={styles.listSubheader}>Info</List.Subheader>
+          <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>Info</List.Subheader>
           <List.Item
             title="Versione"
             description="1.0.0"
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
+            titleStyle={[styles.listTitle, { color: colors.textPrimary }]}
+            descriptionStyle={[styles.listDescription, { color: colors.textSecondary }]}
             left={(props) => <List.Icon {...props} icon="information" />}
           />
           <List.Item
             title="SpesaSmart"
             description="Confronto prezzi supermercati"
-            titleStyle={styles.listTitle}
-            descriptionStyle={styles.listDescription}
+            titleStyle={[styles.listTitle, { color: colors.textPrimary }]}
+            descriptionStyle={[styles.listDescription, { color: colors.textSecondary }]}
             left={(props) => <List.Icon {...props} icon="cart" />}
           />
         </List.Section>
@@ -516,14 +552,14 @@ export default function SettingsScreen() {
 
       {/* Admin link (only for admin users) */}
       {userProfile?.is_admin && (
-        <View style={styles.section}>
+        <View style={[styles.section, themePanel]}>
           <List.Section>
-            <List.Subheader style={styles.listSubheader}>Amministrazione</List.Subheader>
+            <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>Amministrazione</List.Subheader>
             <List.Item
               title="Admin Panel"
               description="Scraping, statistiche, prodotti"
-              titleStyle={styles.listTitle}
-              descriptionStyle={styles.listDescription}
+              titleStyle={[styles.listTitle, { color: colors.textPrimary }]}
+              descriptionStyle={[styles.listDescription, { color: colors.textSecondary }]}
               left={(props) => <List.Icon {...props} icon="shield-crown" />}
               onPress={() => router.push("/admin")}
             />
@@ -571,7 +607,92 @@ interface UploadResult {
   total: string | null;
 }
 
+function BudgetSection() {
+  const { colors } = useGlassTheme();
+  const [budgetInput, setBudgetInput] = useState("");
+  const [editing, setEditing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: budget } = useQuery({
+    queryKey: ["budget"],
+    queryFn: () => {
+      const { getBudget } = require("../../services/api");
+      return getBudget();
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async (value: number | null) => {
+      const { setBudget } = require("../../services/api");
+      return setBudget(value);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["budget"] });
+      setEditing(false);
+    },
+  });
+
+  const handleSave = () => {
+    const val = parseFloat(budgetInput);
+    saveMutation.mutate(isNaN(val) || val <= 0 ? null : val);
+  };
+
+  return (
+    <View style={[styles.section, { backgroundColor: colors.surface }]}>
+      <List.Section>
+        <List.Subheader style={[styles.listSubheader, { color: colors.primary }]}>Budget Mensile</List.Subheader>
+        {budget && budget.monthly_budget != null && !editing && (
+          <>
+            <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
+                <Text variant="bodyMedium" style={{ color: colors.textSecondary }}>
+                  Speso: {"\u20AC"}{budget.spent_this_month.toFixed(2)} / {"\u20AC"}{budget.monthly_budget.toFixed(2)}
+                </Text>
+                <Text variant="bodyMedium" style={{ color: (budget.remaining ?? 0) >= 0 ? "#16A34A" : "#DC2626", fontWeight: "600" }}>
+                  {(budget.remaining ?? 0) >= 0 ? `Rimangono \u20AC${(budget.remaining ?? 0).toFixed(2)}` : `Superato \u20AC${Math.abs(budget.remaining ?? 0).toFixed(2)}`}
+                </Text>
+              </View>
+              <View style={{ height: 8, backgroundColor: "rgba(0,0,0,0.08)", borderRadius: 4, overflow: "hidden" }}>
+                <View style={{
+                  height: 8,
+                  borderRadius: 4,
+                  width: `${Math.min(budget.progress_pct ?? 0, 100)}%`,
+                  backgroundColor: (budget.progress_pct ?? 0) < 60 ? "#16A34A" : (budget.progress_pct ?? 0) < 85 ? "#F59E0B" : "#DC2626",
+                }} />
+              </View>
+            </View>
+            <Button mode="text" onPress={() => { setEditing(true); setBudgetInput(String(budget.monthly_budget)); }}>
+              Modifica budget
+            </Button>
+          </>
+        )}
+        {(editing || !budget?.monthly_budget) && (
+          <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+            <TextInput
+              label="Budget mensile (\u20AC)"
+              value={budgetInput}
+              onChangeText={setBudgetInput}
+              keyboardType="numeric"
+              mode="outlined"
+              style={{ marginBottom: 8 }}
+            />
+            <Button
+              mode="contained"
+              onPress={handleSave}
+              loading={saveMutation.isPending}
+              disabled={!budgetInput.trim()}
+            >
+              Salva
+            </Button>
+          </View>
+        )}
+      </List.Section>
+    </View>
+  );
+}
+
 function ReceiptUploadSection() {
+  const { colors, isDark } = useGlassTheme();
   const queryClient = useQueryClient();
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [chainSlug, setChainSlug] = useState(RECEIPT_CHAINS[0].slug);
@@ -725,8 +846,8 @@ function ReceiptUploadSection() {
   return (
     <View style={receiptStyles.container}>
       <View style={receiptStyles.header}>
-        <Text style={receiptStyles.title}>Carica scontrini</Text>
-        <Text style={receiptStyles.subtitle}>
+        <Text style={[receiptStyles.title, { color: colors.textPrimary }]}>Carica scontrini</Text>
+        <Text style={[receiptStyles.subtitle, { color: colors.textMuted }]}>
           Foto, immagini o PDF (anche multipli)
         </Text>
       </View>
@@ -760,7 +881,7 @@ function ReceiptUploadSection() {
             <View style={{ marginTop: 10 }}>
               {selectedFiles.map((f, idx) => (
                 <View key={idx} style={receiptStyles.fileRow}>
-                  <Text style={receiptStyles.fileName} numberOfLines={1}>
+                  <Text style={[receiptStyles.fileName, { color: colors.textPrimary }]} numberOfLines={1}>
                     {f.isPdf ? "PDF" : "IMG"} — {f.name}
                   </Text>
                   <IconButton
@@ -773,7 +894,7 @@ function ReceiptUploadSection() {
               ))}
 
               <View style={receiptStyles.chainSelector}>
-                <Text style={receiptStyles.chainLabel}>Catena:</Text>
+                <Text style={[receiptStyles.chainLabel, { color: colors.textPrimary }]}>Catena:</Text>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                   {RECEIPT_CHAINS.map((c) => (
                     <Chip
@@ -813,47 +934,47 @@ function ReceiptUploadSection() {
       )}
 
       {error && (
-        <View style={receiptStyles.errorBox}>
-          <Text style={receiptStyles.errorText}>{error}</Text>
+        <View style={[receiptStyles.errorBox, { backgroundColor: colors.errorSubtle }]}>
+          <Text style={[receiptStyles.errorText, { color: colors.error }]}>{error}</Text>
           <Button mode="text" compact onPress={reset}>Riprova</Button>
         </View>
       )}
 
       {results.length > 0 && (
-        <View style={receiptStyles.resultBox}>
+        <View style={[receiptStyles.resultBox, { backgroundColor: colors.subtleBg, borderColor: colors.subtleBorder }]}>
           {results.map((result, rIdx) => (
-            <View key={rIdx} style={rIdx > 0 ? { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "rgba(0,0,0,0.08)" } : undefined}>
-              <View style={receiptStyles.resultHeader}>
-                <Text style={receiptStyles.resultTitle}>
+            <View key={rIdx} style={rIdx > 0 ? { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.subtleBorder } : undefined}>
+              <View style={[receiptStyles.resultHeader, { borderBottomColor: colors.subtleBorder }]}>
+                <Text style={[receiptStyles.resultTitle, { color: colors.textPrimary }]}>
                   {result.store_name || `Scontrino ${rIdx + 1}`}
                 </Text>
                 {result.date && (
-                  <Text style={receiptStyles.resultDate}>{result.date}</Text>
+                  <Text style={[receiptStyles.resultDate, { color: colors.textMuted }]}>{result.date}</Text>
                 )}
               </View>
 
               {result.items.map((item, idx) => (
                 <View key={idx} style={receiptStyles.itemRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={receiptStyles.itemName}>{item.name}</Text>
+                    <Text style={[receiptStyles.itemName, { color: colors.textPrimary }]}>{item.name}</Text>
                     {item.category && (
-                      <Text style={receiptStyles.itemCategory}>{item.category}</Text>
+                      <Text style={[receiptStyles.itemCategory, { color: colors.textMuted }]}>{item.category}</Text>
                     )}
                   </View>
-                  <Text style={receiptStyles.itemPrice}>{item.total_price}</Text>
+                  <Text style={[receiptStyles.itemPrice, { color: colors.textPrimary }]}>{item.total_price}</Text>
                 </View>
               ))}
 
               {result.total && (
-                <View style={receiptStyles.totalRow}>
-                  <Text style={receiptStyles.totalLabel}>Totale</Text>
-                  <Text style={receiptStyles.totalValue}>{result.total}</Text>
+                <View style={[receiptStyles.totalRow, { borderTopColor: colors.divider }]}>
+                  <Text style={[receiptStyles.totalLabel, { color: colors.textPrimary }]}>Totale</Text>
+                  <Text style={[receiptStyles.totalValue, { color: colors.primary }]}>{result.total}</Text>
                 </View>
               )}
             </View>
           ))}
 
-          <Text style={receiptStyles.savedHint}>
+          <Text style={[receiptStyles.savedHint, { color: colors.primary }]}>
             Salvati nello storico acquisti ({totalItems} prodotti da {results.length} scontrin{results.length === 1 ? "o" : "i"})
           </Text>
 
@@ -1043,6 +1164,7 @@ function useBookmarkletCode() {
 }
 
 function EsselungaBookmarkletSection() {
+  const { colors } = useGlassTheme();
   const [copied, setCopied] = useState(false);
   const { accessToken } = useAppStore();
   const linkRef = useRef<HTMLSpanElement>(null);
@@ -1085,20 +1207,20 @@ function EsselungaBookmarkletSection() {
   return (
     <View style={bookmarkletStyles.container}>
       <View style={bookmarkletStyles.header}>
-        <Text style={bookmarkletStyles.title}>Importa scontrini Esselunga</Text>
-        <Text style={bookmarkletStyles.subtitle}>
+        <Text style={[bookmarkletStyles.title, { color: colors.textPrimary }]}>Importa scontrini Esselunga</Text>
+        <Text style={[bookmarkletStyles.subtitle, { color: colors.textMuted }]}>
           Importa automaticamente tutti gli scontrini dal tuo account Esselunga
         </Text>
       </View>
 
       <View style={bookmarkletStyles.steps}>
-        <Text style={bookmarkletStyles.step}>
+        <Text style={[bookmarkletStyles.step, { color: colors.textPrimary }]}>
           1. Trascina il link verde nella barra dei segnalibri (oppure copialo)
         </Text>
-        <Text style={bookmarkletStyles.step}>
+        <Text style={[bookmarkletStyles.step, { color: colors.textPrimary }]}>
           2. Vai su esselunga.it/area-utenti e apri "I tuoi scontrini"
         </Text>
-        <Text style={bookmarkletStyles.step}>
+        <Text style={[bookmarkletStyles.step, { color: colors.textPrimary }]}>
           3. Clicca il segnalibro: gli scontrini vengono scaricati e importati in SpesaSmart
         </Text>
       </View>
@@ -1116,7 +1238,7 @@ function EsselungaBookmarkletSection() {
         </Button>
       </View>
 
-      <Text style={bookmarkletStyles.warning}>
+      <Text style={[bookmarkletStyles.warning, { color: colors.error }]}>
         Il link contiene il tuo token di accesso. Non condividerlo con nessuno.
       </Text>
     </View>
@@ -1163,6 +1285,7 @@ function RemoteBrowserLogin({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { colors: themeColors } = useGlassTheme();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [starting, setStarting] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1457,6 +1580,7 @@ function RemoteBrowserLogin({
 }
 
 function SupermarketAccountsSection() {
+  const { colors } = useGlassTheme();
   const queryClient = useQueryClient();
   const router = useRouter();
   const isNative = Platform.OS !== "web";
@@ -1483,9 +1607,9 @@ function SupermarketAccountsSection() {
   const connectedSlugs = new Set((accounts || []).map((a) => a.chain_slug));
 
   const getStatusColor = (acc: SupermarketAccount) => {
-    if (acc.session_status === "active" && acc.is_valid) return "#2E7D32";
-    if (acc.session_status === "expired" || !acc.is_valid) return "#E65100";
-    return "#9E9E9E";
+    if (acc.session_status === "active" && acc.is_valid) return colors.primary;
+    if (acc.session_status === "expired" || !acc.is_valid) return colors.accent;
+    return colors.textMuted;
   };
 
   const getStatusLabel = (acc: SupermarketAccount) => {
@@ -1509,10 +1633,10 @@ function SupermarketAccountsSection() {
     <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
       {/* Connected accounts */}
       {accounts && accounts.length > 0 && accounts.map((acc) => (
-        <View key={acc.chain_slug} style={smStyles.accountRow}>
+        <View key={acc.chain_slug} style={[smStyles.accountRow, { borderBottomColor: colors.subtleBorder }]}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Text style={smStyles.accountChain}>
+              <Text style={[smStyles.accountChain, { color: colors.textPrimary }]}>
                 {acc.chain_slug.charAt(0).toUpperCase() + acc.chain_slug.slice(1)}
               </Text>
               <View style={[smStyles.statusBadge, { backgroundColor: getStatusColor(acc) + "20" }]}>
@@ -1523,10 +1647,10 @@ function SupermarketAccountsSection() {
               </View>
             </View>
             {acc.last_error && (
-              <Text style={smStyles.accountError}>{acc.last_error}</Text>
+              <Text style={[smStyles.accountError, { color: colors.error }]}>{acc.last_error}</Text>
             )}
             {acc.last_synced_at && (
-              <Text style={smStyles.accountSync}>
+              <Text style={[smStyles.accountSync, { color: colors.textMuted }]}>
                 Ultimo sync: {new Date(acc.last_synced_at).toLocaleDateString("it-IT")}
               </Text>
             )}
@@ -1570,7 +1694,7 @@ function SupermarketAccountsSection() {
               mode="text"
               compact
               icon="close"
-              textColor="#D32F2F"
+              textColor={colors.error}
               onPress={() => removeMutation.mutate(acc.chain_slug)}
             >
               {""}
@@ -1752,6 +1876,7 @@ const CHAIN_OPTIONS = [
 ];
 
 function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
+  const { colors } = useGlassTheme();
   const queryClient = useQueryClient();
   const {
     userLat, userLon, nearbyChains,
@@ -1855,13 +1980,13 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
           onPress={handleGeolocate}
           loading={locating}
           disabled={locating}
-          style={styles.geoButton}
+          style={[styles.geoButton, { backgroundColor: colors.primary }]}
           labelStyle={{ fontWeight: "600" }}
         >
           Usa la mia posizione
         </Button>
         {userLat && userLon && (
-          <Text style={styles.geoCoords}>
+          <Text style={[styles.geoCoords, { color: colors.textMuted }]}>
             {Number(userLat).toFixed(4)}, {Number(userLon).toFixed(4)}
           </Text>
         )}
@@ -1876,10 +2001,12 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
             onPress={() => handleRadiusChange(km)}
             style={[
               styles.radiusChip,
-              radiusKm === km && styles.radiusChipSelected,
+              { backgroundColor: colors.surface, borderColor: colors.divider },
+              radiusKm === km && { backgroundColor: colors.primary, borderColor: colors.primary },
             ]}
             textStyle={[
               styles.radiusChipText,
+              { color: colors.textSecondary },
               radiusKm === km && styles.radiusChipTextSelected,
             ]}
             showSelectedCheck={false}
@@ -1892,11 +2019,11 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
       {/* Nearby chains results */}
       {nearbyData && nearbyData.length > 0 && (
         <View style={styles.nearbyInfo}>
-          <Text style={styles.nearbyLabel}>
+          <Text style={[styles.nearbyLabel, { color: colors.primary }]}>
             {nearbyData.length} catene trovate entro {radiusKm}km
           </Text>
           {nearbyData.map((nc) => (
-            <Text key={nc.chain_slug} style={styles.nearbyDetail}>
+            <Text key={nc.chain_slug} style={[styles.nearbyDetail, { color: colors.textSecondary }]}>
               {nc.chain_name}: {nc.store_count} negozi (min. {nc.min_distance_km}km)
             </Text>
           ))}
@@ -1904,14 +2031,14 @@ function NearbyStoresSelector({ isLoggedIn }: { isLoggedIn: boolean }) {
       )}
 
       {/* Chain toggles */}
-      <Text variant="bodySmall" style={styles.chainHint}>
+      <Text variant="bodySmall" style={[styles.chainHint, { color: colors.textMuted }]}>
         Seleziona le catene. Se nessuna selezionata, le mostra tutte.
       </Text>
       {CHAIN_OPTIONS.map((chain) => (
         <List.Item
           key={chain.slug}
           title={chain.label}
-          titleStyle={{ color: "#1a1a1a" }}
+          titleStyle={{ color: colors.textPrimary }}
           left={(props) => <List.Icon {...props} icon="store" />}
           right={() => (
             <Switch

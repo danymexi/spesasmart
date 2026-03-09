@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ActivityIndicator, Button, Chip, Searchbar, Snackbar, Text } from "react-native-paper";
+import { ActivityIndicator, Avatar, Button, Chip, Searchbar, Snackbar, Text } from "react-native-paper";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import type { SmartSearchResult } from "../../services/api";
@@ -9,6 +9,7 @@ import {
   addToShoppingList,
   getActiveOffers,
   getBestOffers,
+  getChains,
   getHistoricLows,
   getShoppingListCount,
   getShoppingListCompare,
@@ -17,13 +18,12 @@ import {
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import OfferCard from "../../components/OfferCard";
 import SmartCompareCard from "../../components/SmartCompareCard";
+import BudgetProgressBar from "../../components/BudgetProgressBar";
 import HomeSpesaSummary from "../../components/HomeSpesaSummary";
 import { SkeletonList } from "../../components/Skeleton";
 import { useAppStore } from "../../stores/useAppStore";
 import { glassCard, glassColors, glassChip, glassPanel, glassSearchbar } from "../../styles/glassStyles";
 import { useGlassTheme } from "../../styles/useGlassTheme";
-
-const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal", "Carrefour", "Conad", "Eurospin", "Aldi", "MD Discount", "Penny Market", "PAM Panorama"];
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -32,6 +32,11 @@ export default function HomeScreen() {
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const catalogProducts = useAppStore((s) => s.catalogProducts);
   const nearbyChains = useAppStore((s) => s.nearbyChains);
+  const { data: chainsData } = useQuery({
+    queryKey: ["chains"],
+    queryFn: getChains,
+    staleTime: 3600000,
+  });
   const [selectedChain, setSelectedChain] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -194,8 +199,8 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={isLoading} onRefresh={onRefresh} />}
       >
         {/* Header */}
-        <View style={styles.header}>
-          <Text variant="headlineMedium" style={[styles.headerTitle, { color: glass.colors.greenDark }]}>
+        <View style={[styles.header, glass.panel, { backgroundColor: glass.colors.primarySubtle }]}>
+          <Text variant="headlineMedium" style={[styles.headerTitle, { color: glass.colors.primary }]}>
             SpesaSmart
           </Text>
           <Text variant="bodyMedium" style={[styles.headerSubtitle, { color: glass.colors.textSecondary }]}>
@@ -214,7 +219,7 @@ export default function HomeScreen() {
             value={searchQuery}
             onChangeText={setSearchQuery}
             onSubmitEditing={handleQuickAdd}
-            style={styles.searchbar}
+            style={[styles.searchbar, glass.searchbar]}
             inputStyle={styles.searchInput}
             elevation={0}
             right={() =>
@@ -222,7 +227,7 @@ export default function HomeScreen() {
                 <MaterialCommunityIcons
                   name="cart-plus"
                   size={22}
-                  color={glassColors.greenMedium}
+                  color={glass.colors.primaryMuted}
                   style={{ marginRight: 12 }}
                   onPress={handleQuickAdd}
                 />
@@ -247,13 +252,16 @@ export default function HomeScreen() {
                 />
               ))
             ) : (
-              <Text variant="bodyMedium" style={styles.emptyText}>
+              <Text variant="bodyMedium" style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
                 Nessun prodotto trovato per "{debouncedQuery}"
               </Text>
             )}
           </View>
         ) : (
           <>
+            {/* ─── Budget progress ─── */}
+            {isLoggedIn && <BudgetProgressBar />}
+
             {/* ─── Shopping list summary ─── */}
             {hasShoppingList && (
               compareData ? (
@@ -263,24 +271,24 @@ export default function HomeScreen() {
                 />
               ) : (
                 <Pressable
-                  style={styles.shoppingBanner}
+                  style={[styles.shoppingBanner, glass.card, { borderColor: glass.colors.primarySubtle }]}
                   onPress={() => router.push("/(tabs)/watchlist")}
                 >
                   <MaterialCommunityIcons
                     name="cart-check"
                     size={20}
-                    color={glassColors.greenDark}
+                    color={glass.colors.primary}
                   />
-                  <Text style={styles.bannerText}>
+                  <Text style={[styles.bannerText, { color: glass.colors.primary }]}>
                     {shoppingListCount} articol{shoppingListCount === 1 ? "o" : "i"} nella lista
                   </Text>
                   {loadingCompare ? (
-                    <ActivityIndicator size={14} color={glassColors.greenMedium} />
+                    <ActivityIndicator size={14} color={glass.colors.primaryMuted} />
                   ) : (
                     <MaterialCommunityIcons
                       name="chevron-right"
                       size={18}
-                      color={glassColors.textMuted}
+                      color={glass.colors.textMuted}
                     />
                   )}
                 </Pressable>
@@ -293,18 +301,18 @@ export default function HomeScreen() {
                 <MaterialCommunityIcons
                   name="cart-outline"
                   size={48}
-                  color={glassColors.greenSubtle}
+                  color={glass.colors.primaryFaded}
                 />
-                <Text style={styles.emptyStateTitle}>
+                <Text style={[styles.emptyStateTitle, { color: glass.colors.primary }]}>
                   La tua lista della spesa e' vuota
                 </Text>
-                <Text style={styles.emptyStateSubtitle}>
+                <Text style={[styles.emptyStateSubtitle, { color: glass.colors.textMuted }]}>
                   Aggiungi prodotti per confrontare i prezzi tra catene
                 </Text>
                 <Button
                   mode="contained"
                   onPress={() => router.push("/(tabs)/search")}
-                  style={styles.emptyStateBtn}
+                  style={[styles.emptyStateBtn, { backgroundColor: glass.colors.primary }]}
                   labelStyle={{ fontWeight: "600" }}
                 >
                   Sfoglia il Catalogo
@@ -318,18 +326,18 @@ export default function HomeScreen() {
                 <MaterialCommunityIcons
                   name="account-outline"
                   size={48}
-                  color={glassColors.greenSubtle}
+                  color={glass.colors.primaryFaded}
                 />
-                <Text style={styles.emptyStateTitle}>
+                <Text style={[styles.emptyStateTitle, { color: glass.colors.primary }]}>
                   Accedi per la spesa personalizzata
                 </Text>
-                <Text style={styles.emptyStateSubtitle}>
+                <Text style={[styles.emptyStateSubtitle, { color: glass.colors.textMuted }]}>
                   Confronta prezzi, ottimizza la spesa e risparmia
                 </Text>
                 <Button
                   mode="contained"
                   onPress={() => router.push("/(tabs)/settings")}
-                  style={styles.emptyStateBtn}
+                  style={[styles.emptyStateBtn, { backgroundColor: glass.colors.primary }]}
                   labelStyle={{ fontWeight: "600" }}
                 >
                   Accedi
@@ -343,25 +351,27 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               style={styles.chips}
             >
-              {CHAINS.map((chain) => (
+              {(chainsData ?? []).map((chain) => (
                 <Chip
-                  key={chain}
+                  key={chain.slug}
                   style={[
                     styles.chip,
-                    selectedChain === chain && styles.chipSelected,
+                    glass.chip,
+                    selectedChain === chain.name && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }],
                   ]}
-                  selected={selectedChain === chain}
+                  selected={selectedChain === chain.name}
                   onPress={() =>
-                    setSelectedChain(selectedChain === chain ? null : chain)
+                    setSelectedChain(selectedChain === chain.name ? null : chain.name)
                   }
+                  avatar={chain.logo_url ? <Avatar.Image size={24} source={{ uri: chain.logo_url }} /> : undefined}
                 >
-                  {chain}
+                  {chain.name}
                 </Chip>
               ))}
             </ScrollView>
 
             {/* Best offers */}
-            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.greenDark }]}>
+            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.primary }]}>
               Migliori Offerte
             </Text>
             {filteredBest.length > 0 ? (
@@ -377,7 +387,7 @@ export default function HomeScreen() {
                 ))}
               </ScrollView>
             ) : (
-              <Text variant="bodyMedium" style={styles.emptyText}>
+              <Text variant="bodyMedium" style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
                 Nessuna offerta disponibile
               </Text>
             )}
@@ -387,9 +397,9 @@ export default function HomeScreen() {
               <MaterialCommunityIcons
                 name="trending-down"
                 size={22}
-                color={glass.colors.greenDark}
+                color={glass.colors.primary}
               />
-              <Text variant="titleLarge" style={[styles.sectionTitleInline, { color: glass.colors.greenDark }]}>
+              <Text variant="titleLarge" style={[styles.sectionTitleInline, { color: glass.colors.primary }]}>
                 Minimi Storici
               </Text>
             </View>
@@ -406,13 +416,13 @@ export default function HomeScreen() {
                 ))}
               </ScrollView>
             ) : (
-              <Text variant="bodyMedium" style={styles.emptyText}>
+              <Text variant="bodyMedium" style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
                 Nessun minimo storico disponibile
               </Text>
             )}
 
             {/* All active offers */}
-            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.greenDark }]}>
+            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.primary }]}>
               Offerte Attive
             </Text>
             {filteredActive.map((offer) => (
@@ -426,12 +436,12 @@ export default function HomeScreen() {
 
       {/* Floating action: multi-add to shopping list */}
       {selectedProducts.size > 0 && (
-        <View style={styles.floatingAction}>
+        <View style={[styles.floatingAction, { backgroundColor: glass.colors.surface }]}>
           <Button
             mode="contained"
             onPress={handleMultiAdd}
             loading={addMutation.isPending}
-            style={styles.floatingBtn}
+            style={[styles.floatingBtn, { backgroundColor: glass.colors.primary }]}
             labelStyle={styles.floatingBtnLabel}
             icon="cart-plus"
           >
@@ -440,7 +450,7 @@ export default function HomeScreen() {
           <Button
             mode="text"
             onPress={() => setSelectedProducts(new Map())}
-            labelStyle={styles.floatingCancelLabel}
+            labelStyle={[styles.floatingCancelLabel, { color: glass.colors.textMuted }]}
           >
             Annulla
           </Button>

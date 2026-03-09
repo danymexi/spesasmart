@@ -677,15 +677,20 @@ async def list_purchases(
 
     result = await db.execute(stmt)
     orders = result.scalars().all()
+    if not orders:
+        return []
+
+    # Batch count items per order
+    order_ids = [order.id for order in orders]
+    counts_result = await db.execute(
+        select(PurchaseItem.order_id, func.count())
+        .where(PurchaseItem.order_id.in_(order_ids))
+        .group_by(PurchaseItem.order_id)
+    )
+    counts_map = {str(row[0]): row[1] for row in counts_result.all()}
 
     response = []
     for order in orders:
-        # Count items
-        count_result = await db.execute(
-            select(func.count()).where(PurchaseItem.order_id == order.id)
-        )
-        items_count = count_result.scalar() or 0
-
         raw = order.raw_data or {}
         response.append(PurchaseOrderResponse(
             id=str(order.id),
@@ -695,7 +700,7 @@ async def list_purchases(
             total_amount=float(order.total_amount) if order.total_amount else None,
             store_name=order.store_name,
             status=order.status,
-            items_count=items_count,
+            items_count=counts_map.get(str(order.id), 0),
             has_receipt=bool(raw.get("receipt_filename")),
             source=raw.get("source"),
         ))
@@ -721,24 +726,18 @@ async def get_purchase_items(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found.")
 
+    from app.models.product import Product
+
     items_result = await db.execute(
-        select(PurchaseItem)
+        select(PurchaseItem, Product.name.label("product_name"))
+        .outerjoin(Product, PurchaseItem.product_id == Product.id)
         .where(PurchaseItem.order_id == order.id)
         .order_by(PurchaseItem.external_name)
     )
-    items = items_result.scalars().all()
+    rows = items_result.all()
 
     response = []
-    for item in items:
-        # Get matched product name if available
-        product_name = None
-        if item.product_id:
-            from app.models.product import Product
-            prod_result = await db.execute(
-                select(Product.name).where(Product.id == item.product_id)
-            )
-            product_name = prod_result.scalar_one_or_none()
-
+    for item, product_name in rows:
         response.append(PurchaseItemResponse(
             id=str(item.id),
             external_name=item.external_name,

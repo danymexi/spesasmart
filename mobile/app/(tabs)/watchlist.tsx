@@ -148,7 +148,7 @@ export default function WatchlistScreen() {
                         {item.target_price &&
                           Number(item.best_current_price) <= Number(item.target_price) && (
                             <View style={[{ marginTop: 4 }, glass.alertBadge]}>
-                              <Text style={{ color: glass.colors.greenMedium, fontSize: 10, fontWeight: "bold" }}>SOTTO TARGET</Text>
+                              <Text style={{ color: glass.colors.primaryMuted, fontSize: 10, fontWeight: "bold" }}>SOTTO TARGET</Text>
                             </View>
                           )}
                       </>
@@ -182,10 +182,10 @@ export default function WatchlistScreen() {
           }}
           ListEmptyComponent={
             <View style={styles.centered}>
-              <Text variant="titleMedium" style={styles.emptyTitle}>
+              <Text variant="titleMedium" style={[styles.emptyTitle, { color: glass.colors.textPrimary }]}>
                 Lista vuota
               </Text>
-              <Text variant="bodyMedium" style={styles.emptyText}>
+              <Text variant="bodyMedium" style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
                 Cerca prodotti e aggiungili alla tua lista per monitorare i prezzi.
               </Text>
               <Button mode="contained" onPress={() => router.push("/(tabs)/search")}>

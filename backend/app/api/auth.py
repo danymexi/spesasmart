@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import create_access_token, get_current_user, hash_password, verify_password
+from app.auth import create_access_token, create_refresh_token, get_current_user, hash_password, verify_password
 from app.database import get_db
 from app.models.user import UserProfile
 
@@ -48,6 +48,7 @@ class UserResponse(BaseModel):
 
 class AuthResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     user: UserResponse
 
 
@@ -74,8 +75,10 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     token = create_access_token(str(user.id), user.email)
+    refresh = create_refresh_token(str(user.id))
     return AuthResponse(
         access_token=token,
+        refresh_token=refresh,
         user=UserResponse.model_validate(user),
     )
 
@@ -90,8 +93,10 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     token = create_access_token(str(user.id), user.email)
+    refresh = create_refresh_token(str(user.id))
     return AuthResponse(
         access_token=token,
+        refresh_token=refresh,
         user=UserResponse.model_validate(user),
     )
 
@@ -110,8 +115,10 @@ async def create_guest(db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     token = create_access_token(str(user.id), "")
+    refresh = create_refresh_token(str(user.id))
     return AuthResponse(
         access_token=token,
+        refresh_token=refresh,
         user=UserResponse.model_validate(user),
     )
 
@@ -152,8 +159,10 @@ async def claim_guest(
     await db.refresh(user)
 
     token = create_access_token(str(user.id), user.email)
+    refresh = create_refresh_token(str(user.id))
     return AuthResponse(
         access_token=token,
+        refresh_token=refresh,
         user=UserResponse.model_validate(user),
     )
 
@@ -223,7 +232,133 @@ async def google_auth(
     await db.refresh(user)
 
     token = create_access_token(str(user.id), user.email or "")
+    refresh = create_refresh_token(str(user.id))
     return AuthResponse(
         access_token=token,
+        refresh_token=refresh,
+        user=UserResponse.model_validate(user),
+    )
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/refresh", response_model=AuthResponse)
+async def refresh_token(data: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Exchange a valid refresh token for a new access + refresh token pair."""
+    from jose import JWTError, jwt as jose_jwt
+    from app.config import get_settings
+
+    settings = get_settings()
+    try:
+        payload = jose_jwt.decode(
+            data.refresh_token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+    result = await db.execute(select(UserProfile).where(UserProfile.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    new_access = create_access_token(str(user.id), user.email or "")
+    new_refresh = create_refresh_token(str(user.id))
+    return AuthResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        user=UserResponse.model_validate(user),
+    )
+
+
+# ── Password Reset ────────────────────────────────────────────────────────────
+
+def _create_reset_token(user_id: str, email: str) -> str:
+    """Create a short-lived reset token (1 hour)."""
+    from datetime import timedelta, timezone, datetime
+    from jose import jwt as jose_jwt
+    from app.config import get_settings
+
+    settings = get_settings()
+    expire = datetime.now(timezone.utc) + timedelta(hours=1)
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "type": "reset",
+        "exp": expire,
+    }
+    return jose_jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password")
+async def forgot_password(data: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """Generate a password reset token. Always returns 200 to prevent email enumeration."""
+    result = await db.execute(
+        select(UserProfile).where(UserProfile.email == data.email)
+    )
+    user = result.scalar_one_or_none()
+    if user:
+        token = _create_reset_token(str(user.id), user.email)
+        # Log the token (no email sending for now)
+        logger.info("Password reset token for %s: %s", data.email, token)
+
+    return {"message": "If this email is registered, a reset link has been generated. Check server logs."}
+
+
+@router.post("/reset-password", response_model=AuthResponse)
+async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """Validate a reset token and set a new password."""
+    from jose import JWTError, jwt as jose_jwt
+    from app.config import get_settings
+
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    settings = get_settings()
+    try:
+        payload = jose_jwt.decode(
+            data.token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        if payload.get("type") != "reset":
+            raise HTTPException(status_code=400, detail="Invalid token type")
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    result = await db.execute(select(UserProfile).where(UserProfile.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    user.password_hash = hash_password(data.new_password)
+    await db.flush()
+    await db.refresh(user)
+
+    access = create_access_token(str(user.id), user.email or "")
+    refresh = create_refresh_token(str(user.id))
+    return AuthResponse(
+        access_token=access,
+        refresh_token=refresh,
         user=UserResponse.model_validate(user),
     )

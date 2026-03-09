@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getProductCompare, addToShoppingList, CompareOffer } from "../../../services/api";
 import { useAppStore } from "../../../stores/useAppStore";
 import { glassCard, glassColors } from "../../../styles/glassStyles";
+import { useGlassTheme } from "../../../styles/useGlassTheme";
 
 const CHAIN_COLORS: Record<string, string> = {
   esselunga: "#E30613",
@@ -24,6 +25,7 @@ const CHAIN_COLORS: Record<string, string> = {
 export default function CompareScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
+  const glass = useGlassTheme();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const queryClient = useQueryClient();
 
@@ -106,6 +108,7 @@ export default function CompareScreen() {
             key={offer.chain_slug}
             style={[
               styles.offerCard,
+              glass.card,
               isCheapest && styles.cheapestCard,
             ]}
           >

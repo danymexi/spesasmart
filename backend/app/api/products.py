@@ -1324,6 +1324,36 @@ async def search_products(
     return results
 
 
+@router.get("/barcode/{ean}", response_model=SmartSearchResult)
+async def get_product_by_barcode(ean: str, db: AsyncSession = Depends(get_db)):
+    """Look up a product by barcode (EAN) and return it with offers."""
+    result = await db.execute(
+        select(Product).where(Product.barcode == ean)
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found for this barcode")
+
+    today = date.today()
+    offers_result = await db.execute(
+        select(Offer)
+        .options(joinedload(Offer.chain))
+        .where(
+            Offer.product_id == product.id,
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+        )
+        .order_by(Offer.offer_price)
+    )
+    offers = offers_result.unique().scalars().all()
+
+    from app.services.price_analyzer import PriceAnalyzer
+    analyzer = PriceAnalyzer()
+    indicator = await analyzer.get_indicator(product.id, db) if offers else None
+
+    return _build_smart_result(product, list(offers), indicator)
+
+
 @router.get("/{product_id}", response_model=ProductResponse)
 async def get_product(product_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Product).where(Product.id == product_id))

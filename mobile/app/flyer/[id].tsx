@@ -5,10 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, router } from "expo-router";
 import { getFlyer, getFlyerPages, getFlyerProducts } from "../../services/api";
 import { glassCard, glassColors, glassPanel } from "../../styles/glassStyles";
+import { useGlassTheme } from "../../styles/useGlassTheme";
 
 export default function FlyerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
+  const glass = useGlassTheme();
   const { width: screenWidth } = useWindowDimensions();
   const [viewMode, setViewMode] = useState("pages");
   // Cap page width for large screens (desktop web)
@@ -40,7 +42,7 @@ export default function FlyerDetailScreen() {
     <View style={styles.container}>
       {/* Flyer info header */}
       {flyer && (
-        <View style={styles.header}>
+        <View style={[styles.header, glass.panel]}>
           <Text variant="titleMedium" style={styles.title}>
             {flyer.title ?? "Volantino"}
           </Text>
@@ -106,7 +108,7 @@ export default function FlyerDetailScreen() {
           keyExtractor={(item, idx) => `${item.product_id}-${idx}`}
           renderItem={({ item }) => (
             <View
-              style={styles.productCard}
+              style={[styles.productCard, glass.card]}
             >
               <View style={styles.productContent}>
                 <View style={styles.productInfo}>

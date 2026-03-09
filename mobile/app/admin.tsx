@@ -10,8 +10,10 @@ import {
   type AdminChainStatus,
 } from "../services/api";
 import { glassCard, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 function ChainStatusCard({ chain }: { chain: AdminChainStatus }) {
+  const glass = useGlassTheme();
   const queryClient = useQueryClient();
   const triggerMutation = useMutation({
     mutationFn: () => adminTriggerScraping(chain.chain_slug),
@@ -22,7 +24,7 @@ function ChainStatusCard({ chain }: { chain: AdminChainStatus }) {
   const statusColor = isStale ? "#E65100" : glassColors.greenDark;
 
   return (
-    <View style={styles.chainCard}>
+    <View style={[styles.chainCard, glass.card]}>
       <View style={styles.chainHeader}>
         <MaterialCommunityIcons name="store" size={20} color={statusColor} />
         <Text variant="titleMedium" style={[styles.chainName, { color: statusColor }]}>
@@ -65,6 +67,7 @@ function ChainStatusCard({ chain }: { chain: AdminChainStatus }) {
 }
 
 export default function AdminScreen() {
+  const glass = useGlassTheme();
   const { data: scraping, isLoading: loadingScraping } = useQuery({
     queryKey: ["adminScraping"],
     queryFn: getAdminScrapingStatus,
@@ -87,13 +90,13 @@ export default function AdminScreen() {
       ) : scraping ? (
         <>
           <View style={styles.summaryRow}>
-            <View style={styles.summaryCard}>
+            <View style={[styles.summaryCard, glass.card]}>
               <Text variant="headlineMedium" style={styles.summaryValue}>
                 {scraping.total_offers}
               </Text>
               <Text variant="labelSmall" style={styles.summaryLabel}>Offerte totali</Text>
             </View>
-            <View style={styles.summaryCard}>
+            <View style={[styles.summaryCard, glass.card]}>
               <Text variant="headlineMedium" style={styles.summaryValue}>
                 {scraping.total_products}
               </Text>
@@ -116,32 +119,32 @@ export default function AdminScreen() {
         <Text style={styles.loading}>Caricamento...</Text>
       ) : stats ? (
         <View style={styles.statsGrid}>
-          <View style={styles.statsCard}>
+          <View style={[styles.statsCard, glass.card]}>
             <Text variant="headlineSmall" style={styles.statsCardValue}>
               {stats.total_products}
             </Text>
             <Text variant="labelSmall" style={styles.statsCardLabel}>Prodotti totali</Text>
           </View>
-          <View style={styles.statsCard}>
+          <View style={[styles.statsCard, glass.card]}>
             <Text variant="headlineSmall" style={styles.statsCardValue}>
               {stats.products_with_images}
             </Text>
             <Text variant="labelSmall" style={styles.statsCardLabel}>Con immagine</Text>
           </View>
-          <View style={styles.statsCard}>
+          <View style={[styles.statsCard, glass.card]}>
             <Text variant="headlineSmall" style={[styles.statsCardValue, { color: "#E65100" }]}>
               {stats.products_without_images}
             </Text>
             <Text variant="labelSmall" style={styles.statsCardLabel}>Senza immagine</Text>
           </View>
-          <View style={styles.statsCard}>
+          <View style={[styles.statsCard, glass.card]}>
             <Text variant="headlineSmall" style={styles.statsCardValue}>
               {stats.total_active_offers}
             </Text>
             <Text variant="labelSmall" style={styles.statsCardLabel}>Offerte attive</Text>
           </View>
           {stats.avg_discount_pct != null && (
-            <View style={styles.statsCard}>
+            <View style={[styles.statsCard, glass.card]}>
               <Text variant="headlineSmall" style={styles.statsCardValue}>
                 {stats.avg_discount_pct}%
               </Text>
@@ -153,7 +156,7 @@ export default function AdminScreen() {
 
       {/* Categories breakdown */}
       {stats && Object.keys(stats.products_by_category).length > 0 && (
-        <View style={styles.categorySection}>
+        <View style={[styles.categorySection, glass.card]}>
           <Text variant="titleMedium" style={styles.categoryTitle}>Per categoria</Text>
           {Object.entries(stats.products_by_category)
             .sort(([, a], [, b]) => b - a)

@@ -1,10 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
-import { FlatList, StyleSheet, View } from "react-native";
-import { Searchbar, Chip, Text, ActivityIndicator, Snackbar } from "react-native-paper";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { FlatList, ScrollView, StyleSheet, View } from "react-native";
+import { Searchbar, Avatar, Chip, Text, ActivityIndicator, Snackbar } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
+import { router } from "expo-router";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   addToShoppingList,
+  getBestOffers,
   getCatalogGrouped,
+  getChains,
   getWatchlistIds,
   addToWatchlist,
   removeFromWatchlist,
@@ -12,6 +16,7 @@ import {
 } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import ExpandableCatalogCard from "../../components/ExpandableCatalogCard";
+import OfferCard from "../../components/OfferCard";
 import CategoryPicker from "../../components/CategoryPicker";
 import { SkeletonList } from "../../components/Skeleton";
 import {
@@ -29,8 +34,6 @@ const SORT_OPTIONS = [
   { key: "price_per_unit", label: "Prezzo/unita'" },
 ] as const;
 
-const CHAINS = ["Esselunga", "Lidl", "Coop", "Iperal", "Carrefour", "Conad", "Eurospin", "Aldi", "MD Discount", "Penny Market", "PAM Panorama"];
-
 export default function CatalogScreen() {
   const glass = useGlassTheme();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
@@ -40,13 +43,32 @@ export default function CatalogScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedSort, setSelectedSort] = useState<string>("name");
   const [selectedChain, setSelectedChain] = useState<string | null>(null);
+  const { data: chainsData } = useQuery({
+    queryKey: ["chains"],
+    queryFn: getChains,
+    staleTime: 3600000,
+  });
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [snackbar, setSnackbar] = useState<{ visible: boolean; message: string }>({
     visible: false,
     message: "",
   });
 
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   // Are we browsing (have any filter/search active)?
-  const isBrowsing = !!query || !!selectedCategory || !!selectedChain;
+  const isBrowsing = !!debouncedQuery || !!selectedCategory || !!selectedChain;
+
+  // Best offers for empty state
+  const { data: bestOffers } = useQuery({
+    queryKey: ["bestOffers", 8],
+    queryFn: () => getBestOffers(8),
+    enabled: !isBrowsing,
+  });
 
   // Local search from preloaded catalog (instant results while API loads)
   const localResults = useMemo(() => {
@@ -65,10 +87,10 @@ export default function CatalogScreen() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ["catalogGrouped", query, selectedCategory, selectedSort, selectedChain],
+    queryKey: ["catalogGrouped", debouncedQuery, selectedCategory, selectedSort, selectedChain],
     queryFn: ({ pageParam = 0 }) =>
       getCatalogGrouped({
-        q: query || undefined,
+        q: debouncedQuery || undefined,
         category: selectedCategory ?? undefined,
         sort: selectedSort !== "name" ? selectedSort : undefined,
         chain: selectedChain ? selectedChain.toLowerCase() : undefined,
@@ -202,6 +224,15 @@ export default function CatalogScreen() {
         onChangeText={setQuery}
         value={query}
         style={[styles.searchbar, glass.searchbar]}
+        right={() => (
+          <MaterialCommunityIcons
+            name="barcode-scan"
+            size={22}
+            color={glass.colors.primaryMuted}
+            style={{ marginRight: 12 }}
+            onPress={() => router.push("/barcode-scanner")}
+          />
+        )}
       />
 
       {/* Sort chips */}
@@ -221,25 +252,47 @@ export default function CatalogScreen() {
 
       {/* Chain chips */}
       <View style={styles.chipRow}>
-        {CHAINS.map((ch) => (
+        {(chainsData ?? []).map((ch) => (
           <Chip
-            key={ch}
-            selected={selectedChain === ch}
-            onPress={() => setSelectedChain(selectedChain === ch ? null : ch)}
-            style={[styles.filterChip, glass.chip, selectedChain === ch && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }]]}
+            key={ch.slug}
+            selected={selectedChain === ch.name}
+            onPress={() => setSelectedChain(selectedChain === ch.name ? null : ch.name)}
+            style={[styles.filterChip, glass.chip, selectedChain === ch.name && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }]]}
+            avatar={ch.logo_url ? <Avatar.Image size={24} source={{ uri: ch.logo_url }} /> : undefined}
             compact
           >
-            {ch}
+            {ch.name}
           </Chip>
         ))}
       </View>
 
       {/* Category picker (tiles when idle, chips when browsing) */}
       {!isBrowsing ? (
-        <CategoryPicker
-          selectedCategory={selectedCategory}
-          onSelectCategory={setSelectedCategory}
-        />
+        <>
+          <CategoryPicker
+            selectedCategory={selectedCategory}
+            onSelectCategory={setSelectedCategory}
+          />
+          {/* Best offers empty state */}
+          {bestOffers && bestOffers.length > 0 && (
+            <>
+              <Text variant="titleMedium" style={[styles.bestOffersTitle, { color: glass.colors.primary }]}>
+                Migliori offerte
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.bestOffersList}
+              >
+                {bestOffers.map((offer) => (
+                  <View key={offer.id} style={styles.bestOfferCard}>
+                    <OfferCard offer={offer} compact />
+                  </View>
+                ))}
+              </ScrollView>
+            </>
+          )}
+        </>
       ) : (
         <>
           <CategoryPicker
@@ -315,6 +368,9 @@ const styles = StyleSheet.create({
   loader: { marginTop: 40 },
   footerLoader: { paddingVertical: 16 },
   emptyText: { textAlign: "center", marginTop: 40, color: "#555", paddingHorizontal: 20 },
+  bestOffersTitle: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, fontWeight: "700" },
+  bestOffersList: { paddingHorizontal: 12 },
+  bestOfferCard: { width: 260, marginRight: 12 },
   listContent: { paddingBottom: 96 },
   snackbar: { marginBottom: 80 },
   separator: {

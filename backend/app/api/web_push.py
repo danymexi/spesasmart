@@ -1,16 +1,26 @@
 """Web Push subscription endpoints (DB-backed)."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import get_current_user
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models.user import WebPushSubscription
+from app.models.user import UserProfile, WebPushSubscription
 from app.services.web_push_sender import send_web_push
 
 router = APIRouter(prefix="/web-push", tags=["web-push"])
+
+
+# ── Admin key dependency ─────────────────────────────────────────────────────
+
+async def require_admin_key(x_admin_key: str = Header(...)):
+    settings = get_settings()
+    if not settings.admin_api_key or x_admin_key != settings.admin_api_key:
+        raise HTTPException(status_code=403, detail="Invalid or missing admin API key")
+    return True
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -27,7 +37,6 @@ class PushSubscription(BaseModel):
 
 
 class SubscribeRequest(BaseModel):
-    user_id: str
     subscription: PushSubscription
 
 
@@ -49,9 +58,12 @@ async def get_vapid_public_key(settings: Settings = Depends(get_settings)):
 
 
 @router.post("/subscribe")
-async def subscribe(req: SubscribeRequest, db: AsyncSession = Depends(get_db)):
-    """Save or update a Web Push subscription for a user."""
-    # Upsert: if endpoint already exists, update keys and user
+async def subscribe(
+    req: SubscribeRequest,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save or update a Web Push subscription for the authenticated user."""
     existing = await db.execute(
         select(WebPushSubscription).where(
             WebPushSubscription.endpoint == req.subscription.endpoint
@@ -60,12 +72,12 @@ async def subscribe(req: SubscribeRequest, db: AsyncSession = Depends(get_db)):
     sub = existing.scalar_one_or_none()
 
     if sub:
-        sub.user_id = req.user_id
+        sub.user_id = user.id
         sub.p256dh = req.subscription.keys.p256dh
         sub.auth = req.subscription.keys.auth
     else:
         sub = WebPushSubscription(
-            user_id=req.user_id,
+            user_id=user.id,
             endpoint=req.subscription.endpoint,
             p256dh=req.subscription.keys.p256dh,
             auth=req.subscription.keys.auth,
@@ -73,25 +85,29 @@ async def subscribe(req: SubscribeRequest, db: AsyncSession = Depends(get_db)):
         db.add(sub)
 
     await db.flush()
-    return {"status": "subscribed", "user_id": req.user_id}
+    return {"status": "subscribed", "user_id": str(user.id)}
 
 
-@router.delete("/subscribe/{user_id}")
-async def unsubscribe(user_id: str, db: AsyncSession = Depends(get_db)):
-    """Remove all Web Push subscriptions for a user."""
+@router.delete("/subscribe")
+async def unsubscribe(
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove all Web Push subscriptions for the authenticated user."""
     await db.execute(
-        delete(WebPushSubscription).where(WebPushSubscription.user_id == user_id)
+        delete(WebPushSubscription).where(WebPushSubscription.user_id == user.id)
     )
-    return {"status": "unsubscribed", "user_id": user_id}
+    return {"status": "unsubscribed", "user_id": str(user.id)}
 
 
 @router.post("/send")
 async def send_push(
     req: PushMessageRequest,
+    _=Depends(require_admin_key),
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
 ):
-    """Send a push notification to a specific user (for testing/admin)."""
+    """Send a push notification to a specific user (admin only)."""
     result = await db.execute(
         select(WebPushSubscription).where(WebPushSubscription.user_id == req.user_id)
     )

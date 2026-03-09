@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { optimizeTrip, type TripOptimizationResult, type StoreTrip, type OptimizeParams } from "../services/api";
 import { glassCard, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface Props {
   visible: boolean;
@@ -15,6 +16,7 @@ interface Props {
 const MAX_STORES_OPTIONS = [1, 2, 3, 4, 5];
 
 export default function TripOptimizer({ visible, onDismiss, listId }: Props) {
+  const { colors } = useGlassTheme();
   const [tab, setTab] = useState<string>("single");
   const [showSettings, setShowSettings] = useState(false);
   const [maxStores, setMaxStores] = useState(3);
@@ -39,31 +41,31 @@ export default function TripOptimizer({ visible, onDismiss, listId }: Props) {
       <Modal
         visible={visible}
         onDismiss={onDismiss}
-        contentContainerStyle={styles.modal}
+        contentContainerStyle={[styles.modal, { backgroundColor: colors.surface }]}
       >
         <View style={styles.header}>
-          <MaterialCommunityIcons name="map-marker-path" size={24} color={glassColors.greenDark} />
-          <Text variant="titleLarge" style={styles.title}>Ottimizza Spesa</Text>
+          <MaterialCommunityIcons name="map-marker-path" size={24} color={colors.primary} />
+          <Text variant="titleLarge" style={[styles.title, { color: colors.primary }]}>Ottimizza Spesa</Text>
           <Pressable onPress={() => setShowSettings(!showSettings)} style={styles.settingsBtn}>
             <MaterialCommunityIcons
               name={showSettings ? "chevron-up" : "tune-variant"}
               size={22}
-              color={glassColors.greenDark}
+              color={colors.primary}
             />
           </Pressable>
         </View>
 
         {/* Collapsible settings panel */}
         {showSettings && (
-          <View style={styles.settingsPanel}>
-            <Text variant="labelMedium" style={styles.settingsLabel}>Max negozi</Text>
+          <View style={[styles.settingsPanel, { backgroundColor: colors.subtleBg }]}>
+            <Text variant="labelMedium" style={[styles.settingsLabel, { color: colors.textSecondary }]}>Max negozi</Text>
             <View style={styles.chipRow}>
               {MAX_STORES_OPTIONS.map((n) => (
                 <Chip
                   key={n}
                   selected={maxStores === n}
                   onPress={() => setMaxStores(n)}
-                  style={[styles.chip, maxStores === n && styles.chipSelected]}
+                  style={[styles.chip, { backgroundColor: colors.subtleBg }, maxStores === n && styles.chipSelected, maxStores === n && { backgroundColor: colors.primarySubtle }]}
                   compact
                 >
                   {n}
@@ -73,25 +75,25 @@ export default function TripOptimizer({ visible, onDismiss, listId }: Props) {
 
             <View style={styles.settingsRow}>
               <View style={styles.settingsField}>
-                <Text variant="labelMedium" style={styles.settingsLabel}>Raggio (km)</Text>
+                <Text variant="labelMedium" style={[styles.settingsLabel, { color: colors.textSecondary }]}>Raggio (km)</Text>
                 <TextInput
                   value={radiusKm}
                   onChangeText={setRadiusKm}
                   keyboardType="numeric"
                   mode="outlined"
                   dense
-                  style={styles.settingsInput}
+                  style={[styles.settingsInput, { backgroundColor: colors.surface }]}
                 />
               </View>
               <View style={styles.settingsField}>
-                <Text variant="labelMedium" style={styles.settingsLabel}>Costo viaggio ({"\u20AC"})</Text>
+                <Text variant="labelMedium" style={[styles.settingsLabel, { color: colors.textSecondary }]}>Costo viaggio ({"\u20AC"})</Text>
                 <TextInput
                   value={travelCost}
                   onChangeText={setTravelCost}
                   keyboardType="numeric"
                   mode="outlined"
                   dense
-                  style={styles.settingsInput}
+                  style={[styles.settingsInput, { backgroundColor: colors.surface }]}
                 />
               </View>
             </View>
@@ -109,9 +111,9 @@ export default function TripOptimizer({ visible, onDismiss, listId }: Props) {
         />
 
         {isLoading ? (
-          <Text style={styles.loading}>Analisi in corso...</Text>
+          <Text style={[styles.loading, { color: colors.textMuted }]}>Analisi in corso...</Text>
         ) : !data ? (
-          <Text style={styles.empty}>Aggiungi prodotti alla lista della spesa per ottimizzare.</Text>
+          <Text style={[styles.empty, { color: colors.textMuted }]}>Aggiungi prodotti alla lista della spesa per ottimizzare.</Text>
         ) : (
           <ScrollView style={styles.content}>
             {tab === "single" ? (
@@ -122,12 +124,12 @@ export default function TripOptimizer({ visible, onDismiss, listId }: Props) {
 
             {/* Missing items section */}
             {data.missing_items.length > 0 && (
-              <View style={styles.missingSection}>
-                <Text variant="labelMedium" style={styles.missingSectionTitle}>
+              <View style={[styles.missingSection, { backgroundColor: colors.accentSubtle }]}>
+                <Text variant="labelMedium" style={[styles.missingSectionTitle, { color: colors.accent }]}>
                   Prodotti senza offerte ({data.missing_items.length})
                 </Text>
                 {data.missing_items.map((item, i) => (
-                  <Text key={i} variant="bodySmall" style={styles.missingItem}>
+                  <Text key={i} variant="bodySmall" style={[styles.missingItem, { color: colors.textMuted }]}>
                     {item.search_term ? `${item.search_term} → ` : ""}{item.product_name}
                   </Text>
                 ))}
@@ -145,44 +147,45 @@ export default function TripOptimizer({ visible, onDismiss, listId }: Props) {
 }
 
 function StoreRow({ store, itemsTotal, isCheapest }: { store: StoreTrip; itemsTotal: number; isCheapest: boolean }) {
+  const { colors } = useGlassTheme();
   const [expanded, setExpanded] = useState(false);
   const coveragePct = Math.round(store.coverage_pct * 100);
 
   return (
-    <View style={[styles.storeRow, isCheapest && styles.storeRowCheapest]}>
+    <View style={[styles.storeRow, { backgroundColor: colors.subtleBg }, isCheapest && styles.storeRowCheapest, isCheapest && { backgroundColor: colors.primarySubtle, borderColor: colors.primarySubtleStrong }]}>
       <Pressable onPress={() => setExpanded(!expanded)} style={styles.storeRowHeader}>
-        <MaterialCommunityIcons name="store" size={18} color={isCheapest ? glassColors.greenDark : "#555"} />
+        <MaterialCommunityIcons name="store" size={18} color={isCheapest ? colors.primary : colors.textSecondary} />
         <View style={styles.storeRowInfo}>
-          <Text variant="titleSmall" style={[styles.storeRowName, isCheapest && styles.storeRowNameCheapest]}>
+          <Text variant="titleSmall" style={[styles.storeRowName, { color: colors.textPrimary }, isCheapest && styles.storeRowNameCheapest, isCheapest && { color: colors.primary }]}>
             {store.chain_name}
           </Text>
           <View style={styles.badgeRow}>
-            <Text variant="labelSmall" style={styles.coverageBadge}>
+            <Text variant="labelSmall" style={[styles.coverageBadge, { color: colors.textMuted }]}>
               {store.items_covered}/{itemsTotal} ({coveragePct}%)
             </Text>
             {store.distance_km != null && (
-              <Text variant="labelSmall" style={styles.distanceBadge}>
+              <Text variant="labelSmall" style={[styles.distanceBadge, { color: colors.textMuted }]}>
                 {store.distance_km} km
               </Text>
             )}
           </View>
         </View>
-        <Text variant="titleMedium" style={[styles.storeRowTotal, isCheapest && styles.storeRowTotalCheapest]}>
+        <Text variant="titleMedium" style={[styles.storeRowTotal, { color: colors.textPrimary }, isCheapest && styles.storeRowTotalCheapest, isCheapest && { color: colors.primary }]}>
           {"\u20AC"}{Number(store.total).toFixed(2)}
         </Text>
         <MaterialCommunityIcons
           name={expanded ? "chevron-up" : "chevron-down"}
           size={20}
-          color="#888"
+          color={colors.textMuted}
         />
       </Pressable>
       {expanded && (
-        <View style={styles.storeRowItems}>
+        <View style={[styles.storeRowItems, { borderTopColor: colors.subtleBorder }]}>
           {store.items.map((item, i) => (
-            <View key={i} style={styles.itemRow}>
+            <View key={i} style={[styles.itemRow, { borderBottomColor: colors.subtleBorder }]}>
               <View style={styles.itemNameColumn}>
                 {item.search_term && (
-                  <Text variant="labelSmall" style={styles.searchTermLabel} numberOfLines={1}>
+                  <Text variant="labelSmall" style={[styles.searchTermLabel, { color: colors.textMuted }]} numberOfLines={1}>
                     {item.search_term}
                   </Text>
                 )}
@@ -202,10 +205,11 @@ function StoreRow({ store, itemsTotal, isCheapest }: { store: StoreTrip; itemsTo
 }
 
 function AllStoresView({ data }: { data: TripOptimizationResult }) {
+  const { colors } = useGlassTheme();
   const stores = data.all_single_stores;
 
   if (stores.length === 0) {
-    return <Text style={styles.empty}>Nessuna offerta trovata per i prodotti in lista.</Text>;
+    return <Text style={[styles.empty, { color: colors.textMuted }]}>Nessuna offerta trovata per i prodotti in lista.</Text>;
   }
 
   // Find cheapest store (by total, among those with max coverage)
@@ -217,8 +221,8 @@ function AllStoresView({ data }: { data: TripOptimizationResult }) {
   return (
     <View>
       {data.items_not_covered > 0 && (
-        <View style={styles.warningBanner}>
-          <Text variant="bodySmall" style={styles.warningText}>
+        <View style={[styles.warningBanner, { backgroundColor: colors.accentSubtle }]}>
+          <Text variant="bodySmall" style={[styles.warningText, { color: colors.accent }]}>
             {data.items_not_covered} prodott{data.items_not_covered === 1 ? "o" : "i"} senza offerte attive
           </Text>
         </View>
@@ -235,7 +239,7 @@ function AllStoresView({ data }: { data: TripOptimizationResult }) {
 
       {data.potential_savings > 0 && (
         <View style={styles.savingsHint}>
-          <Text variant="bodySmall" style={styles.savingsText}>
+          <Text variant="bodySmall" style={[styles.savingsText, { color: colors.accent }]}>
             Con piu' negozi potresti risparmiare {"\u20AC"}{Number(data.potential_savings).toFixed(2)}
           </Text>
         </View>
@@ -245,33 +249,35 @@ function AllStoresView({ data }: { data: TripOptimizationResult }) {
 }
 
 function MultiStoreView({ data }: { data: TripOptimizationResult }) {
+  const { colors } = useGlassTheme();
+
   if (data.multi_store_plan.length === 0) {
-    return <Text style={styles.empty}>Nessuna offerta trovata per i prodotti in lista.</Text>;
+    return <Text style={[styles.empty, { color: colors.textMuted }]}>Nessuna offerta trovata per i prodotti in lista.</Text>;
   }
 
   return (
     <View>
       {data.potential_savings > 0 && (
-        <View style={styles.savingsBanner}>
-          <Text variant="titleSmall" style={styles.savingsBannerText}>
+        <View style={[styles.savingsBanner, { backgroundColor: colors.primarySubtle }]}>
+          <Text variant="titleSmall" style={[styles.savingsBannerText, { color: colors.primary }]}>
             Risparmio: {"\u20AC"}{Number(data.potential_savings).toFixed(2)}
           </Text>
         </View>
       )}
 
       <View style={styles.totalRow}>
-        <Text variant="bodyMedium" style={styles.totalLabel}>Totale prodotti</Text>
-        <Text variant="titleMedium" style={styles.totalPrice}>
+        <Text variant="bodyMedium" style={[styles.totalLabel, { color: colors.textMuted }]}>Totale prodotti</Text>
+        <Text variant="titleMedium" style={[styles.totalPrice, { color: colors.primary }]}>
           {"\u20AC"}{Number(data.multi_store_total).toFixed(2)}
         </Text>
       </View>
 
       {data.travel_cost > 0 && (
         <View style={styles.totalRow}>
-          <Text variant="bodyMedium" style={styles.totalLabel}>
+          <Text variant="bodyMedium" style={[styles.totalLabel, { color: colors.textMuted }]}>
             Costo viaggio ({data.multi_store_plan.length} negozi)
           </Text>
-          <Text variant="bodyMedium" style={styles.travelCostText}>
+          <Text variant="bodyMedium" style={[styles.travelCostText, { color: colors.accent }]}>
             +{"\u20AC"}{Number(data.travel_cost).toFixed(2)}
           </Text>
         </View>
@@ -280,24 +286,24 @@ function MultiStoreView({ data }: { data: TripOptimizationResult }) {
       {data.multi_store_plan.map((trip) => (
         <View key={trip.chain_name} style={styles.storeSection}>
           <View style={styles.storeHeader}>
-            <MaterialCommunityIcons name="store" size={16} color={glassColors.greenDark} />
-            <Text variant="titleSmall" style={styles.storeSectionName}>
+            <MaterialCommunityIcons name="store" size={16} color={colors.primary} />
+            <Text variant="titleSmall" style={[styles.storeSectionName, { color: colors.primary }]}>
               {trip.chain_name}
             </Text>
             {trip.distance_km != null && (
-              <Text variant="labelSmall" style={styles.distanceBadge}>
+              <Text variant="labelSmall" style={[styles.distanceBadge, { color: colors.textMuted }]}>
                 {trip.distance_km} km
               </Text>
             )}
-            <Text variant="bodySmall" style={styles.storeSubtotal}>
+            <Text variant="bodySmall" style={[styles.storeSubtotal, { color: colors.textMuted }]}>
               {"\u20AC"}{Number(trip.total).toFixed(2)}
             </Text>
           </View>
           {trip.items.map((item, i) => (
-            <View key={i} style={styles.itemRow}>
+            <View key={i} style={[styles.itemRow, { borderBottomColor: colors.subtleBorder }]}>
               <View style={styles.itemNameColumn}>
                 {item.search_term && (
-                  <Text variant="labelSmall" style={styles.searchTermLabel} numberOfLines={1}>
+                  <Text variant="labelSmall" style={[styles.searchTermLabel, { color: colors.textMuted }]} numberOfLines={1}>
                     {item.search_term}
                   </Text>
                 )}

@@ -22,25 +22,25 @@ const queryClient = new QueryClient({
 
 const lightTheme = {
   ...MD3LightTheme,
-  roundness: 20,
+  roundness: 16,
   colors: {
     ...MD3LightTheme.colors,
-    primary: "#2E7D32",
-    secondary: "#FF6F00",
-    surface: "rgba(255,255,255,0.72)",
-    background: "transparent",
+    primary: "#2563EB",
+    secondary: "#F97316",
+    surface: "#FFFFFF",
+    background: "#F5F5F5",
   },
 };
 
 const darkTheme = {
   ...MD3DarkTheme,
-  roundness: 20,
+  roundness: 16,
   colors: {
     ...MD3DarkTheme.colors,
-    primary: "#66BB6A",
-    secondary: "#FFB74D",
-    surface: "rgba(30,30,30,0.72)",
-    background: "transparent",
+    primary: "#60A5FA",
+    secondary: "#FB923C",
+    surface: "#1E1E2E",
+    background: "#121212",
   },
 };
 
@@ -70,7 +70,7 @@ export default function RootLayout() {
     const { isLoggedIn, setGuest } = useAppStore.getState();
     if (!isLoggedIn) {
       createGuestUser()
-        .then((res) => setGuest(res.access_token, res.user.id))
+        .then((res) => setGuest(res.access_token, res.user.id, res.refresh_token))
         .catch(() => {}); // silently fail if offline
     }
   }, []);
@@ -119,8 +119,8 @@ export default function RootLayout() {
           <Stack
             screenOptions={{
               headerStyle: glass.header as any,
-              headerTintColor: glass.colors.greenDark,
-              headerTitleStyle: { fontWeight: "bold", color: glass.colors.greenDark },
+              headerTintColor: glass.colors.primary,
+              headerTitleStyle: { fontWeight: "bold", color: glass.colors.primary },
               headerShadowVisible: false,
               contentStyle: glass.background,
             }}
@@ -141,6 +141,14 @@ export default function RootLayout() {
             <Stack.Screen
               name="shopping-mode"
               options={{ title: "Modalit\u00e0 Spesa", presentation: "fullScreenModal", headerShown: false }}
+            />
+            <Stack.Screen
+              name="barcode-scanner"
+              options={{ title: "Scansiona Barcode", presentation: "modal", headerShown: false }}
+            />
+            <Stack.Screen
+              name="store-map"
+              options={{ title: "Mappa Negozi", headerShown: false }}
             />
             <Stack.Screen
               name="admin"

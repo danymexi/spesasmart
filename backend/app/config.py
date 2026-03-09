@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Credential encryption (Fernet key for supermarket account passwords)
     credential_encryption_key: str = ""
 
+    # Admin
+    admin_api_key: str = ""
+
     # Scheduler
     scheduler_enabled: bool = True
 

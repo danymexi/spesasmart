@@ -13,6 +13,7 @@ import {
   productImage,
   imagePlaceholder,
 } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 
 interface Offer {
   id: string;
@@ -53,6 +54,8 @@ function formatShortDate(iso: string): string {
 
 export default function OfferCard({ offer, compact }: Props) {
   const theme = useTheme();
+  const glass = useGlassTheme();
+  const { colors } = glass;
   const queryClient = useQueryClient();
   const imgSize = compact ? productImage.compact : productImage.card;
 
@@ -86,20 +89,20 @@ export default function OfferCard({ offer, compact }: Props) {
   const prevPrice = offer.previous_price != null ? Number(offer.previous_price) : null;
   const curPrice = Number(offer.offer_price);
   let trendIcon: "arrow-down" | "arrow-up" | "minus" = "minus";
-  let trendColor = "#888";
+  let trendColor = colors.textMuted;
   if (prevPrice != null) {
     if (curPrice < prevPrice) {
       trendIcon = "arrow-down";
-      trendColor = "#2E7D32"; // green
+      trendColor = colors.success;
     } else if (curPrice > prevPrice) {
       trendIcon = "arrow-up";
-      trendColor = "#C62828"; // red
+      trendColor = colors.error;
     }
   }
 
   return (
     <Pressable
-      style={compact ? styles.compactCard : styles.card}
+      style={[compact ? styles.compactCard : styles.card, glass.card]}
       onPress={() => router.push(`/product/${offer.product_id}`)}
     >
       <View style={styles.content}>
@@ -115,7 +118,7 @@ export default function OfferCard({ offer, compact }: Props) {
             <MaterialCommunityIcons
               name="food-variant"
               size={compact ? 24 : 32}
-              color="#ccc"
+              color={colors.textMuted}
             />
           </View>
         )}
@@ -123,18 +126,18 @@ export default function OfferCard({ offer, compact }: Props) {
         <View style={styles.textSection}>
           {/* Chain badge */}
           <View style={styles.chainBadge}>
-            <Text variant="labelSmall" style={styles.chainText}>
+            <Text variant="labelSmall" style={[styles.chainText, { color: colors.primary }]}>
               {offer.chain_name}
             </Text>
           </View>
 
           {/* Product name */}
-          <Text variant="titleSmall" numberOfLines={compact ? 1 : 2} style={styles.productName}>
+          <Text variant="titleSmall" numberOfLines={compact ? 1 : 2} style={[styles.productName, { color: colors.textPrimary }]}>
             {offer.product_name}
           </Text>
 
           {offer.brand && (
-            <Text variant="bodySmall" style={styles.brand}>
+            <Text variant="bodySmall" style={[styles.brand, { color: colors.textSecondary }]}>
               {offer.brand}
             </Text>
           )}
@@ -145,13 +148,13 @@ export default function OfferCard({ offer, compact }: Props) {
               {"\u20AC"}{Number(offer.offer_price).toFixed(2)}
             </Text>
             {offer.original_price && (
-              <Text variant="bodyMedium" style={styles.originalPrice}>
+              <Text variant="bodyMedium" style={[styles.originalPrice, { color: colors.textMuted }]}>
                 {"\u20AC"}{Number(offer.original_price).toFixed(2)}
               </Text>
             )}
             {offer.discount_pct && (
               <View style={styles.discountBadge}>
-                <Text style={styles.discountText}>
+                <Text style={[styles.discountText, { color: colors.accent }]}>
                   -{Number(offer.discount_pct).toFixed(0)}%
                 </Text>
               </View>
@@ -172,12 +175,12 @@ export default function OfferCard({ offer, compact }: Props) {
           {!compact && (
             <View style={styles.footer}>
               {offer.quantity && (
-                <Text variant="labelSmall" style={styles.quantity}>
+                <Text variant="labelSmall" style={[styles.quantity, { color: colors.textMuted }]}>
                   {offer.quantity}
                 </Text>
               )}
               {offer.valid_to && (
-                <Text variant="labelSmall" style={styles.validTo}>
+                <Text variant="labelSmall" style={[styles.validTo, { color: colors.textMuted }]}>
                   Fino al {new Date(offer.valid_to).toLocaleDateString("it-IT")}
                 </Text>
               )}

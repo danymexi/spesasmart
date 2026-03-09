@@ -35,6 +35,7 @@ class UserProfile(Base):
     preferred_chains: Mapped[str | None] = mapped_column(String(200), nullable=True)
     lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
     lon: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
+    monthly_budget: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -9,7 +9,7 @@ import {
   clearCheckedItems,
   type ShoppingListItem,
 } from "../services/api";
-import { glassColors } from "../styles/glassStyles";
+
 
 export default function ShoppingModeScreen() {
   const params = useLocalSearchParams<{ listId?: string }>();
@@ -53,6 +53,17 @@ export default function ShoppingModeScreen() {
   const checkedCount = checked.length;
   const progress = total > 0 ? checkedCount / total : 0;
 
+  // Estimated total from unchecked items with prices
+  const estimatedTotal = useMemo(
+    () =>
+      unchecked.reduce(
+        (sum, item) =>
+          sum + (item.offer_price ? item.offer_price * item.quantity : 0),
+        0
+      ),
+    [unchecked]
+  );
+
   // Celebration when all checked
   useEffect(() => {
     if (total > 0 && checkedCount === total && !celebration) {
@@ -89,6 +100,11 @@ export default function ShoppingModeScreen() {
       <Text style={styles.progressText}>
         {checkedCount} / {total} articoli
       </Text>
+      {estimatedTotal > 0 && (
+        <Text style={styles.estimatedTotal}>
+          Totale stimato: {"\u20AC"}{estimatedTotal.toFixed(2)}
+        </Text>
+      )}
 
       {/* Celebration overlay */}
       {celebration && (
@@ -99,7 +115,7 @@ export default function ShoppingModeScreen() {
             mode="contained"
             onPress={() => router.back()}
             style={styles.celebrationBtn}
-            buttonColor="#2E7D32"
+            buttonColor="#2563EB"
           >
             Torna alla lista
           </Button>
@@ -120,6 +136,11 @@ export default function ShoppingModeScreen() {
                 <Text style={styles.itemName} numberOfLines={2}>
                   {displayName(item)}
                 </Text>
+                {item.offer_price != null && (
+                  <Text style={styles.itemPrice}>
+                    {"\u20AC"}{item.offer_price.toFixed(2)}{item.chain_name ? ` - ${item.chain_name}` : ""}
+                  </Text>
+                )}
                 {item.quantity > 1 && (
                   <Text style={styles.itemQty}>
                     x{item.quantity} {item.unit ?? ""}
@@ -158,7 +179,7 @@ export default function ShoppingModeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "#121212",
   },
   header: {
     flexDirection: "row",
@@ -182,7 +203,7 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: 6,
-    backgroundColor: "#66BB6A",
+    backgroundColor: "#60A5FA",
     borderRadius: 3,
   },
   progressText: {
@@ -221,8 +242,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   checkboxChecked: {
-    backgroundColor: "#66BB6A",
-    borderColor: "#66BB6A",
+    backgroundColor: "#60A5FA",
+    borderColor: "#60A5FA",
   },
   checkmark: {
     color: "#fff",
@@ -243,10 +264,21 @@ const styles = StyleSheet.create({
     textDecorationLine: "line-through",
     flex: 1,
   },
+  itemPrice: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 13,
+    marginTop: 2,
+  },
   itemQty: {
     color: "rgba(255,255,255,0.5)",
     fontSize: 14,
     marginTop: 2,
+  },
+  estimatedTotal: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 8,
   },
   divider: {
     height: 1,

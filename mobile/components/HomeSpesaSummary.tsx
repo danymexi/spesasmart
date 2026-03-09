@@ -4,6 +4,7 @@ import { Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { glassCard, glassColors } from "../styles/glassStyles";
+import { useGlassTheme } from "../styles/useGlassTheme";
 import type { ShoppingListCompareResponse } from "../services/api";
 
 interface Props {
@@ -12,6 +13,8 @@ interface Props {
 }
 
 export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
+  const glass = useGlassTheme();
+  const { colors } = glass;
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   const toggle = (key: string) =>
@@ -21,15 +24,15 @@ export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.card}>
+      <View style={[styles.card, glass.card, { borderColor: colors.primarySubtle }]}>
         {/* Header */}
         <View style={styles.headerRow}>
           <MaterialCommunityIcons
             name="cart-check"
             size={22}
-            color={glassColors.greenDark}
+            color={colors.primary}
           />
-          <Text style={styles.title}>
+          <Text style={[styles.title, { color: colors.primary }]}>
             La tua Spesa ({itemCount} articol{itemCount === 1 ? "o" : "i"})
           </Text>
         </View>
@@ -40,17 +43,17 @@ export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
           activeOpacity={0.7}
           onPress={() => toggle("multi")}
         >
-          <View style={styles.starBadge}>
+          <View style={[styles.starBadge, { backgroundColor: colors.primaryMuted }]}>
             <MaterialCommunityIcons name="star" size={14} color="#fff" />
           </View>
-          <Text style={styles.multiLabel}>Multi-negozio</Text>
-          <Text style={styles.multiPrice}>
+          <Text style={[styles.multiLabel, { color: colors.primary }]}>Multi-negozio</Text>
+          <Text style={[styles.multiPrice, { color: colors.primary }]}>
             {"\u20AC"}{Number(multi_store_total).toFixed(2)}
           </Text>
           <MaterialCommunityIcons
             name={expandedRow === "multi" ? "chevron-down" : "chevron-right"}
             size={18}
-            color={glassColors.textMuted}
+            color={colors.textMuted}
           />
         </TouchableOpacity>
 
@@ -61,18 +64,18 @@ export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
               const best = item.chain_prices.find((cp) => cp.is_best);
               return (
                 <View key={item.item_id} style={styles.productRow}>
-                  <Text style={styles.productName} numberOfLines={1}>
+                  <Text style={[styles.productName, { color: colors.textSecondary }]} numberOfLines={1}>
                     {best ? (best.product_name || item.display_name) : item.display_name}
                   </Text>
                   {best ? (
                     <>
-                      <Text style={styles.productChain}>{best.chain_name}</Text>
-                      <Text style={styles.productPrice}>
+                      <Text style={[styles.productChain, { color: colors.textMuted }]}>{best.chain_name}</Text>
+                      <Text style={[styles.productPrice, { color: colors.textPrimary }]}>
                         {"\u20AC"}{Number(best.offer_price).toFixed(2)}
                       </Text>
                     </>
                   ) : (
-                    <Text style={styles.noMatch}>non trovato</Text>
+                    <Text style={[styles.noMatch, { color: colors.textMuted }]}>non trovato</Text>
                   )}
                 </View>
               );
@@ -81,7 +84,7 @@ export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
         )}
 
         {/* Divider */}
-        <View style={styles.divider} />
+        <View style={[styles.divider, { backgroundColor: colors.subtleBorder }]} />
 
         {/* Per-chain rows */}
         {chain_totals.map((chain) => (
@@ -91,11 +94,11 @@ export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
               activeOpacity={0.7}
               onPress={() => toggle(chain.chain_slug)}
             >
-              <Text style={styles.chainName}>{chain.chain_name}</Text>
-              <Text style={styles.chainPrice}>
+              <Text style={[styles.chainName, { color: colors.textPrimary }]}>{chain.chain_name}</Text>
+              <Text style={[styles.chainPrice, { color: colors.textPrimary }]}>
                 {"\u20AC"}{Number(chain.total).toFixed(2)}
               </Text>
-              <Text style={styles.coverage}>
+              <Text style={[styles.coverage, { color: colors.textMuted }]}>
                 ({chain.items_covered}/{itemCount})
               </Text>
               <MaterialCommunityIcons
@@ -105,7 +108,7 @@ export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
                     : "chevron-right"
                 }
                 size={18}
-                color={glassColors.textMuted}
+                color={colors.textMuted}
               />
             </TouchableOpacity>
 
@@ -124,10 +127,10 @@ export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
                     )!;
                     return (
                       <View key={item.item_id} style={styles.productRow}>
-                        <Text style={styles.productName} numberOfLines={1}>
+                        <Text style={[styles.productName, { color: colors.textSecondary }]} numberOfLines={1}>
                           {cp.product_name || item.display_name}
                         </Text>
-                        <Text style={styles.productPrice}>
+                        <Text style={[styles.productPrice, { color: colors.textPrimary }]}>
                           {"\u20AC"}{Number(cp.offer_price).toFixed(2)}
                         </Text>
                       </View>
@@ -140,15 +143,15 @@ export default function HomeSpesaSummary({ compareData, itemCount }: Props) {
 
         {/* Footer link */}
         <TouchableOpacity
-          style={styles.footerBtn}
+          style={[styles.footerBtn, { backgroundColor: colors.primarySubtle }]}
           activeOpacity={0.7}
           onPress={() => router.push("/(tabs)/watchlist")}
         >
-          <Text style={styles.footerBtnText}>Vai alla Lista</Text>
+          <Text style={[styles.footerBtnText, { color: colors.primary }]}>Vai alla Lista</Text>
           <MaterialCommunityIcons
             name="arrow-right"
             size={16}
-            color={glassColors.greenDark}
+            color={colors.primary}
           />
         </TouchableOpacity>
       </View>

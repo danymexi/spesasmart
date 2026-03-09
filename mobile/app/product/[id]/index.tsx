@@ -15,10 +15,12 @@ import {
   glassColors,
   imagePlaceholder,
 } from "../../../styles/glassStyles";
+import { useGlassTheme } from "../../../styles/useGlassTheme";
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
+  const { colors, card: themeCard } = useGlassTheme();
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const queryClient = useQueryClient();
 
@@ -125,7 +127,7 @@ export default function ProductDetailScreen() {
         }}
       />
       {/* Hero card: image + info + watchlist button */}
-      <View style={styles.heroCard}>
+      <View style={[styles.heroCard, themeCard]}>
         {product.image_url ? (
           <View style={styles.heroImageWrap}>
             <Image
@@ -136,7 +138,7 @@ export default function ProductDetailScreen() {
           </View>
         ) : (
           <View style={[styles.heroImageWrap, styles.heroPlaceholder]}>
-            <MaterialCommunityIcons name="food-variant" size={64} color="#ccc" />
+            <MaterialCommunityIcons name="food-variant" size={64} color={colors.textMuted} />
           </View>
         )}
 
@@ -148,18 +150,18 @@ export default function ProductDetailScreen() {
             <PriceIndicator indicator={bestPrice?.price_indicator} />
           </View>
           {product.brand && (
-            <Text variant="titleMedium" style={styles.brandText}>
+            <Text variant="titleMedium" style={[styles.brandText, { color: colors.primaryMuted }]}>
               {product.brand}
             </Text>
           )}
           <View style={styles.metaRow}>
             {product.category && (
-              <Text variant="bodySmall" style={styles.metaText}>
+              <Text variant="bodySmall" style={[styles.metaText, { color: colors.textSecondary }]}>
                 {product.category}
               </Text>
             )}
             {product.unit && (
-              <Text variant="bodySmall" style={styles.metaText}>
+              <Text variant="bodySmall" style={[styles.metaText, { color: colors.textSecondary }]}>
                 Unita: {product.unit}
               </Text>
             )}
@@ -170,36 +172,36 @@ export default function ProductDetailScreen() {
 
       {/* Best price card */}
       {bestPrice && (
-        <View style={styles.sectionCard}>
-          <Text variant="titleMedium" style={styles.sectionHeader}>
+        <View style={[styles.sectionCard, themeCard]}>
+          <Text variant="titleMedium" style={[styles.sectionHeader, { color: colors.textPrimary }]}>
             Miglior Prezzo Attuale
           </Text>
           <View style={styles.bestPriceRow}>
             <View>
               <Text
                 variant="displaySmall"
-                style={{ color: theme.colors.primary, fontWeight: "bold" }}
+                style={{ color: colors.primary, fontWeight: "bold" }}
               >
                 {"\u20AC"}{Number(bestPrice.best_price).toFixed(2)}
               </Text>
               <Text variant="titleMedium">{bestPrice.chain_name}</Text>
               {bestPrice.price_per_unit != null && (
-                <Text variant="bodyMedium" style={styles.pricePerUnit}>
+                <Text variant="bodyMedium" style={[styles.pricePerUnit, { color: colors.textSecondary }]}>
                   {Number(bestPrice.price_per_unit).toFixed(2)} {bestPrice.unit_reference === "l" ? "EUR/L" : bestPrice.unit_reference === "pz" ? "EUR/pz" : "EUR/kg"}
                 </Text>
               )}
               {bestPrice.original_price && (
-                <Text variant="bodyMedium" style={styles.originalPrice}>
+                <Text variant="bodyMedium" style={[styles.originalPrice, { color: colors.textMuted }]}>
                   Prezzo pieno: {"\u20AC"}{Number(bestPrice.original_price).toFixed(2)}
                 </Text>
               )}
               {bestPrice.discount_pct && (
-                <Text variant="bodyMedium" style={styles.discount}>
+                <Text variant="bodyMedium" style={[styles.discount, { color: colors.accent }]}>
                   Sconto: {Number(bestPrice.discount_pct).toFixed(0)}%
                 </Text>
               )}
               {bestPrice.valid_until && (
-                <Text variant="bodySmall" style={styles.validUntil}>
+                <Text variant="bodySmall" style={[styles.validUntil, { color: colors.textMuted }]}>
                   Valido fino al{" "}
                   {new Date(bestPrice.valid_until).toLocaleDateString("it-IT")}
                 </Text>
@@ -259,22 +261,22 @@ export default function ProductDetailScreen() {
       </Button>
 
       {/* Price comparison (inline) */}
-      <View style={styles.sectionCard}>
-        <Text variant="titleMedium" style={styles.sectionHeader}>
+      <View style={[styles.sectionCard, themeCard]}>
+        <Text variant="titleMedium" style={[styles.sectionHeader, { color: colors.textPrimary }]}>
           Confronto Prezzi
         </Text>
         <ProductComparison productId={id!} />
       </View>
 
       {/* Price history */}
-      <View style={styles.sectionCard}>
-        <Text variant="titleMedium" style={styles.sectionHeader}>
+      <View style={[styles.sectionCard, themeCard]}>
+        <Text variant="titleMedium" style={[styles.sectionHeader, { color: colors.textPrimary }]}>
           Storico Prezzi
         </Text>
         {history && history.history.length > 0 ? (
           <PriceChart data={history.history} />
         ) : (
-          <Text variant="bodyMedium" style={styles.noDataText}>
+          <Text variant="bodyMedium" style={[styles.noDataText, { color: colors.textMuted }]}>
             Storico non disponibile
           </Text>
         )}
@@ -282,8 +284,8 @@ export default function ProductDetailScreen() {
 
       {/* Price trends */}
       {priceTrends && priceTrends.trends.length >= 2 && (
-        <View style={styles.sectionCard}>
-          <Text variant="titleMedium" style={styles.sectionHeader}>
+        <View style={[styles.sectionCard, themeCard]}>
+          <Text variant="titleMedium" style={[styles.sectionHeader, { color: colors.textPrimary }]}>
             Andamento Prezzo al {priceTrends.unit_reference === "l" ? "litro" : "kg"}
           </Text>
           <PriceTrendChart

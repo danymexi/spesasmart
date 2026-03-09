@@ -14,9 +14,9 @@ const COMPAT_MAP: Record<string, Indicator> = {
 };
 
 const INDICATOR_CONFIG: Record<Indicator, { color: string; bg: string; border: string; label: string }> = {
-  top: { color: "#2E7D32", bg: "rgba(46,125,50,0.12)", border: "rgba(46,125,50,0.25)", label: "Prezzo Top" },
-  neutro: { color: "#F57F17", bg: "rgba(245,127,23,0.12)", border: "rgba(245,127,23,0.25)", label: "Nella media" },
-  flop: { color: "#C62828", bg: "rgba(198,40,40,0.12)", border: "rgba(198,40,40,0.25)", label: "Prezzo alto" },
+  top: { color: "#16A34A", bg: "rgba(22,163,74,0.12)", border: "rgba(22,163,74,0.25)", label: "Prezzo Top" },
+  neutro: { color: "#F59E0B", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.25)", label: "Nella media" },
+  flop: { color: "#DC2626", bg: "rgba(220,38,38,0.12)", border: "rgba(220,38,38,0.25)", label: "Prezzo alto" },
 };
 
 interface Props {

@@ -1,9 +1,11 @@
-import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
-import { Text, useTheme, Chip } from "react-native-paper";
+import { useState } from "react";
+import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Text, useTheme, Avatar, Chip } from "react-native-paper";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { getFlyers } from "../../services/api";
-import { glassCard, glassColors } from "../../styles/glassStyles";
+import { getChains, getFlyers } from "../../services/api";
+import { glassCard, glassChip, glassColors } from "../../styles/glassStyles";
+import { useGlassTheme } from "../../styles/useGlassTheme";
 
 function daysUntil(dateStr: string): number {
   const target = new Date(dateStr);
@@ -34,18 +36,49 @@ const CHAIN_COLORS: Record<string, string> = {
 
 export default function FlyersScreen() {
   const theme = useTheme();
+  const glass = useGlassTheme();
+  const [selectedChain, setSelectedChain] = useState<string | null>(null);
+
+  const { data: chainsData } = useQuery({
+    queryKey: ["chains"],
+    queryFn: getChains,
+    staleTime: 3600000,
+  });
 
   const {
     data: flyers,
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ["flyers"],
-    queryFn: () => getFlyers(),
+    queryKey: ["flyers", selectedChain],
+    queryFn: () => getFlyers(selectedChain ? selectedChain.toLowerCase() : undefined),
   });
 
   return (
     <View style={styles.container}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.chainChips}
+        contentContainerStyle={styles.chainChipsContent}
+      >
+        {(chainsData ?? []).map((ch) => (
+          <Chip
+            key={ch.slug}
+            selected={selectedChain === ch.name}
+            onPress={() => setSelectedChain(selectedChain === ch.name ? null : ch.name)}
+            style={[
+              styles.chainChip,
+              glass.chip,
+              selectedChain === ch.name && { backgroundColor: glass.colors.primarySubtle },
+            ]}
+            avatar={ch.logo_url ? <Avatar.Image size={24} source={{ uri: ch.logo_url }} /> : undefined}
+            compact
+          >
+            {ch.name}
+          </Chip>
+        ))}
+      </ScrollView>
       <FlatList
         data={flyers}
         keyExtractor={(item) => item.id}
@@ -58,7 +91,7 @@ export default function FlyersScreen() {
 
           return (
             <View
-              style={styles.card}
+              style={[styles.card, glass.card]}
             >
               <Pressable
                 style={styles.cardInner}
@@ -70,14 +103,14 @@ export default function FlyersScreen() {
                   </Text>
                 </View>
                 <View style={styles.cardContent}>
-                  <Text variant="bodyMedium" numberOfLines={2} style={styles.flyerTitle}>
+                  <Text variant="bodyMedium" numberOfLines={2} style={[styles.flyerTitle, { color: glass.colors.textPrimary }]}>
                     {item.title ?? "Volantino"}
                   </Text>
-                  <Text variant="bodySmall" style={styles.dates}>
+                  <Text variant="bodySmall" style={[styles.dates, { color: glass.colors.textSecondary }]}>
                     {formatDate(item.valid_from)} - {formatDate(item.valid_to)}
                   </Text>
                   {item.pages_count && (
-                    <Text variant="labelSmall" style={styles.pages}>
+                    <Text variant="labelSmall" style={[styles.pages, { color: glass.colors.textMuted }]}>
                       {item.pages_count} pagine
                     </Text>
                   )}
@@ -86,14 +119,14 @@ export default function FlyersScreen() {
                       styles.countdownChip,
                       {
                         backgroundColor: daysLeft <= 2
-                          ? glassColors.redAccent
-                          : glassColors.greenAccent,
+                          ? glass.colors.errorSubtle
+                          : glass.colors.successSubtle,
                       },
                     ]}
                   >
                     <Text
                       style={{
-                        color: daysLeft <= 2 ? "#C62828" : "#2E7D32",
+                        color: daysLeft <= 2 ? glass.colors.error : glass.colors.success,
                         fontSize: 11,
                         fontWeight: "600",
                       }}
@@ -111,7 +144,7 @@ export default function FlyersScreen() {
           );
         }}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>Nessun volantino attivo</Text>
+          <Text style={[styles.emptyText, { color: glass.colors.textSecondary }]}>Nessun volantino attivo</Text>
         }
         contentContainerStyle={styles.listContent}
       />
@@ -130,7 +163,7 @@ const styles = StyleSheet.create({
   } as any,
   cardInner: {
     overflow: "hidden",
-    borderRadius: 20,
+    borderRadius: 16,
   },
   chainBanner: { paddingVertical: 10, paddingHorizontal: 12 },
   chainName: { fontWeight: "bold" },
@@ -144,6 +177,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
+  chainChips: { flexGrow: 0, paddingTop: 12 },
+  chainChipsContent: { paddingHorizontal: 12, gap: 8 },
+  chainChip: { ...glassChip } as any,
   emptyText: { textAlign: "center", marginTop: 40, color: "#555" },
   listContent: { paddingTop: 12, paddingBottom: 96 },
 });
