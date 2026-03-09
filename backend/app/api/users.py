@@ -1288,113 +1288,129 @@ async def _find_alternative_prices(
     db: AsyncSession,
     today: date,
 ) -> dict[uuid.UUID, dict[str, dict]]:
-    """For items missing offers in certain chains, find similar products via fuzzy match."""
+    """For items missing offers in certain chains, find similar products via fuzzy match.
+
+    Uses per-item candidate queries to avoid generic keywords drowning out
+    specific matches when many items are processed together.
+    """
     from app.services.product_matcher import ProductMatcher
 
     if not items_with_gaps:
         return {}
 
-    # Extract search keywords per item (significant words from normalized name)
-    item_keywords: dict[uuid.UUID, list[str]] = {}
-    item_info: dict[uuid.UUID, tuple] = {}  # item_id -> (product, missing_slugs)
-    all_keywords: set[str] = set()
+    # Prepare per-item data
     original_pids: set[uuid.UUID] = set()
+    item_data: list[tuple] = []  # (item, product, missing_slugs, keywords)
+
+    # Common Italian stopwords to exclude from keyword extraction
+    _stop = {"del", "dei", "della", "delle", "con", "per", "gli", "una", "uno", "più"}
 
     for item, product, missing_slugs in items_with_gaps:
-        normalized = ProductMatcher.normalize_text(product.name)
-        words = [w for w in normalized.split() if len(w) >= 3][:3]
-        if not words:
+        # Use RAW name (lowercased) for ILIKE keywords — not stemmed/normalized,
+        # because ILIKE searches the raw product name in the DB.
+        raw_words = [w for w in product.name.lower().split() if len(w) >= 3 and w not in _stop][:4]
+        if not raw_words:
             continue
-        item_keywords[item.id] = words
-        item_info[item.id] = (product, missing_slugs)
-        all_keywords.update(words)
         original_pids.add(product.id)
+        item_data.append((item, product, missing_slugs, raw_words))
 
-    if not all_keywords:
+    if not item_data:
         return {}
 
-    # Collect all missing chain_ids
-    missing_chain_ids: set[uuid.UUID] = set()
-    for _, (_, missing_slugs) in item_info.items():
+    # Phase 1: Per-item candidate queries — collect all candidate product IDs
+    all_candidate_pids: set[uuid.UUID] = set()
+    item_candidate_pids: dict[uuid.UUID, list[uuid.UUID]] = {}  # item_id -> candidate pids
+
+    for item, product, missing_slugs, keywords in item_data:
+        item_chain_ids = [all_chains[s][0] for s in missing_slugs if s in all_chains]
+        if not item_chain_ids:
+            continue
+
+        kw_filters = [Product.name.ilike(f"%{kw}%") for kw in keywords]
+        cands_result = await db.execute(
+            select(Product.id)
+            .join(Offer, Offer.product_id == Product.id)
+            .where(
+                or_(*kw_filters),
+                ~Product.id.in_(original_pids),
+                Offer.valid_from <= today,
+                Offer.valid_to >= today,
+                Offer.chain_id.in_(item_chain_ids),
+            )
+            .distinct()
+            .limit(100)
+        )
+        pids = [row[0] for row in cands_result.all()]
+        item_candidate_pids[item.id] = pids
+        all_candidate_pids.update(pids)
+
+    if not all_candidate_pids:
+        return {}
+
+    # Phase 2: Batch-load candidate products + their offers
+    products_result = await db.execute(
+        select(Product).where(Product.id.in_(all_candidate_pids))
+    )
+    candidate_map = {p.id: p for p in products_result.scalars().all()}
+
+    all_missing_chain_ids: set[uuid.UUID] = set()
+    for _, _, missing_slugs, _ in item_data:
         for s in missing_slugs:
             if s in all_chains:
-                missing_chain_ids.add(all_chains[s][0])
+                all_missing_chain_ids.add(all_chains[s][0])
 
-    if not missing_chain_ids:
-        return {}
-
-    # Single batch query: find candidate products with active offers in missing chains
-    keyword_filters = [Product.name.ilike(f"%{kw}%") for kw in all_keywords]
-    candidates_result = await db.execute(
-        select(Product)
-        .join(Offer, Offer.product_id == Product.id)
-        .where(
-            or_(*keyword_filters),
-            ~Product.id.in_(original_pids),
-            Offer.valid_from <= today,
-            Offer.valid_to >= today,
-            Offer.chain_id.in_(missing_chain_ids),
-        )
-        .distinct()
-        .limit(500)
-    )
-    candidates = candidates_result.scalars().all()
-
-    if not candidates:
-        return {}
-
-    # Load offers for candidate products
-    candidate_pids = [c.id for c in candidates]
     offers_result = await db.execute(
         select(Offer)
         .options(joinedload(Offer.chain))
         .where(
-            Offer.product_id.in_(candidate_pids),
+            Offer.product_id.in_(list(all_candidate_pids)),
             Offer.valid_from <= today,
             Offer.valid_to >= today,
-            Offer.chain_id.in_(missing_chain_ids),
+            Offer.chain_id.in_(all_missing_chain_ids),
         )
         .order_by(Offer.offer_price)
     )
-    candidate_offers = offers_result.unique().scalars().all()
-
-    # Build candidate_pid -> chain_slug -> best offer
+    # Build candidate_pid -> chain_slug -> cheapest (offer, chain)
     pid_chain_offers: dict[uuid.UUID, dict[str, tuple]] = defaultdict(dict)
-    for o in candidate_offers:
+    for o in offers_result.unique().scalars().all():
         if not o.chain:
             continue
         slug = o.chain.slug
         if slug not in pid_chain_offers[o.product_id]:
             pid_chain_offers[o.product_id][slug] = (o, o.chain)
 
-    # Build candidate lookup by id
-    candidate_map = {c.id: c for c in candidates}
-
-    # Score and pick best alternative per (item, missing_chain)
+    # Phase 3: Score and pick best alternative per (item, missing_chain)
     result: dict[uuid.UUID, dict[str, dict]] = {}
 
-    for item_id, (product, missing_slugs) in item_info.items():
+    for item, product, missing_slugs, keywords in item_data:
+        cand_pids = item_candidate_pids.get(item.id, [])
+        if not cand_pids:
+            continue
+
         for slug in missing_slugs:
             best_score = 0.0
             best_data = None
 
-            for cand_id, chain_offers in pid_chain_offers.items():
-                if slug not in chain_offers:
+            for cand_id in cand_pids:
+                if slug not in pid_chain_offers.get(cand_id, {}):
                     continue
                 cand = candidate_map.get(cand_id)
                 if not cand:
                     continue
 
-                # Category guard: skip if both have categories and they differ
+                # Category guard
                 if product.category and cand.category and product.category != cand.category:
                     continue
 
                 score = ProductMatcher.fuzzy_match(
                     product.name, cand.name, product.brand, cand.brand,
                 )
-                if score >= 65 and score > best_score:
-                    offer, chain = chain_offers[slug]
-                    # Among equal scores, prefer cheaper
+                # Lower threshold for short names (1-2 words) since fuzzy_match
+                # short-name guard penalises them; use 50 to catch "Sofficini" etc.
+                name_words = len([w for w in product.name.split() if len(w) >= 3])
+                threshold = 50 if name_words <= 2 else 65
+                if score >= threshold and score > best_score:
+                    offer, chain = pid_chain_offers[cand_id][slug]
                     if score == best_score and best_data and offer.offer_price >= best_data["offer_price"]:
                         continue
                     best_score = score
@@ -1410,9 +1426,9 @@ async def _find_alternative_prices(
                     }
 
             if best_data:
-                if item_id not in result:
-                    result[item_id] = {}
-                result[item_id][slug] = best_data
+                if item.id not in result:
+                    result[item.id] = {}
+                result[item.id][slug] = best_data
 
     return result
 
