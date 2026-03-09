@@ -44,7 +44,7 @@ async def _resolve_store_id(chain_slug: str) -> uuid.UUID | None:
     from app.models.store import Store
 
     async with async_session() as session:
-        stmt = select(Store).where(Store.name == store_name)
+        stmt = select(Store).where(Store.name == store_name).limit(1)
         result = await session.execute(stmt)
         store = result.scalar_one_or_none()
         if store:
@@ -87,12 +87,60 @@ async def scrape_chain(chain_slug: str):
         logger.exception("Tiendeo scraping failed for '%s'.", chain_slug)
         tiendeo_count = 0
 
-    # --- 2. Direct scraper (supplementary for Lidl) ---
+    # --- 2. Direct scraper (supplementary for Lidl, Iperal, Esselunga) ---
     try:
         if chain_slug == "lidl":
             from app.scrapers.lidl import LidlScraper
 
             scraper = LidlScraper(store_id=store_id)
+            direct_results = await scraper.scrape()
+            direct_count = sum(len(f.get("products", [])) for f in direct_results)
+            total_products += direct_count
+            logger.info(
+                "Direct scraper returned %d products for '%s'.",
+                direct_count,
+                chain_slug,
+            )
+        elif chain_slug == "iperal":
+            from app.scrapers.iperal import IperalScraper
+
+            scraper = IperalScraper(store_id=store_id)
+            direct_results = await scraper.scrape()
+            direct_count = sum(len(f.get("products", [])) for f in direct_results)
+            total_products += direct_count
+            logger.info(
+                "Direct scraper returned %d products for '%s'.",
+                direct_count,
+                chain_slug,
+            )
+        elif chain_slug == "esselunga":
+            from app.scrapers.esselunga import EsselungaScraper
+
+            scraper = EsselungaScraper(store_id=store_id)
+            direct_results = await scraper.scrape()
+            direct_count = sum(len(f.get("products", [])) for f in direct_results)
+            total_products += direct_count
+            logger.info(
+                "Direct scraper returned %d products for '%s'.",
+                direct_count,
+                chain_slug,
+            )
+        elif chain_slug == "carrefour":
+            from app.scrapers.carrefour import CarrefourScraper
+
+            scraper = CarrefourScraper(store_id=store_id)
+            direct_results = await scraper.scrape()
+            direct_count = sum(len(f.get("products", [])) for f in direct_results)
+            total_products += direct_count
+            logger.info(
+                "Direct scraper returned %d products for '%s'.",
+                direct_count,
+                chain_slug,
+            )
+        elif chain_slug == "eurospin":
+            from app.scrapers.eurospin import EurospinScraper
+
+            scraper = EurospinScraper(store_id=store_id)
             direct_results = await scraper.scrape()
             direct_count = sum(len(f.get("products", [])) for f in direct_results)
             total_products += direct_count

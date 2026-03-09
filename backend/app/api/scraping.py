@@ -66,13 +66,19 @@ async def _run_scraper(chain_slug: str, source: str = "auto") -> dict:
             scraper = LidlScraper(store_id=store_id)
         elif chain_slug == "esselunga":
             from app.scrapers.esselunga import EsselungaScraper
-            scraper = EsselungaScraper()
+            scraper = EsselungaScraper(store_id=store_id)
         elif chain_slug == "coop":
             from app.scrapers.coop import CoopScraper
             scraper = CoopScraper()
         elif chain_slug == "iperal":
             from app.scrapers.iperal import IperalScraper
             scraper = IperalScraper(store_id=store_id)
+        elif chain_slug == "carrefour":
+            from app.scrapers.carrefour import CarrefourScraper
+            scraper = CarrefourScraper(store_id=store_id)
+        elif chain_slug == "eurospin":
+            from app.scrapers.eurospin import EurospinScraper
+            scraper = EurospinScraper(store_id=store_id)
         elif source == "direct":
             raise ValueError(f"Unknown chain: {chain_slug}")
 

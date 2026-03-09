@@ -1,6 +1,8 @@
 """Iperal scraper -- extracts offers from iperal.it.
 
 Strategy:
+    0. VolantinoPiu flyers: discover + extract products from
+       iperal.volantinopiu.com (JS-rendered, requires Playwright).
     1. Try scraping HTML offers directly from iperal.it (no Gemini needed).
     2. If HTML extraction succeeds, persist products directly.
     3. Fallback: locate PDF flyer links, download, convert to images, feed
@@ -57,19 +59,25 @@ class IperalScraper(BaseScraper):
     async def scrape(self) -> list[dict[str, Any]]:
         """Execute the Iperal scraping workflow.
 
-        Tries HTML scraping first (no Gemini needed), falls back to
-        PDF + Gemini pipeline if HTML extraction fails.
+        Strategy 0: VolantinoPiu flyers (supplementary, always runs).
+        Strategy 1: HTML offers from iperal.it (no Gemini).
+        Strategy 2: Sub-page discovery.
+        Strategy 3: PDF + Gemini pipeline (fallback).
         """
         flyers_data: list[dict[str, Any]] = []
 
         try:
             page = await self._new_page()
 
+            # ----- Strategy 0: VolantinoPiu flyers (supplementary) -----
+            vp_flyers = await self._scrape_volantinopiu_flyers(page)
+            flyers_data.extend(vp_flyers)
+
             # Try each URL until one works
             working_url = await self._find_working_url(page)
             if working_url is None:
                 logger.error("Could not reach any Iperal page.")
-                return []
+                return flyers_data  # may still have VolantinoPiu results
 
             await self._accept_cookies(page)
             await page.wait_for_timeout(2000)
@@ -162,6 +170,394 @@ class IperalScraper(BaseScraper):
             await self.close()
 
         return flyers_data
+
+    # ------------------------------------------------------------------
+    # VolantinoPiu: discovery + extraction + orchestrator
+    # ------------------------------------------------------------------
+
+    ITALIAN_MONTHS = {
+        "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4,
+        "maggio": 5, "giugno": 6, "luglio": 7, "agosto": 8,
+        "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
+    }
+
+    async def _discover_volantinopiu_urls(self, page: Page) -> list[dict[str, Any]]:
+        """Navigate to iperal.it/promozioni and extract VolantinoPiu flyer links."""
+        logger.info("VolantinoPiu: discovering flyer URLs from iperal.it/promozioni")
+        try:
+            resp = await page.goto(
+                "https://www.iperal.it/promozioni/",
+                wait_until="domcontentloaded",
+                timeout=20000,
+            )
+            if not resp or not resp.ok:
+                logger.warning("VolantinoPiu: could not load /promozioni (status=%s)", resp.status if resp else "None")
+                return []
+        except (PlaywrightTimeout, Exception) as exc:
+            logger.warning("VolantinoPiu: /promozioni load failed: %s", exc)
+            return []
+
+        await self._accept_cookies(page)
+        await page.wait_for_timeout(2000)
+
+        # Extract links to volantinopiu.com
+        raw_links = await page.evaluate("""() => {
+            const results = [];
+            const anchors = document.querySelectorAll('a[href*="volantinopiu"]');
+            for (const a of anchors) {
+                const href = a.href || '';
+                if (!href) continue;
+                // Only .html and .php pages (skip fliphtml5, images, etc.)
+                if (!href.match(/\\.(html|php)(\\?.*)?$/i)) continue;
+                if (href.includes('fliphtml5')) continue;
+
+                // Try to get title and date info from the card
+                const card = a.closest('.card, article, [class*="promo"], [class*="volantino"], div');
+                const title = (a.title || a.innerText || (card ? card.innerText : '')).trim();
+                results.push({url: href, title: title.substring(0, 200)});
+            }
+            return results;
+        }""")
+
+        seen: set[str] = set()
+        flyers: list[dict[str, Any]] = []
+        for item in raw_links:
+            url = item.get("url", "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+
+            title = item.get("title", "Volantino Iperal")
+            valid_from, valid_to = self._parse_italian_date_range(title)
+
+            flyers.append({
+                "url": url,
+                "title": title.split("\n")[0].strip()[:100] or "Volantino Iperal",
+                "valid_from": valid_from,
+                "valid_to": valid_to,
+            })
+
+        logger.info("VolantinoPiu: discovered %d flyer URLs.", len(flyers))
+        return flyers
+
+    async def _extract_volantinopiu_products(self, page: Page, url: str) -> list[dict[str, Any]]:
+        """Navigate to a VolantinoPiu flyer page and extract products.
+
+        Uses 3 strategies: card selectors, price-pattern search, full-text parsing.
+        """
+        logger.info("VolantinoPiu: extracting products from %s", url)
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except (PlaywrightTimeout, Exception) as exc:
+            logger.warning("VolantinoPiu: failed to load %s: %s", url, exc)
+            return []
+
+        await self._accept_cookies(page)
+
+        # Wait for JS rendering — try known selectors first, fall back to timeout
+        for selector in [".product", "[class*='product']", ".item", "article", ".offer"]:
+            try:
+                await page.wait_for_selector(selector, timeout=5000)
+                break
+            except (PlaywrightTimeout, Exception):
+                continue
+        else:
+            await page.wait_for_timeout(8000)
+
+        # Scroll to trigger lazy-loading
+        for _ in range(5):
+            prev_h = await page.evaluate("document.body.scrollHeight")
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(1500)
+            new_h = await page.evaluate("document.body.scrollHeight")
+            if new_h == prev_h:
+                break
+
+        # Multi-strategy extraction via page.evaluate()
+        raw_products = await page.evaluate("""() => {
+            const results = [];
+            const seen = new Set();
+
+            function addProduct(name, price, originalPrice, discount, quantity, imgUrl, rawText) {
+                name = (name || '').trim();
+                if (!name || name.length < 3) return;
+                const key = name.toLowerCase().replace(/\\s+/g, ' ');
+                if (seen.has(key)) return;
+                seen.add(key);
+                results.push({
+                    name: name,
+                    offer_price: price || null,
+                    original_price: originalPrice || null,
+                    discount_pct: discount || null,
+                    quantity: quantity || null,
+                    image_url: imgUrl || null,
+                    raw_text: (rawText || '').substring(0, 500),
+                });
+            }
+
+            // ---- Strategy A: product cards ----
+            const cardSelectors = [
+                '.product', '[class*="product"]', '.item', 'article',
+                '[class*="offerta"]', '[class*="offer"]', '.card-product',
+                '[class*="promo-item"]', '[class*="flyer-product"]',
+            ];
+            let cards = [];
+            for (const sel of cardSelectors) {
+                const els = document.querySelectorAll(sel);
+                if (els.length > 3) { cards = Array.from(els); break; }
+            }
+
+            const priceRe = /(\\d+[,.]\\d{2})/;
+            const euroRe = /(\\d+[,.]?\\d{0,2})\\s*€|€\\s*(\\d+[,.]?\\d{0,2})/;
+            const discountRe = /(-\\s*\\d+\\s*%|sconto\\s+\\d+\\s*%)/i;
+            const qtyRe = /(\\d+(?:[,.]\\d+)?\\s*(?:g|kg|ml|l|cl|pz|pezzi|conf|capsule|dosi|bustine|rotoli|paia)\\b)/i;
+
+            for (const card of cards) {
+                const text = card.innerText || '';
+                if (text.length < 5) continue;
+
+                // Name: heading or first substantial line
+                const heading = card.querySelector('h2, h3, h4, h5, [class*="title"], [class*="name"], [class*="desc"]');
+                let name = heading ? heading.innerText.trim() : '';
+                if (!name) {
+                    const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 2 && !l.match(/^[€\\d.,\\s%]+$/));
+                    name = lines[0] || '';
+                }
+
+                // Prices
+                let offerPrice = null, origPrice = null;
+                const allPrices = text.match(/\\d+[,.]\\d{2}/g) || [];
+                if (allPrices.length >= 1) offerPrice = allPrices[allPrices.length - 1]; // last = usually the offer
+                if (allPrices.length >= 2) origPrice = allPrices[0]; // first = usually original
+
+                // Also try €-prefixed
+                const euroMatch = text.match(euroRe);
+                if (euroMatch && !offerPrice) offerPrice = (euroMatch[1] || euroMatch[2]);
+
+                // Discount
+                let discount = null;
+                const discMatch = text.match(discountRe);
+                if (discMatch) discount = discMatch[1].replace(/[^\\d]/g, '');
+
+                // Quantity
+                let qty = null;
+                const qtyMatch = text.match(qtyRe);
+                if (qtyMatch) qty = qtyMatch[1];
+
+                // Image
+                const img = card.querySelector('img');
+                const imgUrl = img ? (img.src || img.getAttribute('data-src') || '') : '';
+
+                addProduct(name, offerPrice, origPrice, discount, qty, imgUrl, text);
+            }
+
+            // ---- Strategy B: price-pattern scan (if Strategy A found few) ----
+            if (results.length < 5) {
+                const allElements = document.querySelectorAll('div, span, p, li, td');
+                for (const el of allElements) {
+                    const text = (el.innerText || '').trim();
+                    if (text.length < 5 || text.length > 300) continue;
+
+                    const priceMatch = text.match(/(\\d+[,.]\\d{2})\\s*€|€\\s*(\\d+[,.]\\d{2})/);
+                    if (!priceMatch) continue;
+
+                    const price = priceMatch[1] || priceMatch[2];
+                    // Walk up to find product name
+                    let nameEl = el.previousElementSibling || el.parentElement;
+                    let name = '';
+                    for (let i = 0; i < 3 && nameEl; i++) {
+                        const t = (nameEl.innerText || '').trim();
+                        if (t.length > 3 && t.length < 150 && !t.match(/^[€\\d.,\\s%]+$/)) {
+                            name = t.split('\\n')[0].trim();
+                            break;
+                        }
+                        nameEl = nameEl.previousElementSibling || nameEl.parentElement;
+                    }
+                    if (name) {
+                        const qtyMatch = text.match(qtyRe);
+                        addProduct(name, price, null, null, qtyMatch ? qtyMatch[1] : null, null, text);
+                    }
+                }
+            }
+
+            // ---- Strategy C: full-text parsing (last resort) ----
+            if (results.length < 5) {
+                const bodyText = document.body.innerText || '';
+                // Split into chunks by double-newline or category-like headings
+                const chunks = bodyText.split(/\\n{2,}|(?=(?:FRUTTA|VERDURA|LATTICINI|SURGELATI|BEVANDE|SALUMI|DOLCI|CARNE|PESCE|PASTA|OLIO|DETERSIVI|IGIENE|MACELLERIA|GASTRONOMIA|PANETTERIA|PESCHERIA)\\b)/i);
+
+                for (const chunk of chunks) {
+                    const lines = chunk.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i];
+                        const pm = line.match(/(\\d+[,.]\\d{2})\\s*€|€\\s*(\\d+[,.]\\d{2})/);
+                        if (!pm) continue;
+                        const price = pm[1] || pm[2];
+                        // Name is on the same line before the price, or previous line
+                        let name = line.replace(pm[0], '').replace(/\\d+[,.]\\d{2}/g, '').trim();
+                        if (name.length < 3 && i > 0) name = lines[i - 1];
+                        name = name.replace(/[-–]\\s*\\d+\\s*%/, '').trim();
+                        if (name.length >= 3) {
+                            const qtyMatch = line.match(qtyRe);
+                            addProduct(name, price, null, null, qtyMatch ? qtyMatch[1] : null, null, chunk.substring(0, 300));
+                        }
+                    }
+                }
+            }
+
+            return results;
+        }""")
+
+        # Parse and normalize in Python
+        from app.services.product_matcher import ProductMatcher
+
+        parsed: list[dict[str, Any]] = []
+        for item in raw_products:
+            name = (item.get("name") or "").strip()
+            if not name or len(name) < 3:
+                continue
+
+            offer_price = self.normalize_price(item.get("offer_price"))
+            if offer_price is None:
+                continue
+
+            original_price = self.normalize_price(item.get("original_price"))
+            if original_price and original_price < offer_price:
+                original_price, offer_price = offer_price, original_price
+
+            # Extract brand from name
+            brand, clean_name = ProductMatcher.extract_brand_from_name(name)
+
+            discount_pct = None
+            if item.get("discount_pct"):
+                try:
+                    discount_pct = Decimal(item["discount_pct"])
+                except Exception:
+                    pass
+
+            parsed.append({
+                "name": clean_name or name,
+                "brand": brand,
+                "category": None,
+                "original_price": str(original_price) if original_price else None,
+                "offer_price": str(offer_price),
+                "discount_pct": str(discount_pct) if discount_pct else None,
+                "discount_type": "percentage" if discount_pct else None,
+                "quantity": item.get("quantity"),
+                "price_per_unit": None,
+                "raw_text": item.get("raw_text", ""),
+                "confidence": 0.70,
+                "image_url": item.get("image_url"),
+            })
+
+        logger.info("VolantinoPiu: extracted %d products from %s", len(parsed), url)
+        return parsed
+
+    async def _scrape_volantinopiu_flyers(self, page: Page) -> list[dict[str, Any]]:
+        """Orchestrate VolantinoPiu discovery + extraction + persistence."""
+        flyers_data: list[dict[str, Any]] = []
+        total_products = 0
+
+        try:
+            flyer_urls = await self._discover_volantinopiu_urls(page)
+            if not flyer_urls:
+                logger.info("VolantinoPiu: no flyer URLs found.")
+                return []
+
+            for flyer_info in flyer_urls:
+                try:
+                    vp_page = await self._new_page()
+                    products = await self._extract_volantinopiu_products(
+                        vp_page, flyer_info["url"]
+                    )
+                    await vp_page.close()
+
+                    if not products:
+                        logger.info(
+                            "VolantinoPiu: no products from %s", flyer_info["url"]
+                        )
+                        continue
+
+                    today = date.today()
+                    valid_from = flyer_info.get("valid_from") or today
+                    valid_to = flyer_info.get("valid_to") or (today + timedelta(days=13))
+
+                    flyer_data = {
+                        "chain": self.name,
+                        "slug": self.slug,
+                        "title": flyer_info.get("title", "Volantino Iperal"),
+                        "source_url": flyer_info["url"],
+                        "valid_from": valid_from,
+                        "valid_to": valid_to,
+                        "products": products,
+                        "image_paths": [],
+                        "store_id": self.store_id,
+                    }
+                    await self._persist_offers(flyer_data)
+                    flyers_data.append(flyer_data)
+                    total_products += len(products)
+
+                except Exception:
+                    logger.exception(
+                        "VolantinoPiu: error processing flyer %s",
+                        flyer_info.get("url"),
+                    )
+        except Exception:
+            logger.exception("VolantinoPiu: discovery/extraction failed.")
+
+        logger.info(
+            "VolantinoPiu: completed — %d flyers, %d total products.",
+            len(flyers_data),
+            total_products,
+        )
+        return flyers_data
+
+    @classmethod
+    def _parse_italian_date_range(cls, text: str) -> tuple[date | None, date | None]:
+        """Parse Italian text date ranges like 'dal 5 al 17 marzo 2026'.
+
+        Handles both 'dal X al Y mese' and 'dal X mese al Y mese' formats.
+        Falls back to _extract_dates for numeric formats.
+        """
+        text_lower = text.lower()
+
+        # Pattern: "dal DD al DD mese [YYYY]"
+        m = re.search(
+            r"dal\s+(\d{1,2})\s+al\s+(\d{1,2})\s+(\w+)(?:\s+(\d{4}))?",
+            text_lower,
+        )
+        if m:
+            day_from, day_to = int(m.group(1)), int(m.group(2))
+            month_name = m.group(3)
+            year = int(m.group(4)) if m.group(4) else date.today().year
+            month = cls.ITALIAN_MONTHS.get(month_name)
+            if month:
+                try:
+                    return date(year, month, day_from), date(year, month, day_to)
+                except ValueError:
+                    pass
+
+        # Pattern: "dal DD mese al DD mese [YYYY]"
+        m = re.search(
+            r"dal\s+(\d{1,2})\s+(\w+)\s+al\s+(\d{1,2})\s+(\w+)(?:\s+(\d{4}))?",
+            text_lower,
+        )
+        if m:
+            day_from = int(m.group(1))
+            month_from_name = m.group(2)
+            day_to = int(m.group(3))
+            month_to_name = m.group(4)
+            year = int(m.group(5)) if m.group(5) else date.today().year
+            month_from = cls.ITALIAN_MONTHS.get(month_from_name)
+            month_to = cls.ITALIAN_MONTHS.get(month_to_name)
+            if month_from and month_to:
+                try:
+                    return date(year, month_from, day_from), date(year, month_to, day_to)
+                except ValueError:
+                    pass
+
+        # Fallback to numeric date parsing
+        return cls._extract_dates(text)
 
     # ------------------------------------------------------------------
     # URL probing
