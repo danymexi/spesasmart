@@ -7,6 +7,7 @@ import {
   getWatchlist,
   removeFromWatchlist,
   addToShoppingList,
+  bulkAddToShoppingList,
   createShoppingList,
   deleteShoppingList,
   duplicateShoppingList,
@@ -69,12 +70,15 @@ export default function WatchlistScreen() {
 
   const addAllToListMutation = useMutation({
     mutationFn: (productIds: string[]) =>
-      addToShoppingList({ product_ids: productIds, list_id: activeListId ?? undefined }),
-    onSuccess: () => {
+      bulkAddToShoppingList(
+        productIds.map((id) => ({ product_id: id })),
+        activeListId ?? undefined,
+      ),
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
       queryClient.invalidateQueries({ queryKey: ["shoppingListCount"] });
       queryClient.invalidateQueries({ queryKey: ["shoppingLists"] });
-      setSnackbar(`${items?.length ?? 0} prodotti aggiunti alla spesa`);
+      setSnackbar(`${data.added} prodotti aggiunti alla spesa`);
     },
   });
 
