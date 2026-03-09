@@ -546,7 +546,7 @@ export interface PurchaseItemDetail {
 }
 
 export interface PurchaseHabit {
-  product_id: string;
+  product_id: string | null;
   product_name: string;
   brand: string | null;
   category: string | null;
@@ -559,7 +559,7 @@ export interface PurchaseHabit {
 }
 
 export interface SmartListItem {
-  product_id: string;
+  product_id: string | null;
   product_name: string;
   brand: string | null;
   category: string | null;

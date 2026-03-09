@@ -415,7 +415,7 @@ function HabitsTab() {
   return (
     <FlatList
       data={habits}
-      keyExtractor={(item) => item.product_id}
+      keyExtractor={(item) => item.product_id || item.product_name}
       contentContainerStyle={styles.listContent}
       renderItem={({ item }) => (
         <View style={styles.card}>
@@ -550,7 +550,7 @@ function SmartListTab() {
     bassa: "#2E7D32",
   };
 
-  const notInWatchlist = items.filter((i) => !i.in_watchlist);
+  const notInWatchlist = items.filter((i) => !i.in_watchlist && i.product_id !== null);
 
   return (
     <View style={{ flex: 1 }}>
@@ -560,7 +560,7 @@ function SmartListTab() {
             mode="contained"
             icon="sync"
             compact
-            onPress={() => syncAllMutation.mutate(notInWatchlist.map((i) => i.product_id))}
+            onPress={() => syncAllMutation.mutate(notInWatchlist.map((i) => i.product_id!))}
             loading={syncAllMutation.isPending}
             style={styles.syncBtn}
             labelStyle={{ fontSize: 12 }}
@@ -571,7 +571,7 @@ function SmartListTab() {
       )}
       <FlatList
         data={items}
-        keyExtractor={(item) => item.product_id}
+        keyExtractor={(item) => item.product_id || item.product_name}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
           <View style={styles.card}>
@@ -586,18 +586,20 @@ function SmartListTab() {
                   </Text>
                 )}
               </View>
-              <IconButton
-                icon={item.in_watchlist ? "star" : "star-outline"}
-                size={20}
-                iconColor={item.in_watchlist ? "#FFD200" : glassColors.textMuted}
-                onPress={() => {
-                  if (!item.in_watchlist) {
-                    addSingleMutation.mutate(item.product_id);
-                  }
-                }}
-                disabled={item.in_watchlist || addSingleMutation.isPending}
-                style={{ margin: 0 }}
-              />
+              {item.product_id !== null && (
+                <IconButton
+                  icon={item.in_watchlist ? "star" : "star-outline"}
+                  size={20}
+                  iconColor={item.in_watchlist ? "#FFD200" : glassColors.textMuted}
+                  onPress={() => {
+                    if (!item.in_watchlist && item.product_id) {
+                      addSingleMutation.mutate(item.product_id);
+                    }
+                  }}
+                  disabled={item.in_watchlist || addSingleMutation.isPending}
+                  style={{ margin: 0 }}
+                />
+              )}
               <Chip
                 compact
                 style={{
