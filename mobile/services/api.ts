@@ -444,6 +444,8 @@ export interface ChainPriceInfo {
   discount_pct: number | null;
   product_name: string;
   is_best: boolean;
+  is_alternative: boolean;
+  alternative_product_id: string | null;
 }
 
 export interface CompareItemInfo {
@@ -461,6 +463,8 @@ export interface ChainTotalInfo {
   chain_slug: string;
   total: number;
   items_covered: number;
+  items_exact: number;
+  items_alternative: number;
 }
 
 export interface ShoppingListCompareResponse {

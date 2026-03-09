@@ -61,7 +61,9 @@ export default function ChainTotalsSummary({
             {"\u20AC"}{Number(best.total).toFixed(2)}
           </Text>
           <Text style={[styles.coverage, { color: colors.textMuted }]}>
-            ({best.items_covered}/{itemsTotal})
+            ({best.items_alternative > 0
+              ? `${best.items_exact}+${best.items_alternative}~`
+              : best.items_covered}/{itemsTotal})
           </Text>
         </View>
 
@@ -75,7 +77,9 @@ export default function ChainTotalsSummary({
                   {"\u20AC"}{Number(chain.total).toFixed(2)}
                 </Text>
                 <Text style={[styles.coverage, { color: colors.textMuted }]}>
-                  ({chain.items_covered}/{itemsTotal})
+                  ({chain.items_alternative > 0
+                    ? `${chain.items_exact}+${chain.items_alternative}~`
+                    : chain.items_covered}/{itemsTotal})
                 </Text>
               </View>
             ))}

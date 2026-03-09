@@ -280,13 +280,18 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
         {compareInfo.chain_prices.map((cp: ChainPriceInfo) => (
           <View
             key={cp.chain_slug}
-            style={[styles.pill, { backgroundColor: colors.subtleBg }, cp.is_best && styles.pillBest, cp.is_best && { backgroundColor: colors.primarySubtle }]}
+            style={[
+              styles.pill,
+              { backgroundColor: cp.is_alternative ? "rgba(255,152,0,0.08)" : colors.subtleBg },
+              cp.is_best && styles.pillBest,
+              cp.is_best && { backgroundColor: colors.primarySubtle },
+            ]}
           >
             <Text
               style={[styles.pillText, { color: colors.textSecondary }, cp.is_best && styles.pillTextBest, cp.is_best && { color: colors.primary }]}
               numberOfLines={1}
             >
-              {cp.chain_name} {"\u20AC"}
+              {cp.is_alternative ? "~" : ""}{cp.chain_name} {"\u20AC"}
               {Number(cp.offer_price).toFixed(2)}
               {cp.is_best ? " \u2605" : ""}
             </Text>

@@ -1251,6 +1251,8 @@ class ChainPriceInfo(BaseModel):
     discount_pct: Decimal | None
     product_name: str
     is_best: bool = False
+    is_alternative: bool = False
+    alternative_product_id: str | None = None
 
 
 class CompareItem(BaseModel):
@@ -1268,6 +1270,8 @@ class ChainTotalInfo(BaseModel):
     chain_slug: str
     total: Decimal
     items_covered: int
+    items_exact: int = 0
+    items_alternative: int = 0
 
 
 class ShoppingListCompareResponse(BaseModel):
@@ -1276,6 +1280,141 @@ class ShoppingListCompareResponse(BaseModel):
     items_total: int
     multi_store_total: Decimal
     potential_savings: Decimal
+
+
+async def _find_alternative_prices(
+    items_with_gaps: list[tuple],  # (item, product, missing_chain_slugs)
+    all_chains: dict[str, tuple],  # slug -> (chain_id, name)
+    db: AsyncSession,
+    today: date,
+) -> dict[uuid.UUID, dict[str, dict]]:
+    """For items missing offers in certain chains, find similar products via fuzzy match."""
+    from app.services.product_matcher import ProductMatcher
+
+    if not items_with_gaps:
+        return {}
+
+    # Extract search keywords per item (significant words from normalized name)
+    item_keywords: dict[uuid.UUID, list[str]] = {}
+    item_info: dict[uuid.UUID, tuple] = {}  # item_id -> (product, missing_slugs)
+    all_keywords: set[str] = set()
+    original_pids: set[uuid.UUID] = set()
+
+    for item, product, missing_slugs in items_with_gaps:
+        normalized = ProductMatcher.normalize_text(product.name)
+        words = [w for w in normalized.split() if len(w) >= 3][:3]
+        if not words:
+            continue
+        item_keywords[item.id] = words
+        item_info[item.id] = (product, missing_slugs)
+        all_keywords.update(words)
+        original_pids.add(product.id)
+
+    if not all_keywords:
+        return {}
+
+    # Collect all missing chain_ids
+    missing_chain_ids: set[uuid.UUID] = set()
+    for _, (_, missing_slugs) in item_info.items():
+        for s in missing_slugs:
+            if s in all_chains:
+                missing_chain_ids.add(all_chains[s][0])
+
+    if not missing_chain_ids:
+        return {}
+
+    # Single batch query: find candidate products with active offers in missing chains
+    keyword_filters = [Product.name.ilike(f"%{kw}%") for kw in all_keywords]
+    candidates_result = await db.execute(
+        select(Product)
+        .join(Offer, Offer.product_id == Product.id)
+        .where(
+            or_(*keyword_filters),
+            ~Product.id.in_(original_pids),
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+            Offer.chain_id.in_(missing_chain_ids),
+        )
+        .distinct()
+        .limit(500)
+    )
+    candidates = candidates_result.scalars().all()
+
+    if not candidates:
+        return {}
+
+    # Load offers for candidate products
+    candidate_pids = [c.id for c in candidates]
+    offers_result = await db.execute(
+        select(Offer)
+        .options(joinedload(Offer.chain))
+        .where(
+            Offer.product_id.in_(candidate_pids),
+            Offer.valid_from <= today,
+            Offer.valid_to >= today,
+            Offer.chain_id.in_(missing_chain_ids),
+        )
+        .order_by(Offer.offer_price)
+    )
+    candidate_offers = offers_result.unique().scalars().all()
+
+    # Build candidate_pid -> chain_slug -> best offer
+    pid_chain_offers: dict[uuid.UUID, dict[str, tuple]] = defaultdict(dict)
+    for o in candidate_offers:
+        if not o.chain:
+            continue
+        slug = o.chain.slug
+        if slug not in pid_chain_offers[o.product_id]:
+            pid_chain_offers[o.product_id][slug] = (o, o.chain)
+
+    # Build candidate lookup by id
+    candidate_map = {c.id: c for c in candidates}
+
+    # Score and pick best alternative per (item, missing_chain)
+    result: dict[uuid.UUID, dict[str, dict]] = {}
+
+    for item_id, (product, missing_slugs) in item_info.items():
+        for slug in missing_slugs:
+            best_score = 0.0
+            best_data = None
+
+            for cand_id, chain_offers in pid_chain_offers.items():
+                if slug not in chain_offers:
+                    continue
+                cand = candidate_map.get(cand_id)
+                if not cand:
+                    continue
+
+                # Category guard: skip if both have categories and they differ
+                if product.category and cand.category and product.category != cand.category:
+                    continue
+
+                score = ProductMatcher.fuzzy_match(
+                    product.name, cand.name, product.brand, cand.brand,
+                )
+                if score >= 65 and score > best_score:
+                    offer, chain = chain_offers[slug]
+                    # Among equal scores, prefer cheaper
+                    if score == best_score and best_data and offer.offer_price >= best_data["offer_price"]:
+                        continue
+                    best_score = score
+                    best_data = {
+                        "offer_price": offer.offer_price,
+                        "chain_name": chain.name,
+                        "chain_slug": slug,
+                        "original_price": offer.original_price,
+                        "discount_pct": offer.discount_pct,
+                        "product_name": cand.name,
+                        "is_alternative": True,
+                        "alternative_product_id": str(cand.id),
+                    }
+
+            if best_data:
+                if item_id not in result:
+                    result[item_id] = {}
+                result[item_id][slug] = best_data
+
+    return result
 
 
 @router.get("/me/shopping-list/compare", response_model=ShoppingListCompareResponse)
@@ -1430,9 +1569,31 @@ async def compare_shopping_list(
                             "product_name": prod_name,
                         }
 
+    # --- Fuzzy alternatives for missing chains ---
+    available_slugs = set(all_chains.keys())
+    if filter_chain_slugs:
+        available_slugs = available_slugs & filter_chain_slugs
+
+    items_with_gaps: list[tuple] = []
+    for item in product_items + linked_items:
+        product = item.product
+        if not product:
+            continue
+        covered_slugs = set(item_prices.get(item.id, {}).keys())
+        missing = available_slugs - covered_slugs
+        if missing:
+            items_with_gaps.append((item, product, missing))
+
+    if items_with_gaps:
+        alt_prices = await _find_alternative_prices(items_with_gaps, all_chains, db, today)
+        for item_id, chain_data in alt_prices.items():
+            for slug, pdata in chain_data.items():
+                if slug not in item_prices[item_id]:
+                    item_prices[item_id][slug] = pdata
+
     # --- Build response ---
     compare_items: list[CompareItem] = []
-    chain_totals_map: dict[str, dict] = {}  # slug -> {total, items_covered, chain_name}
+    chain_totals_map: dict[str, dict] = {}  # slug -> {total, items_covered, chain_name, items_exact, items_alternative}
     multi_store_total = Decimal("0")
 
     for item in items:
@@ -1451,6 +1612,7 @@ async def compare_shopping_list(
         chain_price_list: list[ChainPriceInfo] = []
         for slug, pdata in sorted(prices.items(), key=lambda x: x[1]["offer_price"]):
             is_best = pdata["offer_price"] == best_price
+            is_alt = pdata.get("is_alternative", False)
             chain_price_list.append(ChainPriceInfo(
                 chain_name=pdata["chain_name"],
                 chain_slug=pdata["chain_slug"],
@@ -1459,6 +1621,8 @@ async def compare_shopping_list(
                 discount_pct=pdata["discount_pct"],
                 product_name=pdata["product_name"],
                 is_best=is_best,
+                is_alternative=is_alt,
+                alternative_product_id=pdata.get("alternative_product_id"),
             ))
 
             # Accumulate chain totals
@@ -1467,10 +1631,16 @@ async def compare_shopping_list(
                 chain_totals_map[slug] = {
                     "total": Decimal("0"),
                     "items_covered": 0,
+                    "items_exact": 0,
+                    "items_alternative": 0,
                     "chain_name": pdata["chain_name"],
                 }
             chain_totals_map[slug]["total"] += item_cost
             chain_totals_map[slug]["items_covered"] += 1
+            if is_alt:
+                chain_totals_map[slug]["items_alternative"] += 1
+            else:
+                chain_totals_map[slug]["items_exact"] += 1
 
         # Multi-store: add best price for this item
         if best_price is not None:
@@ -1494,6 +1664,8 @@ async def compare_shopping_list(
                 chain_slug=slug,
                 total=data["total"],
                 items_covered=data["items_covered"],
+                items_exact=data.get("items_exact", 0),
+                items_alternative=data.get("items_alternative", 0),
             )
             for slug, data in chain_totals_map.items()
         ],
