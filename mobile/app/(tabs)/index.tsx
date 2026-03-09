@@ -9,10 +9,13 @@ import {
   addToShoppingList,
   getActiveOffers,
   getBestOffers,
+  getBestOffersForWatchlist,
   getChains,
   getHistoricLows,
+  getHistoricLowsForWatchlist,
   getShoppingListCount,
   getShoppingListCompare,
+  getWatchlistIds,
   smartSearch,
 } from "../../services/api";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -98,7 +101,35 @@ export default function HomeScreen() {
     },
   });
 
-  // Offers (for non-logged-in or empty list state)
+  // Watchlist IDs (lightweight check)
+  const { data: watchlistData } = useQuery({
+    queryKey: ["watchlistIds"],
+    queryFn: getWatchlistIds,
+    enabled: isLoggedIn,
+    staleTime: 60000,
+  });
+  const hasWatchlist = isLoggedIn && (watchlistData?.product_ids?.length ?? 0) > 0;
+
+  // Personalized offers (watchlist-filtered)
+  const {
+    data: personalBest,
+    refetch: refetchPersonalBest,
+  } = useQuery({
+    queryKey: ["bestOffersWatchlist"],
+    queryFn: () => getBestOffersForWatchlist(10),
+    enabled: hasWatchlist,
+  });
+
+  const {
+    data: personalHistoric,
+    refetch: refetchPersonalHistoric,
+  } = useQuery({
+    queryKey: ["historicLowsWatchlist"],
+    queryFn: () => getHistoricLowsForWatchlist(10),
+    enabled: hasWatchlist,
+  });
+
+  // Generic offers (always fetched as fallback)
   const {
     data: bestOffers,
     isLoading: loadingBest,
@@ -126,14 +157,23 @@ export default function HomeScreen() {
     queryFn: () => getHistoricLows(10),
   });
 
+  // Determine which data to show: personalized if available, else generic
+  const useBestPersonalized = hasWatchlist && (personalBest?.length ?? 0) > 0;
+  const useHistoricPersonalized = hasWatchlist && (personalHistoric?.length ?? 0) > 0;
+
+  const bestLabel = useBestPersonalized ? "Le Tue Migliori Offerte" : "Migliori Offerte";
+  const historicLabel = useHistoricPersonalized ? "I Tuoi Minimi Storici" : "Minimi Storici";
+
+  const bestData = useBestPersonalized ? personalBest! : (bestOffers ?? []);
+  const historicData = useHistoricPersonalized ? personalHistoric! : (historicLows ?? []);
+
   // Chain-filtered offers
   const filteredBest = useMemo(() => {
-    if (!bestOffers) return [];
-    if (!selectedChain) return bestOffers;
-    return bestOffers.filter(
+    if (!selectedChain) return bestData;
+    return bestData.filter(
       (o) => o.chain_name?.toLowerCase() === selectedChain.toLowerCase()
     );
-  }, [bestOffers, selectedChain]);
+  }, [bestData, selectedChain]);
 
   const filteredActive = useMemo(() => {
     if (!activeOffers) return [];
@@ -144,12 +184,11 @@ export default function HomeScreen() {
   }, [activeOffers, selectedChain]);
 
   const filteredHistoric = useMemo(() => {
-    if (!historicLows) return [];
-    if (!selectedChain) return historicLows;
-    return historicLows.filter(
+    if (!selectedChain) return historicData;
+    return historicData.filter(
       (o) => o.chain_name?.toLowerCase() === selectedChain.toLowerCase()
     );
-  }, [historicLows, selectedChain]);
+  }, [historicData, selectedChain]);
 
   const isLoading = loadingBest || loadingActive || loadingHistoric;
 
@@ -157,7 +196,11 @@ export default function HomeScreen() {
     refetchBest();
     refetchActive();
     refetchHistoric();
-  }, [refetchBest, refetchActive, refetchHistoric]);
+    if (hasWatchlist) {
+      refetchPersonalBest();
+      refetchPersonalHistoric();
+    }
+  }, [refetchBest, refetchActive, refetchHistoric, hasWatchlist, refetchPersonalBest, refetchPersonalHistoric]);
 
   // Quick-add: submit search query as custom_name to shopping list
   const handleQuickAdd = () => {
@@ -345,7 +388,61 @@ export default function HomeScreen() {
               </View>
             )}
 
-            {/* ─── Offers section (always visible below) ─── */}
+            {/* ─── Best offers ─── */}
+            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.primary }]}>
+              {bestLabel}
+            </Text>
+            {filteredBest.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {filteredBest.map((item) => (
+                  <View key={item.id} style={styles.horizontalCard}>
+                    <OfferCard offer={item} compact />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <Text variant="bodyMedium" style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
+                Nessuna offerta disponibile
+              </Text>
+            )}
+
+            {/* ─── Historic lows ─── */}
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons
+                name="trending-down"
+                size={22}
+                color={glass.colors.primary}
+              />
+              <Text variant="titleLarge" style={[styles.sectionTitleInline, { color: glass.colors.primary }]}>
+                {historicLabel}
+              </Text>
+            </View>
+            {filteredHistoric.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {filteredHistoric.map((item) => (
+                  <View key={item.id} style={styles.horizontalCard}>
+                    <OfferCard offer={item} compact />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <Text variant="bodyMedium" style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
+                Nessun minimo storico disponibile
+              </Text>
+            )}
+
+            {/* ─── Active offers with chain filter ─── */}
+            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.primary }]}>
+              Offerte Attive
+            </Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -369,65 +466,13 @@ export default function HomeScreen() {
                 </Chip>
               ))}
             </ScrollView>
-
-            {/* Best offers */}
-            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.primary }]}>
-              Migliori Offerte
-            </Text>
-            {filteredBest.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {filteredBest.map((item) => (
-                  <View key={item.id} style={styles.horizontalCard}>
-                    <OfferCard offer={item} compact />
-                  </View>
-                ))}
-              </ScrollView>
-            ) : (
-              <Text variant="bodyMedium" style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
-                Nessuna offerta disponibile
-              </Text>
-            )}
-
-            {/* Historic lows */}
-            <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons
-                name="trending-down"
-                size={22}
-                color={glass.colors.primary}
-              />
-              <Text variant="titleLarge" style={[styles.sectionTitleInline, { color: glass.colors.primary }]}>
-                Minimi Storici
-              </Text>
+            <View style={styles.activeGrid}>
+              {filteredActive.map((offer) => (
+                <View key={offer.id} style={styles.activeGridItem}>
+                  <OfferCard offer={offer} mini />
+                </View>
+              ))}
             </View>
-            {filteredHistoric.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {filteredHistoric.map((item) => (
-                  <View key={item.id} style={styles.horizontalCard}>
-                    <OfferCard offer={item} compact />
-                  </View>
-                ))}
-              </ScrollView>
-            ) : (
-              <Text variant="bodyMedium" style={[styles.emptyText, { color: glass.colors.textSecondary }]}>
-                Nessun minimo storico disponibile
-              </Text>
-            )}
-
-            {/* All active offers */}
-            <Text variant="titleLarge" style={[styles.sectionTitle, { color: glass.colors.primary }]}>
-              Offerte Attive
-            </Text>
-            {filteredActive.map((offer) => (
-              <OfferCard key={offer.id} offer={offer} />
-            ))}
 
             <View style={styles.bottomPadding} />
           </>
@@ -585,5 +630,14 @@ const styles = StyleSheet.create({
   snackbar: {
     marginBottom: 80,
   },
+  activeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  activeGridItem: {
+    width: "48%",
+  } as any,
   bottomPadding: { height: 96 },
 });

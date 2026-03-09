@@ -817,6 +817,16 @@ export async function getHistoricLows(limit: number = 20): Promise<Offer[]> {
   return res.data;
 }
 
+export async function getBestOffersForWatchlist(limit: number = 20): Promise<Offer[]> {
+  const res = await apiClient.get<Offer[]>("/offers/best-for-watchlist", { params: { limit } });
+  return res.data;
+}
+
+export async function getHistoricLowsForWatchlist(limit: number = 20): Promise<Offer[]> {
+  const res = await apiClient.get<Offer[]>("/offers/historic-lows-for-watchlist", { params: { limit } });
+  return res.data;
+}
+
 // ── Watchlist (JWT-protected, /me routes) ────────────────────────────────────
 
 export async function getWatchlist(): Promise<WatchlistItem[]> {

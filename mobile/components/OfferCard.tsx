@@ -38,6 +38,7 @@ interface Offer {
 interface Props {
   offer: Offer;
   compact?: boolean;
+  mini?: boolean;
 }
 
 const MONTH_ABBR = [
@@ -52,7 +53,7 @@ function formatShortDate(iso: string): string {
   return `${month} '${year}`;
 }
 
-export default function OfferCard({ offer, compact }: Props) {
+export default function OfferCard({ offer, compact, mini }: Props) {
   const theme = useTheme();
   const glass = useGlassTheme();
   const { colors } = glass;
@@ -98,6 +99,37 @@ export default function OfferCard({ offer, compact }: Props) {
       trendIcon = "arrow-up";
       trendColor = colors.error;
     }
+  }
+
+  // ── Mini layout: ultra-compact for 2-column grid ──
+  if (mini) {
+    return (
+      <Pressable
+        style={[styles.miniCard, glass.card]}
+        onPress={() => router.push(`/product/${offer.product_id}`)}
+      >
+        <View style={styles.miniChainBadge}>
+          <Text style={[styles.miniChainText, { color: colors.primary }]}>
+            {offer.chain_name}
+          </Text>
+        </View>
+        <Text numberOfLines={1} style={[styles.miniProductName, { color: colors.textPrimary }]}>
+          {offer.product_name}
+        </Text>
+        <View style={styles.miniPriceRow}>
+          <Text style={[styles.miniPrice, { color: theme.colors.primary }]}>
+            {"\u20AC"}{Number(offer.offer_price).toFixed(2)}
+          </Text>
+          {offer.discount_pct && (
+            <View style={styles.discountBadge}>
+              <Text style={[styles.miniDiscountText, { color: colors.accent }]}>
+                -{Number(offer.discount_pct).toFixed(0)}%
+              </Text>
+            </View>
+          )}
+        </View>
+      </Pressable>
+    );
   }
 
   return (
@@ -262,4 +294,19 @@ const styles = StyleSheet.create({
   validTo: { color: "#888" },
   actionRow: { flexDirection: "row", marginTop: 4, marginLeft: -8 },
   actionBtn: { margin: 0 },
+  // Mini layout styles
+  miniCard: {
+    padding: 10,
+    ...glassCard,
+  } as any,
+  miniChainBadge: {
+    alignSelf: "flex-start",
+    marginBottom: 4,
+    ...chainBadgeGlass,
+  },
+  miniChainText: { fontWeight: "bold", fontSize: 10 },
+  miniProductName: { fontWeight: "600", fontSize: 13, marginBottom: 4 },
+  miniPriceRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  miniPrice: { fontWeight: "bold", fontSize: 16 },
+  miniDiscountText: { fontWeight: "bold", fontSize: 11 },
 });
