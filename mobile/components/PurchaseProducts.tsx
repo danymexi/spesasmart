@@ -98,7 +98,8 @@ export default function PurchaseProducts() {
     bassa: "#2E7D32",
   };
 
-  const notInWatchlist = items.filter((i) => !i.in_watchlist && i.product_id !== null);
+  const withProductId = items.filter((i) => i.product_id !== null);
+  const notInWatchlist = withProductId.filter((i) => !i.in_watchlist);
   const hasUnmatched = items.some((i) => i.product_id === null);
 
   const formatDaysInfo = (item: SmartListItem): string | null => {
@@ -115,8 +116,8 @@ export default function PurchaseProducts() {
 
   return (
     <View style={{ flex: 1 }}>
-      {notInWatchlist.length > 0 && (
-        <View style={styles.syncBar}>
+      <View style={styles.syncBar}>
+        {notInWatchlist.length > 0 ? (
           <Button
             mode="contained"
             icon="sync"
@@ -128,8 +129,21 @@ export default function PurchaseProducts() {
           >
             Sincronizza con Watchlist ({notInWatchlist.length})
           </Button>
-        </View>
-      )}
+        ) : (
+          <Button
+            mode="outlined"
+            icon="sync"
+            compact
+            onPress={() => syncAllMutation.mutate(withProductId.map((i) => i.product_id!))}
+            loading={syncAllMutation.isPending}
+            disabled={withProductId.length === 0}
+            style={styles.forceSyncBtn}
+            labelStyle={{ fontSize: 12 }}
+          >
+            Forza sincronizzazione ({withProductId.length})
+          </Button>
+        )}
+      </View>
       {hasUnmatched && (
         <View style={styles.backfillBanner}>
           <Text variant="bodySmall" style={{ color: glassColors.textSecondary, flex: 1 }}>
@@ -285,5 +299,6 @@ const styles = StyleSheet.create({
   daysInfo: { color: glassColors.textMuted, marginTop: 4, fontSize: 12 },
   syncBar: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4 },
   syncBtn: { backgroundColor: glassColors.greenDark, borderRadius: 8 },
+  forceSyncBtn: { borderColor: glassColors.greenDark, borderRadius: 8 },
   snackbar: { backgroundColor: "#1a1a2e" },
 });
