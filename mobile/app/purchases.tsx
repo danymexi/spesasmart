@@ -33,6 +33,7 @@ import type {
   PurchaseItemDetail,
   SmartListItem,
 } from "../services/api";
+import { useRouter } from "expo-router";
 import { glassPanel, glassCard, glassColors } from "../styles/glassStyles";
 import { useAppStore } from "../stores/useAppStore";
 
@@ -358,6 +359,7 @@ function OrderDetail({ order }: { order: PurchaseOrderItem }) {
 // ── Products Tab (unified habits + smart list) ─────────────────────────────
 
 function ProductsTab() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [snackbar, setSnackbar] = useState("");
   const { data: items, isLoading } = useQuery({
@@ -488,7 +490,14 @@ function ProductsTab() {
         renderItem={({ item }) => {
           const daysText = formatDaysInfo(item);
           return (
-            <View style={styles.card}>
+            <Pressable
+              style={styles.card}
+              onPress={() => {
+                if (item.product_id) {
+                  router.push(`/product/${item.product_id}`);
+                }
+              }}
+            >
               <View style={styles.smartHeader}>
                 <View style={{ flex: 1 }}>
                   <Text variant="titleSmall" style={styles.habitName}>
@@ -565,7 +574,7 @@ function ProductsTab() {
                   </Text>
                 )}
               </View>
-            </View>
+            </Pressable>
           );
         }}
       />
