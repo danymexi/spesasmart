@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { Searchbar, Avatar, Chip, Text, ActivityIndicator, Snackbar } from "react-native-paper";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -74,7 +74,7 @@ export default function CatalogScreen() {
     const q = query.toLowerCase();
     return catalogProducts
       .filter((p) => p.name.toLowerCase().includes(q))
-      .slice(0, 10);
+      .slice(0, 5);
   }, [query, catalogProducts]);
 
   // Fetch grouped catalog products with infinite scroll
@@ -89,7 +89,7 @@ export default function CatalogScreen() {
     queryFn: ({ pageParam = 0 }) =>
       getCatalogGrouped({
         q: debouncedQuery || undefined,
-        category: selectedCategory ?? undefined,
+        category: selectedCategory && selectedCategory !== "__all__" ? selectedCategory : undefined,
         sort: selectedSort !== "name" ? selectedSort : undefined,
         chain: selectedChain ? selectedChain.toLowerCase() : undefined,
         limit: PAGE_SIZE,
@@ -104,6 +104,9 @@ export default function CatalogScreen() {
   });
 
   const rawResults = catalogPages?.pages.flat() ?? [];
+
+  // Show local suggestions while API is still loading
+  const showLocalHints = query.length > 0 && localResults.length > 0 && isLoading;
 
   // Insert a separator between active and inactive products
   type ListItem = SmartSearchResult | { _separator: true };
@@ -241,6 +244,32 @@ export default function CatalogScreen() {
           contentContainerStyle={styles.chipRow}
           style={{ flexGrow: 0 }}
         >
+          <Chip
+            key="__all__"
+            icon={() => (
+              <MaterialCommunityIcons
+                name="view-grid"
+                size={16}
+                color={
+                  selectedCategory === "__all__"
+                    ? glass.colors.primary
+                    : glass.colors.textMuted
+                }
+              />
+            )}
+            selected={selectedCategory === "__all__"}
+            onPress={() =>
+              setSelectedCategory(selectedCategory === "__all__" ? null : "__all__")
+            }
+            style={[
+              styles.filterChip,
+              glass.chip,
+              selectedCategory === "__all__" && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }],
+            ]}
+            compact
+          >
+            Tutti
+          </Chip>
           {catalogHomeData.categories.map((cat) => (
             <Chip
               key={cat.slug}
@@ -266,7 +295,7 @@ export default function CatalogScreen() {
               ]}
               compact
             >
-              {cat.name}
+              {cat.name} ({cat.count})
             </Chip>
           ))}
         </ScrollView>
@@ -318,6 +347,32 @@ export default function CatalogScreen() {
               </Chip>
             ))}
           </ScrollView>
+
+          {/* Local instant suggestions while API loads */}
+          {showLocalHints && (
+            <View style={styles.localHints}>
+              {localResults.map((p) => (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[styles.localHintRow, { borderBottomColor: glass.colors.divider }]}
+                  onPress={() => setQuery(p.name)}
+                >
+                  <MaterialCommunityIcons
+                    name="magnify"
+                    size={16}
+                    color={glass.colors.textMuted}
+                  />
+                  <Text
+                    variant="bodySmall"
+                    numberOfLines={1}
+                    style={[styles.localHintText, { color: glass.colors.textSecondary }]}
+                  >
+                    {p.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {/* Results count */}
           {rawResults.length > 0 && (
@@ -406,6 +461,21 @@ const styles = StyleSheet.create({
   },
   listContent: { paddingBottom: 96 },
   snackbar: { marginBottom: 80 },
+  localHints: {
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+  },
+  localHintRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    gap: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  localHintText: {
+    flex: 1,
+  },
   separator: {
     flexDirection: "row",
     alignItems: "center",

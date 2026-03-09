@@ -49,6 +49,21 @@ _ITALIAN_SYNONYMS: dict[str, str] = {
     "tonno olio": "tonno olio",
     "prosciutto cotto": "prosciutto cotto",
     "prosciutto crudo": "prosciutto crudo",
+    # Common typos and brand variants
+    "nutela": "nutella",
+    "coca cola": "coca-cola",
+    "cocacola": "coca-cola",
+    "spek": "speck",
+    "mortadela": "mortadella",
+    "Philadelphia": "philadelphia",
+    "stracchino": "stracchino",
+    "mascrapone": "mascarpone",
+    "proscutto": "prosciutto",
+    "salsicia": "salsiccia",
+    "bagnodoccia": "bagnoschiuma",
+    "detersivio": "detersivo",
+    "bisccotti": "biscotti",
+    "crackers": "cracker",
 }
 
 
@@ -622,7 +637,7 @@ def _group_similar_product_ids(
     # --- Phase B: Fuzzy name matching (limited to nearby neighbours) ---
     # Products are sorted by name, so duplicates with similar names are adjacent.
     # Limit the inner loop to WINDOW neighbours to avoid O(n²) on large catalogs.
-    WINDOW = 30
+    WINDOW = 50
     for i, r in enumerate(rows):
         if i in used:
             continue
@@ -662,11 +677,15 @@ def _group_similar_product_ids(
                 continue
 
             # Quick first-word rejection (avoid expensive SequenceMatcher)
-            if (
-                first_words[i] and first_words[j]
-                and first_words[i][:4] != first_words[j][:4]
-            ):
-                continue
+            # Cross-match first 2 words to handle "Barilla Spaghetti" vs "Spaghetti Barilla"
+            if first_words[i] and first_words[j] and first_words[i][:4] != first_words[j][:4]:
+                words_i = normalized[i].split()[:2]
+                words_j = normalized[j].split()[:2]
+                cross_match = any(
+                    wi[:4] == wj[:4] for wi in words_i for wj in words_j
+                )
+                if not cross_match:
+                    continue
 
             if not _names_match(normalized[i], normalized[j]):
                 continue
@@ -805,11 +824,14 @@ _CATEGORY_NORM: dict[str, str] = {
     "pesce": "Pesce",
     "gastronomia": "Gastronomia",
     "neonati e infanzia": "Neonati e Infanzia",
+    "acqua": "Bevande",
+    "uova": "Latticini",
+    "altro": "Altro",
 }
 
 # Categories to exclude (catch-all, seasonal, non-food)
 _CATEGORY_EXCLUDE = {
-    "supermercato", "altro", "pasqua", "videogiochi", "console",
+    "supermercato", "pasqua", "videogiochi", "console",
     "action figure", "cancelleria", "giocattoli", "elettronica",
     "telefonia", "informatica", "giardinaggio", "auto e moto",
 }
@@ -835,6 +857,7 @@ _CATEGORY_ICONS: dict[str, str] = {
     "Gastronomia": "food-turkey",
     "Benessere e Intolleranze": "leaf",
     "Neonati e Infanzia": "baby-carriage",
+    "Altro": "dots-horizontal",
 }
 
 
@@ -901,11 +924,11 @@ async def get_catalog_home(
         cat_counts[canonical] += cnt
         cat_raw_variants[canonical].add(raw_cat)
 
-    # Top 12 categories with >50 products
+    # Top 20 categories with >10 products
     top_categories = sorted(
-        [(name, count) for name, count in cat_counts.items() if count > 50],
+        [(name, count) for name, count in cat_counts.items() if count > 10],
         key=lambda x: -x[1],
-    )[:12]
+    )[:20]
 
     # ── 2. Featured offers (top 8 by discount) ──
     feat_query = (
@@ -1037,6 +1060,15 @@ async def get_catalog_grouped(
         (row.id, row.name, row.brand, row.category, row.barcode)
         for row in result.all()
     ]
+
+    # Fuzzy fallback: if ILIKE found nothing and query is >= 3 chars, try pg_trgm
+    if not all_rows and q and len(q.strip()) >= 3:
+        fuzzy_products = await _fuzzy_search_products(q, db, limit=limit, category=category)
+        if fuzzy_products:
+            all_rows = [
+                (p.id, p.name, p.brand, p.category, p.barcode)
+                for p in fuzzy_products
+            ]
 
     if not all_rows:
         return []

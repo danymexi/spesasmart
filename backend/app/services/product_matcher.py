@@ -337,12 +337,11 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "Bevande": [
         "birra", "succo", "cola", "aranciata", "energy", "drink", "sprite",
         "fanta", "schweppes", "gassosa", "chinotto", "limonata", "the freddo",
-        "te freddo",
+        "te freddo", "acqua",
     ],
-    "Acqua": ["acqua minerale", "acqua naturale", "acqua frizzante"],
     "Latticini": [
         "latte", "yogurt", "panna", "burro", "ricotta", "mascarpone",
-        "kefir", "skyr",
+        "kefir", "skyr", "uova", "stracchino",
     ],
     "Salumi e Formaggi": [
         "parmigiano", "mozzarella", "gorgonzola", "provolone", "pecorino",
@@ -360,6 +359,7 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
         "pollo", "manzo", "maiale", "vitello", "tacchino", "hamburger",
         "salsiccia", "agnello", "coniglio", "scottona", "fettine",
         "arrosto", "bistecca", "carpaccio", "polpette",
+        "bresaola", "cotoletta", "spiedini",
     ],
     "Pesce": [
         "salmone", "merluzzo", "gamberi", "pesce", "orata", "branzino",
@@ -382,6 +382,7 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
         "crostata", "croissant", "brioche", "plumcake", "muffin",
         "patatine", "pop corn", "taralli", "salatini", "snack",
         "caramelle", "chewing gum", "gomme",
+        "cioccolatini", "praline", "panettone", "pandoro", "colomba",
     ],
     "Caffe e Te": [
         "caffè", "caffe", "espresso", "capsule caffè", "capsule caffe",
@@ -391,22 +392,24 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
         "pelati", "passata", "sugo", "conserva", "pesto", "ragù", "ragu",
         "olio", "aceto", "sale fino", "sale grosso", "pepe",
         "maionese", "ketchup", "senape", "salsa", "dado",
+        "tonno", "legumi", "marmellata", "confettura", "miele",
     ],
     "Igiene Personale": [
         "shampoo", "bagnodoccia", "bagnoschiuma", "dentifricio",
         "deodorante", "sapone mani", "crema viso", "crema corpo",
         "rasoio", "assorbent", "salvaslip", "cotton fioc",
+        "gel doccia", "schiuma", "salviette",
     ],
     "Pulizia Casa": [
         "detersivo", "ammorbidente", "candeggina", "sgrassatore", "spugna",
         "carta igienica", "tovaglioli", "pellicola", "alluminio",
         "sacchetti spazzatura", "anticalcare",
+        "sacchetti", "panno", "rotolone", "fazzoletti",
     ],
     "Alcolici": [
         "vino rosso", "vino bianco", "prosecco", "spumante", "champagne",
         "grappa", "amaro", "limoncello", "vodka", "gin", "rum", "whisky",
     ],
-    "Uova": ["uova"],
     "Neonati e Infanzia": [
         "pannolini", "latte crescita", "omogenizzat", "pastina bimbi",
     ],
@@ -1031,6 +1034,15 @@ class ProductMatcher:
         new_cat = raw_data.get("category")
         if new_cat and (not product.category or product.category == "Supermercato"):
             product.category = new_cat
+        # Keyword categorization fallback if still missing
+        if not product.category or product.category == "Supermercato":
+            kw_cat = ProductMatcher.categorize_by_keywords(
+                product.name, product.brand
+            )
+            if kw_cat:
+                product.category = kw_cat
+        if not product.category:
+            product.category = "Altro"
 
         new_sub = raw_data.get("subcategory")
         if new_sub and (not product.subcategory or product.subcategory == "Supermercato"):
@@ -1132,11 +1144,16 @@ class ProductMatcher:
 
             # --- 3. Create new product ---
             canonical_brand = self.normalize_brand(brand)
+            category = raw_data.get("category")
+            if not category or category == "Supermercato":
+                category = self.categorize_by_keywords(name, canonical_brand)
+            if not category:
+                category = "Altro"
             product = Product(
                 id=uuid.uuid4(),
                 name=name.strip(),
                 brand=canonical_brand,
-                category=raw_data.get("category"),
+                category=category,
                 subcategory=raw_data.get("subcategory"),
                 unit=raw_data.get("unit"),
                 barcode=barcode,

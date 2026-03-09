@@ -10,6 +10,7 @@ import {
 import { IconButton, Text } from "react-native-paper";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import {
   glassCard,
   glassColors,
@@ -137,6 +138,18 @@ export default function ExpandableCatalogCard({
               </Text>
             )}
           </View>
+          {onAddToShoppingList && (
+            <IconButton
+              icon="cart-plus"
+              iconColor={colors.textMuted}
+              size={20}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onAddToShoppingList(product.id);
+              }}
+              style={styles.actionBtn}
+            />
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -197,7 +210,10 @@ export default function ExpandableCatalogCard({
             icon="cart-plus"
             iconColor={colors.primaryMuted}
             size={20}
-            onPress={() => onAddToShoppingList(product.id)}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onAddToShoppingList(product.id);
+            }}
             style={styles.actionBtn}
           />
         )}
