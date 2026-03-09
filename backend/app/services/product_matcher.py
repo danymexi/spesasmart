@@ -1073,10 +1073,11 @@ class ProductMatcher:
         """Match a receipt item name to a catalog product.
 
         Optimised for the noisy, abbreviated names found on Italian receipts.
-        Uses a lower match threshold (65) and shorter token minimum (>2 chars)
-        to compensate for truncation.  Does NOT create new products.
+        Uses a lower match threshold than standard matching but with guards
+        against false matches on short/generic names.  Does NOT create products.
         """
-        RECEIPT_THRESHOLD = 65
+        RECEIPT_THRESHOLD = 75
+        RECEIPT_THRESHOLD_SHORT = 85  # for names with < 3 significant tokens
 
         close_session = False
         if session is None:
@@ -1093,11 +1094,27 @@ class ProductMatcher:
             if not significant:
                 return None
 
-            stmt = select(Product).where(
-                or_(*[Product.name.ilike(f"%{tok}%") for tok in significant])
-            )
+            # For better precision, require ALL tokens to match (AND) when
+            # we have 2+ significant tokens, instead of OR which returns
+            # too many false candidates for common words like "mutti"/"passata"
+            if len(significant) >= 2:
+                stmt = select(Product).where(
+                    *[Product.name.ilike(f"%{tok}%") for tok in significant[:3]]
+                )
+            else:
+                stmt = select(Product).where(
+                    or_(*[Product.name.ilike(f"%{tok}%") for tok in significant])
+                )
             result = await session.execute(stmt)
             candidates: list[Product] = list(result.scalars().all())
+
+            # Fallback to OR if AND returned nothing
+            if not candidates and len(significant) >= 2:
+                stmt = select(Product).where(
+                    or_(*[Product.name.ilike(f"%{tok}%") for tok in significant])
+                )
+                result = await session.execute(stmt)
+                candidates = list(result.scalars().all())
 
             if not candidates:
                 return None
@@ -1122,15 +1139,22 @@ class ProductMatcher:
                     best_score = score
                     best_product = product
 
-            if best_score >= RECEIPT_THRESHOLD and best_product is not None:
+            # Short/generic names need a higher threshold to avoid false matches
+            # e.g. "BANANE" -> "Banana Chips" or "PATATE" -> "Patata di Campo"
+            threshold = RECEIPT_THRESHOLD
+            if len(significant) < 3:
+                threshold = RECEIPT_THRESHOLD_SHORT
+
+            if best_score >= threshold and best_product is not None:
                 logger.info(
-                    "Receipt match '%s' -> '%s' (score=%.1f)",
-                    name, best_product.name, best_score,
+                    "Receipt match '%s' -> '%s' (score=%.1f, threshold=%d)",
+                    name, best_product.name, best_score, threshold,
                 )
                 return best_product
 
             logger.debug(
-                "No receipt match for '%s' (best=%.1f)", name, best_score
+                "No receipt match for '%s' (best=%.1f, threshold=%d)",
+                name, best_score, threshold,
             )
             return None
         finally:
