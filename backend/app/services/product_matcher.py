@@ -89,12 +89,58 @@ _ABBREVIATION_MAP: dict[str, str] = {
     "int.": "integrale",
     "orig.": "originale",
     "class.": "classico",
+    # Receipt-specific abbreviations
+    "yog.": "yogurt", "yog": "yogurt",
+    "mozz.": "mozzarella", "mozz": "mozzarella",
+    "prosc.": "prosciutto", "prosc": "prosciutto",
+    "form.": "formaggio", "form": "formaggio",
+    "bisc.": "biscotti", "bisc": "biscotti",
+    "sacc.": "sacchetto",
+    "compost.": "compostabile",
+    "buf.": "bufala", "buf": "bufala",
+    "camp.": "campana", "camp": "campana",
+    "fres.": "fresco", "fres": "fresco",
+    "pol.": "pollo", "pol": "pollo",
+    "tac.": "tacchino", "tac": "tacchino",
+    "sug.": "sugo", "sug": "sugo",
+    "marg.": "margherita", "marg": "margherita",
+    "ins.": "insalata", "ins": "insalata",
+    "lat.": "latte", "lat": "latte",
+    "pan.": "pane", "pan": "pane",
+    "bev.": "bevanda", "bev": "bevanda",
+    "acq.": "acqua", "acq": "acqua",
+    "nat.": "naturale", "nat": "naturale",
+    "friz.": "frizzante", "friz": "frizzante",
+    "cap.": "capelli",
+    "bag.": "bagnoschiuma", "bag": "bagnoschiuma",
+    "dent.": "dentifricio", "dent": "dentifricio",
+    "cart.": "carta",
+    "mul.": "muller", "mul": "muller",
+    "dan.": "danone", "dan": "danone",
+    "grec.": "greco", "grec": "greco",
+    "mag.": "magro", "mag": "magro",
+    "med.": "medio",
+    "pic.": "piccolo",
+    "gra.": "grande",
+    "riso.": "risotto",
+    "past.": "pasta",
+    "tom.": "pomodoro",
+    "lav.": "lavaggio",
+    "conc.": "concentrato",
+    "prec.": "precotto",
+    "affet.": "affettato", "affet": "affettato",
+    "cot.": "cotto", "cot": "cotto",
+    "crud.": "crudo", "crud": "crudo",
 }
 
 # Multi-token abbreviation expansions (applied before tokenizing)
 _MULTI_TOKEN_ABBREVS: dict[str, str] = {
     "s/glutine": "senza glutine",
     "s/lattosio": "senza lattosio",
+    "p.s.": "parzialmente scremato",
+    "a.q.": "alta qualita",
+    "o.v.": "olio vergine",
+    "e.v.": "extra vergine",
 }
 
 # ---------------------------------------------------------------------------
@@ -1011,6 +1057,80 @@ class ProductMatcher:
 
             logger.debug(
                 "No match for '%s' (best score=%.1f)", name, best_score
+            )
+            return None
+        finally:
+            if close_session:
+                await session.close()
+
+    async def find_receipt_match(
+        self,
+        name: str,
+        *,
+        category: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> Optional[Product]:
+        """Match a receipt item name to a catalog product.
+
+        Optimised for the noisy, abbreviated names found on Italian receipts.
+        Uses a lower match threshold (65) and shorter token minimum (>2 chars)
+        to compensate for truncation.  Does NOT create new products.
+        """
+        RECEIPT_THRESHOLD = 65
+
+        close_session = False
+        if session is None:
+            session = async_session()
+            close_session = True
+
+        try:
+            cleaned = self._strip_units(self._strip_brand(
+                self._strip_private_label(name), None))
+            tokens = self.normalize_text(cleaned).split()
+            # Use shorter tokens (>2 chars) and more of them (up to 5)
+            significant = [t for t in tokens if len(t) > 2][:5]
+
+            if not significant:
+                return None
+
+            stmt = select(Product).where(
+                or_(*[Product.name.ilike(f"%{tok}%") for tok in significant])
+            )
+            result = await session.execute(stmt)
+            candidates: list[Product] = list(result.scalars().all())
+
+            if not candidates:
+                return None
+
+            best_score: float = 0.0
+            best_product: Product | None = None
+
+            for product in candidates:
+                score = self.fuzzy_match(name, product.name)
+
+                # Category guard
+                if (
+                    category
+                    and product.category
+                    and category != product.category
+                    and category != "Supermercato"
+                    and product.category != "Supermercato"
+                ):
+                    score = min(score, 60.0)
+
+                if score > best_score:
+                    best_score = score
+                    best_product = product
+
+            if best_score >= RECEIPT_THRESHOLD and best_product is not None:
+                logger.info(
+                    "Receipt match '%s' -> '%s' (score=%.1f)",
+                    name, best_product.name, best_score,
+                )
+                return best_product
+
+            logger.debug(
+                "No receipt match for '%s' (best=%.1f)", name, best_score
             )
             return None
         finally:

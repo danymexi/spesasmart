@@ -38,7 +38,11 @@ the following keys:
 - "total"         (string | null) — total amount paid, Italian format with comma \
   as decimal separator, e.g. "45,30".
 - "items"         (array) — list of purchased items, each an object with:
-    - "name"        (string) — product name as printed on the receipt.
+    - "name"        (string) — product name **expanded to a readable form**.  \
+      Receipt names are often truncated or abbreviated (e.g. "YOG.GRECO MUL." → \
+      "Yogurt Greco Muller", "SACC.COMPOST." → "Sacchetto Compostabile", \
+      "MOZZ.BUF.CAMP." → "Mozzarella di Bufala Campana").  Expand abbreviations \
+      when the meaning is clear.  Use Title Case.
     - "quantity"    (number) — quantity purchased (default 1 if not printed).
     - "unit_price"  (string | null) — unit price in Italian format, e.g. "2,49".
     - "total_price" (string) — line total in Italian format, e.g. "4,98".
@@ -46,14 +50,21 @@ the following keys:
     - "category"    (string | null) — broad category in Italian if identifiable \
       (e.g. "Latticini", "Frutta e Verdura", "Bevande", "Carne", "Surgelati", \
       "Dolci", "Igiene personale", "Pulizia casa", "Pasta e Riso", "Pane").
+    - "is_product"  (boolean) — true if this line is an actual purchased product.  \
+      Set to false for non-product lines such as: bags (sacchetti, buste, \
+      shopper), deposit/cauzione, coupons/buoni, loyalty points, subtotals, \
+      payment lines, cashback, rounding adjustments, VAT lines, or any \
+      other line that is NOT a product the customer intended to buy.
 
 IMPORTANT RULES:
 1. Return ONLY valid JSON — no markdown fences, no commentary.
 2. Prices MUST stay in Italian format (comma as decimal separator) as they \
    appear on the receipt.  Do NOT convert them.
 3. Do NOT invent data.  If something is unclear, set the field to null.
-4. Include ALL items, even if partially legible — set name to the best guess.
+4. Include ALL lines from the receipt in "items" but mark non-products with \
+   "is_product": false so they can be filtered downstream.
 5. The JSON must be parseable by ``json.loads`` in Python.
+6. Expand abbreviated names to their full readable form whenever possible.
 """
 
 

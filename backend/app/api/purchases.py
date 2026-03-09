@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import shutil
 import tempfile
 import uuid
@@ -377,6 +378,27 @@ async def get_session_status(
 
 # ── Receipt upload (OCR) ─────────────────────────────────────────────────────
 
+# Non-product line patterns (case-insensitive) — bags, coupons, loyalty, etc.
+_NON_PRODUCT_PATTERNS = re.compile(
+    r"(?i)"
+    r"sacchett[oi]|busta|shopper|"
+    r"buono|coupon|sconto\s+tessera|"
+    r"carta\s+fedelta|fidelity|punti|"
+    r"cauzione|deposito\s+vuot|"
+    r"subtotal|contante|bancomat|"
+    r"carta\s+credito|carta\s+debito|"
+    r"resto\s+euro|arrotondamento|"
+    r"commissione|iva\b|"
+    r"reso\b|rimborso|"
+    r"cashback|acconto"
+)
+
+
+def _is_non_product_line(name: str) -> bool:
+    """Return True if the receipt line is likely not a real product."""
+    return bool(_NON_PRODUCT_PATTERNS.search(name))
+
+
 @router.post("/purchases/upload-receipt", response_model=ReceiptUploadResponse)
 async def upload_receipt(
     file: UploadFile = File(...),
@@ -497,6 +519,12 @@ async def upload_receipt(
             if not name:
                 continue
 
+            # Skip non-product lines (marked by OCR or caught by blacklist)
+            if not item_data.get("is_product", True):
+                continue
+            if _is_non_product_line(name):
+                continue
+
             quantity = Decimal("1")
             try:
                 q = item_data.get("quantity")
@@ -525,13 +553,16 @@ async def upload_receipt(
             try:
                 from app.services.product_matcher import ProductMatcher
                 matcher = ProductMatcher()
-                product = await matcher.create_or_match_product({
-                    "name": name,
-                    "category": item_data.get("category"),
-                })
-                purchase_item.product_id = product.id
-                matched_product_id = str(product.id)
-                matched_product_name = product.name
+                # Use receipt-specific matching (lower threshold, no product creation)
+                product = await matcher.find_receipt_match(
+                    name,
+                    category=item_data.get("category"),
+                    session=db,
+                )
+                if product:
+                    purchase_item.product_id = product.id
+                    matched_product_id = str(product.id)
+                    matched_product_name = product.name
             except Exception:
                 logger.debug("Product matching failed for '%s', skipping", name)
 
