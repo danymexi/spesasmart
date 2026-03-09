@@ -1392,6 +1392,29 @@ export async function uploadReceipt(
   return res.data;
 }
 
+// ── Bulk add to shopping list ───────────────────────────────────────────────
+
+export interface BulkShoppingListItem {
+  product_id?: string;
+  custom_name?: string;
+  quantity?: number;
+}
+
+export interface BulkAddResult {
+  added: number;
+}
+
+export async function bulkAddToShoppingList(
+  items: BulkShoppingListItem[],
+  listId?: string
+): Promise<BulkAddResult> {
+  const res = await apiClient.post<BulkAddResult>(
+    "/users/me/shopping-list/bulk",
+    { items, list_id: listId }
+  );
+  return res.data;
+}
+
 // ── Purchase History ────────────────────────────────────────────────────────
 
 export async function getPurchaseOrders(

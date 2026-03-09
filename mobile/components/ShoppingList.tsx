@@ -529,6 +529,15 @@ export default function ShoppingList({ listId }: ShoppingListProps) {
             >
               Importa
             </Button>
+            <Button
+              mode="outlined"
+              icon="receipt"
+              onPress={() => router.push("/scan-receipt")}
+              labelStyle={styles.actionLabel}
+              compact
+            >
+              Scontrino
+            </Button>
             {checkedItems.length > 0 && (
               <Button
                 mode="outlined"

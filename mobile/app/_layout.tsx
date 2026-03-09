@@ -147,6 +147,10 @@ export default function RootLayout() {
               options={{ title: "Scansiona Barcode", presentation: "modal", headerShown: false }}
             />
             <Stack.Screen
+              name="scan-receipt"
+              options={{ title: "Scontrino", presentation: "modal", headerShown: false }}
+            />
+            <Stack.Screen
               name="store-map"
               options={{ title: "Mappa Negozi", headerShown: false }}
             />

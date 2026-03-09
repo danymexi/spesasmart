@@ -132,6 +132,21 @@ class ShoppingListAddRequest(BaseModel):
     list_id: uuid.UUID | None = None
 
 
+class ShoppingListBulkItem(BaseModel):
+    product_id: uuid.UUID | None = None
+    custom_name: str | None = None
+    quantity: int = 1
+
+
+class ShoppingListBulkAddRequest(BaseModel):
+    items: list[ShoppingListBulkItem]
+    list_id: uuid.UUID | None = None
+
+
+class ShoppingListBulkAddResponse(BaseModel):
+    added: int
+
+
 class LinkedProductDetail(BaseModel):
     id: uuid.UUID
     name: str
@@ -943,6 +958,51 @@ async def add_to_shopping_list(
         linked_products_details=linked_details,
         created_at=item.created_at,
     )
+
+
+@router.post("/me/shopping-list/bulk", response_model=ShoppingListBulkAddResponse, status_code=201)
+async def bulk_add_to_shopping_list(
+    data: ShoppingListBulkAddRequest,
+    user: UserProfile = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add multiple items to the shopping list in one request."""
+    if not data.items:
+        return ShoppingListBulkAddResponse(added=0)
+
+    # Resolve list_id
+    resolved_list_id = data.list_id
+    if resolved_list_id is None:
+        from app.api.shopping_lists import _get_or_create_default_list
+        default = await _get_or_create_default_list(user, db)
+        resolved_list_id = default.id
+
+    # Batch-load all referenced products
+    product_ids = [it.product_id for it in data.items if it.product_id]
+    products_map: dict[uuid.UUID, Product] = {}
+    if product_ids:
+        prods_result = await db.execute(
+            select(Product).where(Product.id.in_(product_ids))
+        )
+        products_map = {p.id: p for p in prods_result.scalars().all()}
+
+    added = 0
+    for it in data.items:
+        if not it.product_id and not it.custom_name:
+            continue  # skip invalid items
+
+        item = ShoppingListItem(
+            user_id=user.id,
+            list_id=resolved_list_id,
+            product_id=it.product_id if it.product_id and it.product_id in products_map else None,
+            custom_name=it.custom_name if not it.product_id else None,
+            quantity=it.quantity,
+        )
+        db.add(item)
+        added += 1
+
+    await db.flush()
+    return ShoppingListBulkAddResponse(added=added)
 
 
 @router.patch("/me/shopping-list/{item_id}/check")
