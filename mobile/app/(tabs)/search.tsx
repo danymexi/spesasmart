@@ -16,7 +16,6 @@ import {
 } from "../../services/api";
 import { useAppStore } from "../../stores/useAppStore";
 import ExpandableCatalogCard from "../../components/ExpandableCatalogCard";
-import CatalogHome from "../../components/CatalogHome";
 import { SkeletonList } from "../../components/Skeleton";
 import {
   glassChip,
@@ -234,69 +233,91 @@ export default function CatalogScreen() {
         )}
       />
 
-      {/* Sort chips */}
-      <View style={styles.chipRow}>
-        {SORT_OPTIONS.map((opt) => (
-          <Chip
-            key={opt.key}
-            selected={selectedSort === opt.key}
-            onPress={() => setSelectedSort(opt.key)}
-            style={[styles.filterChip, glass.chip, selectedSort === opt.key && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }]]}
-            compact
-          >
-            {opt.label}
-          </Chip>
-        ))}
-      </View>
+      {/* Category chips — always visible */}
+      {catalogHomeData && catalogHomeData.categories.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+          style={{ flexGrow: 0 }}
+        >
+          {catalogHomeData.categories.map((cat) => (
+            <Chip
+              key={cat.slug}
+              icon={() => (
+                <MaterialCommunityIcons
+                  name={cat.icon as any}
+                  size={16}
+                  color={
+                    selectedCategory === cat.name
+                      ? glass.colors.primary
+                      : glass.colors.textMuted
+                  }
+                />
+              )}
+              selected={selectedCategory === cat.name}
+              onPress={() =>
+                setSelectedCategory(selectedCategory === cat.name ? null : cat.name)
+              }
+              style={[
+                styles.filterChip,
+                glass.chip,
+                selectedCategory === cat.name && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }],
+              ]}
+              compact
+            >
+              {cat.name}
+            </Chip>
+          ))}
+        </ScrollView>
+      )}
 
-      {/* Chain chips */}
-      <View style={styles.chipRow}>
-        {(chainsData ?? []).map((ch) => (
-          <Chip
-            key={ch.slug}
-            selected={selectedChain === ch.name}
-            onPress={() => setSelectedChain(selectedChain === ch.name ? null : ch.name)}
-            style={[styles.filterChip, glass.chip, selectedChain === ch.name && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }]]}
-            avatar={ch.logo_url ? <Avatar.Image size={24} source={{ uri: ch.logo_url }} /> : undefined}
-            compact
-          >
-            {ch.name}
-          </Chip>
-        ))}
-      </View>
-
-      {/* Idle: vertical feed — Browsing: category chips + results */}
+      {/* Idle state: empty state prompt */}
       {!isBrowsing ? (
-        <CatalogHome onSelectCategory={setSelectedCategory} />
+        <View style={styles.idleContainer}>
+          <MaterialCommunityIcons
+            name="cart-outline"
+            size={48}
+            color={glass.colors.textMuted}
+          />
+          <Text style={[styles.idleText, { color: glass.colors.textSecondary }]}>
+            Cerca un prodotto o{"\n"}scegli una categoria
+          </Text>
+        </View>
       ) : (
         <>
-          {/* Category chips from catalogHome cache */}
-          {catalogHomeData && catalogHomeData.categories.length > 0 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipRow}
-              style={{ flexGrow: 0 }}
-            >
-              {catalogHomeData.categories.map((cat) => (
-                <Chip
-                  key={cat.slug}
-                  selected={selectedCategory === cat.name}
-                  onPress={() =>
-                    setSelectedCategory(selectedCategory === cat.name ? null : cat.name)
-                  }
-                  style={[
-                    styles.filterChip,
-                    glass.chip,
-                    selectedCategory === cat.name && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }],
-                  ]}
-                  compact
-                >
-                  {cat.name}
-                </Chip>
-              ))}
-            </ScrollView>
-          )}
+          {/* Sort + Chain chips — single row */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRow}
+            style={{ flexGrow: 0 }}
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <Chip
+                key={opt.key}
+                selected={selectedSort === opt.key}
+                onPress={() => setSelectedSort(opt.key)}
+                style={[styles.filterChip, glass.chip, selectedSort === opt.key && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }]]}
+                compact
+              >
+                {opt.label}
+              </Chip>
+            ))}
+            <View style={[styles.chipDivider, { backgroundColor: glass.colors.divider }]} />
+            {(chainsData ?? []).map((ch) => (
+              <Chip
+                key={ch.slug}
+                selected={selectedChain === ch.name}
+                onPress={() => setSelectedChain(selectedChain === ch.name ? null : ch.name)}
+                style={[styles.filterChip, glass.chip, selectedChain === ch.name && [styles.chipSelected, { backgroundColor: glass.colors.primarySubtle }]]}
+                avatar={ch.logo_url ? <Avatar.Image size={24} source={{ uri: ch.logo_url }} /> : undefined}
+                compact
+              >
+                {ch.name}
+              </Chip>
+            ))}
+          </ScrollView>
 
           {/* Results count */}
           {rawResults.length > 0 && (
@@ -365,6 +386,24 @@ const styles = StyleSheet.create({
   loader: { marginTop: 40 },
   footerLoader: { paddingVertical: 16 },
   emptyText: { textAlign: "center", marginTop: 40, color: "#555", paddingHorizontal: 20 },
+  idleContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 12,
+    paddingBottom: 80,
+  },
+  idleText: {
+    fontSize: 15,
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  chipDivider: {
+    width: 1,
+    height: 24,
+    alignSelf: "center",
+    marginHorizontal: 2,
+  },
   listContent: { paddingBottom: 96 },
   snackbar: { marginBottom: 80 },
   separator: {
